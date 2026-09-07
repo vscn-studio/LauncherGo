@@ -15,7 +15,7 @@ namespace LauncherGo.Services;
 public sealed class LauncherUpdateService : ILauncherUpdateService
 {
     private const string Repository = "vscn-studio/LauncherGo";
-    private const int RetainedUpdateDirectories = 2;
+    private const int RetainedUpdateDirectories = 0;
     private static readonly HttpClient HttpClient = CreateHttpClient();
     private static readonly HttpRangeFileDownloader FileDownloader = new(HttpClient);
     private readonly ILauncherPreferencesService _preferencesService;

@@ -8,7 +8,7 @@ namespace LauncherGo.Services;
 internal static class ServerHostRuntimeStager
 {
     private const string CompletionMarkerName = ".complete";
-    private const int DefaultRetainedVersions = 2;
+    private const int DefaultRetainedVersions = 0;
     private static readonly object Gate = new();
 
     public static string Prepare(string sourceExecutablePath, string? runtimeRoot = null)
