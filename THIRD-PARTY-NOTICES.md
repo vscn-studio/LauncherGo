@@ -100,6 +100,7 @@ LauncherGo components:
 | launchergoauth | serverauth.dll | MIT |
 | launchergoredirect | launchergoredirect.dll | MIT |
 | launchergoserverbridge | serverbridge.dll | MIT |
+| servermap | ServerMap.dll | MIT |
 
 Each standalone embedded mod ZIP should include `LICENSE.txt` copied from the
 repository `LICENSE` file.
@@ -107,6 +108,22 @@ repository `LICENSE` file.
 The embedded mods list `VSCN-Studio` as their author. Copyright in these
 first-party mods belongs to HansJack, the LauncherGo project owner, who is a
 member of the VSCN-Studio team. The project distributes them under MIT.
+
+## ServerMap Web Assets
+
+The ServerMap web interface is first-party LauncherGo content. Copyright (C)
+2026 HansJack, LauncherGo project owner (VSCN-Studio team), licensed under MIT.
+The web package includes the following third-party components and retains their
+copyright and complete license text beside the files they cover:
+
+| Component | Version | Copyright | License text |
+| --- | --- | --- | --- |
+| Leaflet | 1.9.4 | Copyright (c) 2010-2023, Volodymyr Agafonkin and Leaflet contributors | `WebRoot/vendor/leaflet/LICENSE.txt` (BSD-2-Clause) |
+| WebCartographer route planner core | 2023 | Copyright (c) 2023 Th3Dilli | `WebRoot/vendor/WebCartographer-LICENSE.txt` (MIT) |
+
+ServerMap was informed by VS-LiveMap-Revival (Copyright (c) 2024 William Blake
+Galbreath, MIT), but no VS-LiveMap-Revival source is distributed in the web
+package. The complete notice is also included in `WebRoot/THIRD_PARTY_NOTICES.txt`.
 
 ## Release Audit Notes
 
