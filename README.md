@@ -37,7 +37,7 @@ LauncherGo 是面向 Vintage Story 服务器的图形化开服器。项目目标
 | 桌面 UI | `Avalonia 12.0.1` 与 `Semi.Avalonia 12.0.1` |
 | 默认运行平台 | 当前发布工作流打包 `win-x64`，产出自包含安装包、便携单文件包和内嵌模组包 |
 | Vintage Story 服务端版本 | 由官方或第三方服务端索引下载，实例档案按选择的服务端版本运行 |
-| 第一方嵌入模组 | `serverauth.dll`、`launchergoredirect.dll`、`serverbridge.dll`，与 LauncherGo 源码同为 MIT 许可证 |
+| 第一方嵌入模组 | `serverauth.dll`、`launchergoredirect.dll`、`serverbridge.dll`、`ServerMap.dll`，与 LauncherGo 源码同为 MIT 许可证 |
 | 模组构建参考 | GitHub Actions 默认使用 Vintage Story `1.22.2` 的服务端 API 引用构建，可在工作流输入中修改 |
 
 ## 当前功能

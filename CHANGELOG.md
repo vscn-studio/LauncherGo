@@ -24,6 +24,7 @@
 
 - ServerHost 和 GatewayHost 在普通安装包中共享主程序 .NET 运行时，显著降低安装包体积；portable 包保留自包含 Host 以保证独立启动。
 - Host 运行时缓存默认不保留历史版本，更新缓存默认不保留历史安装包；清理时跳过正在使用的进程目录。
+- 网关状态快照写入增加临时文件占用和 I/O 错误重试，并移除后端统计 JSONL 历史快照，避免统计文件无限增长。
 - GitHub Release 工作流移除 small package 和 small installer，仅发布标准安装包、portable 包及嵌入模组包。
 - 补齐 ServerMap 模组和网页的作者、版权、MIT、Leaflet BSD-2-Clause、WebCartographer MIT 及 VS-LiveMap-Revival MIT 声明。
 

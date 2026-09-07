@@ -37,7 +37,7 @@ This project is open source under the MIT License. You may use, copy, modify, di
 | Desktop UI | `Avalonia 12.0.1` and `Semi.Avalonia 12.0.1` |
 | Default release platform | The current release workflows package `win-x64` as a self-contained installer, portable single-file package, and embedded mod packages |
 | Vintage Story server version | Server versions are downloaded from the official or configured third-party server catalog, and each profile runs the selected version |
-| First-party embedded mods | `serverauth.dll`, `launchergoredirect.dll`, and `serverbridge.dll`, all licensed under MIT with LauncherGo source |
+| First-party embedded mods | `serverauth.dll`, `launchergoredirect.dll`, `serverbridge.dll`, and `ServerMap.dll`, all licensed under MIT with LauncherGo source |
 | Mod build reference | GitHub Actions defaults to Vintage Story `1.22.2` server API references, and the version can be changed in workflow inputs |
 
 ## Current Features
