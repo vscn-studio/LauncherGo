@@ -57,7 +57,9 @@ app.Map("/api/{**path}", async context =>
     await response.Content.CopyToAsync(context.Response.Body, context.RequestAborted);
 });
 
-app.MapFallback(async context =>
+// MapFallback uses the framework's non-file constraint, which excludes the
+// .js/.css/.png assets used by the map. Handle every non-API path explicitly.
+app.Map("/{**path}", async context =>
 {
     var relative = context.Request.Path.Value?.TrimStart('/') ?? string.Empty;
     if (string.IsNullOrWhiteSpace(relative)) relative = "index.html";
