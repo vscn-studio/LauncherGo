@@ -342,6 +342,8 @@ try {
   }
   Remove-Item -LiteralPath $Asset -Force -ErrorAction SilentlyContinue
   Start-Process -FilePath $Executable
+  $cleanupRoot = $PSScriptRoot.Replace("'", "''")
+  Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @('-NoProfile', '-Command', "Start-Sleep -Seconds 2; Remove-Item -LiteralPath '$cleanupRoot' -Recurse -Force -ErrorAction SilentlyContinue")
 } catch {
   Add-Content -LiteralPath (Join-Path $PSScriptRoot 'update-error.log') -Value $_
   Start-Process -FilePath $Executable

@@ -90,16 +90,14 @@
     <RemoveDir Directories="$(_ServerHostPublishDir)" />
     <MSBuild Projects="$(_ServerHostProject)"
              Targets="Publish"
-             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(SelfContained);PublishSingleFile=true;IncludeNativeLibrariesForSelfExtract=true;DebugType=None;DebugSymbols=false;PublishDir=$(_ServerHostPublishDir)" />
-    <Copy SourceFiles="$(_ServerHostPublishDir)LauncherGo.ServerHost.exe"
-          DestinationFiles="$(PublishDir)LauncherGo.ServerHost.exe" />
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(PublishSingleFile);PublishSingleFile=$(PublishSingleFile);IncludeNativeLibrariesForSelfExtract=$(PublishSingleFile);DebugType=None;DebugSymbols=false;PublishDir=$(_ServerHostPublishDir)" />
     <ItemGroup>
-      <_ServerHostCompanion Include="$(PublishDir)LauncherGo.ServerHost.dll" />
-      <_ServerHostCompanion Include="$(PublishDir)LauncherGo.ServerHost.deps.json" />
-      <_ServerHostCompanion Include="$(PublishDir)LauncherGo.ServerHost.runtimeconfig.json" />
-      <_ServerHostCompanion Include="$(PublishDir)LauncherGo.ServerHost.pdb" />
+      <_ServerHostPublishFile Include="$(_ServerHostPublishDir)LauncherGo.ServerHost.exe" Condition="Exists('$(_ServerHostPublishDir)LauncherGo.ServerHost.exe')" />
+      <_ServerHostPublishFile Include="$(_ServerHostPublishDir)LauncherGo.ServerHost.dll" Condition="Exists('$(_ServerHostPublishDir)LauncherGo.ServerHost.dll')" />
+      <_ServerHostPublishFile Include="$(_ServerHostPublishDir)LauncherGo.ServerHost.deps.json" Condition="Exists('$(_ServerHostPublishDir)LauncherGo.ServerHost.deps.json')" />
+      <_ServerHostPublishFile Include="$(_ServerHostPublishDir)LauncherGo.ServerHost.runtimeconfig.json" Condition="Exists('$(_ServerHostPublishDir)LauncherGo.ServerHost.runtimeconfig.json')" />
     </ItemGroup>
-    <Delete Files="@(_ServerHostCompanion)" />
+    <Copy SourceFiles="@(_ServerHostPublishFile)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
   </Target>
 
   <Target Name="CopyGatewayHostBuildOutput"
@@ -121,7 +119,10 @@
   </Target>
 
   <Target Name="CopyServerMapHostBuildOutput" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
-    <PropertyGroup><_ServerMapHostBuildDir>$(MSBuildProjectDirectory)\..\LauncherGo.ServerMapHost\bin\$(Configuration)\net10.0\</_ServerMapHostBuildDir></PropertyGroup>
+    <PropertyGroup>
+      <_ServerMapHostBuildDir>$(MSBuildProjectDirectory)\..\LauncherGo.ServerMapHost\bin\$(Configuration)\net10.0\</_ServerMapHostBuildDir>
+      <_ServerMapHostBuildDir Condition="'$(RuntimeIdentifier)' != ''">$(_ServerMapHostBuildDir)$(RuntimeIdentifier)\</_ServerMapHostBuildDir>
+    </PropertyGroup>
     <ItemGroup>
       <_ServerMapHostBuildFile Include="$(_ServerMapHostBuildDir)LauncherGo.ServerMapHost.exe" />
       <_ServerMapHostBuildFile Include="$(_ServerMapHostBuildDir)LauncherGo.ServerMapHost.dll" />
@@ -139,6 +140,36 @@
     <MakeDir Directories="$(TargetDir)EmbeddedMods\servermap" />
     <Copy SourceFiles="$(MSBuildProjectDirectory)\..\LauncherGo.Services\bin\$(Configuration)\net10.0\EmbeddedMods\servermap\servermap.zip"
           DestinationFiles="$(TargetDir)EmbeddedMods\servermap\servermap.zip"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(MSBuildProjectDirectory)\..\LauncherGo.Services\bin\$(Configuration)\net10.0\EmbeddedMods\servermap\servermap.zip')" />
+  </Target>
+
+  <Target Name="PublishServerMapHost" AfterTargets="Publish" Condition="'$(RuntimeIdentifier)' != '' and Exists('$(PublishDir)')">
+    <PropertyGroup>
+      <_ServerMapHostProject>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\LauncherGo.ServerMapHost\LauncherGo.ServerMapHost.csproj'))</_ServerMapHostProject>
+      <_ServerMapHostPublishDir>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)servermaphost-publish'))\</_ServerMapHostPublishDir>
+    </PropertyGroup>
+    <RemoveDir Directories="$(_ServerMapHostPublishDir)" />
+    <MSBuild Projects="$(_ServerMapHostProject)"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(PublishSingleFile);PublishSingleFile=$(PublishSingleFile);IncludeNativeLibrariesForSelfExtract=$(PublishSingleFile);DebugType=None;DebugSymbols=false;PublishDir=$(_ServerMapHostPublishDir)" />
+    <ItemGroup>
+      <_ServerMapHostPublishFile Include="$(_ServerMapHostPublishDir)LauncherGo.ServerMapHost.exe" Condition="Exists('$(_ServerMapHostPublishDir)LauncherGo.ServerMapHost.exe')" />
+      <_ServerMapHostPublishFile Include="$(_ServerMapHostPublishDir)LauncherGo.ServerMapHost.dll" Condition="Exists('$(_ServerMapHostPublishDir)LauncherGo.ServerMapHost.dll')" />
+      <_ServerMapHostPublishFile Include="$(_ServerMapHostPublishDir)LauncherGo.ServerMapHost.deps.json" Condition="Exists('$(_ServerMapHostPublishDir)LauncherGo.ServerMapHost.deps.json')" />
+      <_ServerMapHostPublishFile Include="$(_ServerMapHostPublishDir)LauncherGo.ServerMapHost.runtimeconfig.json" Condition="Exists('$(_ServerMapHostPublishDir)LauncherGo.ServerMapHost.runtimeconfig.json')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_ServerMapHostPublishFile)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <_ServerMapHostWebFiles Include="$(_ServerMapHostPublishDir)WebRoot\**\*" />
+    </ItemGroup>
+    <MakeDir Directories="$(PublishDir)WebRoot" />
+    <Copy SourceFiles="@(_ServerMapHostWebFiles)"
+          DestinationFolder="$(PublishDir)WebRoot\%(RecursiveDir)"
+          SkipUnchangedFiles="true" />
+    <MakeDir Directories="$(PublishDir)EmbeddedMods\servermap" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\LauncherGo.Services\bin\$(Configuration)\net10.0\EmbeddedMods\servermap\servermap.zip"
+          DestinationFiles="$(PublishDir)EmbeddedMods\servermap\servermap.zip"
           SkipUnchangedFiles="true"
           Condition="Exists('$(MSBuildProjectDirectory)\..\LauncherGo.Services\bin\$(Configuration)\net10.0\EmbeddedMods\servermap\servermap.zip')" />
   </Target>
@@ -203,15 +234,13 @@
     <RemoveDir Directories="$(_GatewayHostPublishDir)" />
     <MSBuild Projects="$(_GatewayHostProject)"
              Targets="Publish"
-             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(SelfContained);PublishSingleFile=true;IncludeNativeLibrariesForSelfExtract=true;DebugType=None;DebugSymbols=false;PublishDir=$(_GatewayHostPublishDir)" />
-    <Copy SourceFiles="$(_GatewayHostPublishDir)LauncherGo.GatewayHost.exe"
-          DestinationFiles="$(PublishDir)LauncherGo.GatewayHost.exe" />
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(PublishSingleFile);PublishSingleFile=$(PublishSingleFile);IncludeNativeLibrariesForSelfExtract=$(PublishSingleFile);DebugType=None;DebugSymbols=false;PublishDir=$(_GatewayHostPublishDir)" />
     <ItemGroup>
-      <_GatewayHostCompanion Include="$(PublishDir)LauncherGo.GatewayHost.dll" />
-      <_GatewayHostCompanion Include="$(PublishDir)LauncherGo.GatewayHost.deps.json" />
-      <_GatewayHostCompanion Include="$(PublishDir)LauncherGo.GatewayHost.runtimeconfig.json" />
-      <_GatewayHostCompanion Include="$(PublishDir)LauncherGo.GatewayHost.pdb" />
+      <_GatewayHostPublishFile Include="$(_GatewayHostPublishDir)LauncherGo.GatewayHost.exe" Condition="Exists('$(_GatewayHostPublishDir)LauncherGo.GatewayHost.exe')" />
+      <_GatewayHostPublishFile Include="$(_GatewayHostPublishDir)LauncherGo.GatewayHost.dll" Condition="Exists('$(_GatewayHostPublishDir)LauncherGo.GatewayHost.dll')" />
+      <_GatewayHostPublishFile Include="$(_GatewayHostPublishDir)LauncherGo.GatewayHost.deps.json" Condition="Exists('$(_GatewayHostPublishDir)LauncherGo.GatewayHost.deps.json')" />
+      <_GatewayHostPublishFile Include="$(_GatewayHostPublishDir)LauncherGo.GatewayHost.runtimeconfig.json" Condition="Exists('$(_GatewayHostPublishDir)LauncherGo.GatewayHost.runtimeconfig.json')" />
     </ItemGroup>
-    <Delete Files="@(_GatewayHostCompanion)" />
+    <Copy SourceFiles="@(_GatewayHostPublishFile)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
   </Target>
 </Project>

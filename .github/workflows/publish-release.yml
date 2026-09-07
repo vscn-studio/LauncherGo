@@ -36,6 +36,7 @@ jobs:
       EMBEDDED_AUTH_PROJECT: LauncherGo.Services/EmbeddedMods/VsslAuthMod/VsslAuthMod.csproj
       EMBEDDED_REDIRECT_PROJECT: LauncherGo.Services/EmbeddedMods/LauncherGoRedirectMod/LauncherGoRedirectMod.csproj
       EMBEDDED_SERVER_BRIDGE_PROJECT: LauncherGo.Services/EmbeddedMods/LauncherGoServerBridgeMod/LauncherGoServerBridgeMod.csproj
+      EMBEDDED_SERVER_MAP_PROJECT: LauncherGo.Services/EmbeddedMods/ServerMapMod/ServerMapMod.csproj
       CONFIGURATION: Release
       RUNTIME: win-x64
       VINTAGE_STORY_VERSION: 1.22.2
@@ -212,6 +213,7 @@ jobs:
           dotnet restore $env:EMBEDDED_AUTH_PROJECT
           dotnet restore $env:EMBEDDED_REDIRECT_PROJECT
           dotnet restore $env:EMBEDDED_SERVER_BRIDGE_PROJECT
+          dotnet restore $env:EMBEDDED_SERVER_MAP_PROJECT
 
       - name: Build embedded mods
         shell: pwsh
@@ -252,21 +254,23 @@ jobs:
             -DllPath "LauncherGo.Services/EmbeddedMods/LauncherGoServerBridgeMod/bin/$env:CONFIGURATION/net10.0/serverbridge.dll" `
             -TargetPath "LauncherGo.Services/EmbeddedMods/launchergoserverbridge/serverbridge.dll" `
             -Name "Server Bridge"
+          Build-EmbeddedMod `
+            -Project $env:EMBEDDED_SERVER_MAP_PROJECT `
+            -DllPath "LauncherGo.Services/EmbeddedMods/ServerMapMod/bin/$env:CONFIGURATION/package/ServerMap.dll" `
+            -TargetPath "LauncherGo.Services/EmbeddedMods/ServerMapMod/ServerMap.dll" `
+            -Name "ServerMap"
 
       - name: Publish installer payload
-        run: dotnet publish $env:PROJECT_PATH -c $env:CONFIGURATION -r $env:RUNTIME --self-contained true -p:Version=${{ steps.meta.outputs.version }} -p:InformationalVersion=${{ steps.meta.outputs.version }} -o artifacts/publish/win-x64
+        run: dotnet publish $env:PROJECT_PATH -c $env:CONFIGURATION -r $env:RUNTIME --self-contained true -p:BuildEmbeddedServerMapMod=true -p:Version=${{ steps.meta.outputs.version }} -p:InformationalVersion=${{ steps.meta.outputs.version }} -o artifacts/publish/win-x64
 
       - name: Publish portable single-file
-        run: dotnet publish $env:PROJECT_PATH -c $env:CONFIGURATION -r $env:RUNTIME --self-contained true -p:Version=${{ steps.meta.outputs.version }} -p:InformationalVersion=${{ steps.meta.outputs.version }} -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o artifacts/publish/portable
-
-      - name: Publish self-contained small package
-        run: dotnet publish $env:PROJECT_PATH -c $env:CONFIGURATION -r $env:RUNTIME --self-contained true -p:Version=${{ steps.meta.outputs.version }} -p:InformationalVersion=${{ steps.meta.outputs.version }} -p:DebugType=None -p:DebugSymbols=false -p:StripPublishSymbols=true -o artifacts/publish/small-package
+        run: dotnet publish $env:PROJECT_PATH -c $env:CONFIGURATION -r $env:RUNTIME --self-contained true -p:BuildEmbeddedServerMapMod=true -p:StripPublishSymbols=true -p:Version=${{ steps.meta.outputs.version }} -p:InformationalVersion=${{ steps.meta.outputs.version }} -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o artifacts/publish/portable
 
       - name: Copy .NET runtime license files
         shell: pwsh
         run: |
           $dotnetRoot = Split-Path -Parent (Get-Command dotnet).Source
-          foreach ($publishRoot in @("artifacts/publish/win-x64", "artifacts/publish/portable", "artifacts/publish/small-package")) {
+          foreach ($publishRoot in @("artifacts/publish/win-x64", "artifacts/publish/portable")) {
             Copy-Item -LiteralPath (Join-Path $dotnetRoot "LICENSE.txt") -Destination (Join-Path $publishRoot "LICENSE.txt") -Force
             Copy-Item -LiteralPath (Join-Path $dotnetRoot "ThirdPartyNotices.txt") -Destination (Join-Path $publishRoot "ThirdPartyNotices.txt") -Force
             foreach ($officialAssembly in @("VintagestoryAPI.dll", "VintagestoryLib.dll", "VSSurvivalMod.dll")) {
@@ -282,7 +286,8 @@ jobs:
           $mods = @(
             @{ Id = "launchergoauth"; SourceRoot = "LauncherGo.Services/EmbeddedMods/launchergoauth"; Files = @("serverauth.dll", "modinfo.json", "README.txt") },
             @{ Id = "launchergoredirect"; SourceRoot = "LauncherGo.Services/EmbeddedMods/launchergoredirect"; Files = @("launchergoredirect.dll", "modinfo.json", "README.txt") },
-            @{ Id = "launchergoserverbridge"; SourceRoot = "LauncherGo.Services/EmbeddedMods/launchergoserverbridge"; Files = @("serverbridge.dll", "modinfo.json", "README.txt") }
+            @{ Id = "launchergoserverbridge"; SourceRoot = "LauncherGo.Services/EmbeddedMods/launchergoserverbridge"; Files = @("serverbridge.dll", "modinfo.json", "README.txt") },
+            @{ Id = "servermap"; SourceRoot = "LauncherGo.Services/EmbeddedMods/ServerMapMod"; Files = @("ServerMap.dll", "modinfo.json", "README.txt", "LICENSE.txt", "THIRD_PARTY_NOTICES.txt", "VS-LiveMap-Revival-LICENSE.txt") }
           )
 
           foreach ($mod in $mods) {
@@ -293,7 +298,7 @@ jobs:
               }
             }
 
-            foreach ($publishRoot in @("artifacts/publish/win-x64", "artifacts/publish/portable", "artifacts/publish/small-package")) {
+            foreach ($publishRoot in @("artifacts/publish/win-x64", "artifacts/publish/portable")) {
               $targetRoot = Join-Path $publishRoot "EmbeddedMods/$($mod.Id)"
               New-Item -ItemType Directory -Force -Path $targetRoot | Out-Null
 
@@ -306,7 +311,6 @@ jobs:
 
           Set-Content -LiteralPath "artifacts/publish/win-x64/launchergo-package-kind.txt" -Value "Installer" -NoNewline
           Set-Content -LiteralPath "artifacts/publish/portable/launchergo-package-kind.txt" -Value "Portable" -NoNewline
-          Set-Content -LiteralPath "artifacts/publish/small-package/launchergo-package-kind.txt" -Value "SmallPackage" -NoNewline
 
       - name: Verify embedded mod payloads
         shell: pwsh
@@ -324,6 +328,17 @@ jobs:
             "artifacts/publish/win-x64/THIRD-PARTY-LICENSES/LGPL-3.0.txt",
             "artifacts/publish/win-x64/THIRD-PARTY-LICENSES/CC-BY-4.0.txt",
             "artifacts/publish/win-x64/LauncherGo.ServerHost.exe",
+            "artifacts/publish/win-x64/LauncherGo.ServerHost.dll",
+            "artifacts/publish/win-x64/LauncherGo.ServerHost.deps.json",
+            "artifacts/publish/win-x64/LauncherGo.ServerHost.runtimeconfig.json",
+            "artifacts/publish/win-x64/LauncherGo.GatewayHost.exe",
+            "artifacts/publish/win-x64/LauncherGo.GatewayHost.dll",
+            "artifacts/publish/win-x64/LauncherGo.GatewayHost.deps.json",
+            "artifacts/publish/win-x64/LauncherGo.GatewayHost.runtimeconfig.json",
+            "artifacts/publish/win-x64/LauncherGo.ServerMapHost.exe",
+            "artifacts/publish/win-x64/LauncherGo.ServerMapHost.dll",
+            "artifacts/publish/win-x64/LauncherGo.ServerMapHost.deps.json",
+            "artifacts/publish/win-x64/LauncherGo.ServerMapHost.runtimeconfig.json",
             "artifacts/publish/win-x64/EmbeddedMods/launchergoauth/serverauth.dll",
             "artifacts/publish/win-x64/EmbeddedMods/launchergoauth/modinfo.json",
             "artifacts/publish/win-x64/EmbeddedMods/launchergoauth/README.txt",
@@ -336,6 +351,12 @@ jobs:
             "artifacts/publish/win-x64/EmbeddedMods/launchergoserverbridge/modinfo.json",
             "artifacts/publish/win-x64/EmbeddedMods/launchergoserverbridge/README.txt",
             "artifacts/publish/win-x64/EmbeddedMods/launchergoserverbridge/LICENSE.txt",
+            "artifacts/publish/win-x64/EmbeddedMods/servermap/ServerMap.dll",
+            "artifacts/publish/win-x64/EmbeddedMods/servermap/modinfo.json",
+            "artifacts/publish/win-x64/EmbeddedMods/servermap/README.txt",
+            "artifacts/publish/win-x64/EmbeddedMods/servermap/LICENSE.txt",
+            "artifacts/publish/win-x64/EmbeddedMods/servermap/THIRD_PARTY_NOTICES.txt",
+            "artifacts/publish/win-x64/EmbeddedMods/servermap/VS-LiveMap-Revival-LICENSE.txt",
             "artifacts/publish/portable/EmbeddedMods/launchergoauth/serverauth.dll",
             "artifacts/publish/portable/EmbeddedMods/launchergoauth/modinfo.json",
             "artifacts/publish/portable/EmbeddedMods/launchergoauth/README.txt",
@@ -348,6 +369,12 @@ jobs:
             "artifacts/publish/portable/EmbeddedMods/launchergoserverbridge/modinfo.json",
             "artifacts/publish/portable/EmbeddedMods/launchergoserverbridge/README.txt",
             "artifacts/publish/portable/EmbeddedMods/launchergoserverbridge/LICENSE.txt",
+            "artifacts/publish/portable/EmbeddedMods/servermap/ServerMap.dll",
+            "artifacts/publish/portable/EmbeddedMods/servermap/modinfo.json",
+            "artifacts/publish/portable/EmbeddedMods/servermap/README.txt",
+            "artifacts/publish/portable/EmbeddedMods/servermap/LICENSE.txt",
+            "artifacts/publish/portable/EmbeddedMods/servermap/THIRD_PARTY_NOTICES.txt",
+            "artifacts/publish/portable/EmbeddedMods/servermap/VS-LiveMap-Revival-LICENSE.txt",
             "artifacts/publish/portable/LICENSE",
             "artifacts/publish/portable/LICENSE.txt",
             "artifacts/publish/portable/NOTICE",
@@ -360,45 +387,23 @@ jobs:
             "artifacts/publish/portable/THIRD-PARTY-LICENSES/LGPL-3.0.txt",
             "artifacts/publish/portable/THIRD-PARTY-LICENSES/CC-BY-4.0.txt",
             "artifacts/publish/portable/LauncherGo.ServerHost.exe",
-            "artifacts/publish/small-package/LICENSE",
-            "artifacts/publish/small-package/LICENSE.txt",
-            "artifacts/publish/small-package/NOTICE",
-            "artifacts/publish/small-package/THIRD-PARTY-NOTICES.md",
-            "artifacts/publish/small-package/ThirdPartyNotices.txt",
-            "artifacts/publish/small-package/THIRD-PARTY-LICENSES/README.md",
-            "artifacts/publish/small-package/THIRD-PARTY-LICENSES/MIT.txt",
-            "artifacts/publish/small-package/THIRD-PARTY-LICENSES/Apache-2.0.txt",
-            "artifacts/publish/small-package/THIRD-PARTY-LICENSES/MPL-2.0.txt",
-            "artifacts/publish/small-package/THIRD-PARTY-LICENSES/LGPL-3.0.txt",
-            "artifacts/publish/small-package/THIRD-PARTY-LICENSES/CC-BY-4.0.txt",
-            "artifacts/publish/small-package/EmbeddedMods/launchergoauth/serverauth.dll",
-            "artifacts/publish/small-package/EmbeddedMods/launchergoauth/modinfo.json",
-            "artifacts/publish/small-package/EmbeddedMods/launchergoauth/README.txt",
-            "artifacts/publish/small-package/EmbeddedMods/launchergoauth/LICENSE.txt",
-            "artifacts/publish/small-package/EmbeddedMods/launchergoredirect/launchergoredirect.dll",
-            "artifacts/publish/small-package/EmbeddedMods/launchergoredirect/modinfo.json",
-            "artifacts/publish/small-package/EmbeddedMods/launchergoredirect/README.txt",
-            "artifacts/publish/small-package/EmbeddedMods/launchergoredirect/LICENSE.txt",
-            "artifacts/publish/small-package/EmbeddedMods/launchergoserverbridge/serverbridge.dll",
-            "artifacts/publish/small-package/EmbeddedMods/launchergoserverbridge/modinfo.json",
-            "artifacts/publish/small-package/EmbeddedMods/launchergoserverbridge/README.txt",
-            "artifacts/publish/small-package/EmbeddedMods/launchergoserverbridge/LICENSE.txt",
-            "artifacts/publish/small-package/LauncherGo.ServerHost.exe",
-            "artifacts/publish/small-package/coreclr.dll",
-            "artifacts/publish/small-package/hostfxr.dll",
-            "artifacts/publish/small-package/hostpolicy.dll"
+            "artifacts/publish/portable/LauncherGo.ServerHost.dll",
+            "artifacts/publish/portable/LauncherGo.ServerHost.deps.json",
+            "artifacts/publish/portable/LauncherGo.ServerHost.runtimeconfig.json",
+            "artifacts/publish/portable/LauncherGo.GatewayHost.exe",
+            "artifacts/publish/portable/LauncherGo.GatewayHost.dll",
+            "artifacts/publish/portable/LauncherGo.GatewayHost.deps.json",
+            "artifacts/publish/portable/LauncherGo.GatewayHost.runtimeconfig.json",
+            "artifacts/publish/portable/LauncherGo.ServerMapHost.exe",
+            "artifacts/publish/portable/LauncherGo.ServerMapHost.dll",
+            "artifacts/publish/portable/LauncherGo.ServerMapHost.deps.json",
+            "artifacts/publish/portable/LauncherGo.ServerMapHost.runtimeconfig.json"
           )
 
           foreach ($path in $requiredPaths) {
             if (!(Test-Path $path)) {
               throw "Missing embedded mod payload: $path"
             }
-          }
-
-          $unexpectedSymbols = Get-ChildItem "artifacts/publish/small-package" -Recurse -Filter *.pdb -ErrorAction SilentlyContinue
-          if ($unexpectedSymbols) {
-            $unexpectedList = $unexpectedSymbols | ForEach-Object { $_.FullName }
-            throw "Unexpected .pdb files found in small package publish output:`n$($unexpectedList -join "`n")"
           }
 
       - name: Prepare embedded mod artifacts
@@ -410,7 +415,8 @@ jobs:
           $mods = @(
             @{ Id = "launchergoauth"; Files = @("serverauth.dll", "modinfo.json", "README.txt", "LICENSE.txt") },
             @{ Id = "launchergoredirect"; Files = @("launchergoredirect.dll", "modinfo.json", "README.txt", "LICENSE.txt") },
-            @{ Id = "launchergoserverbridge"; Files = @("serverbridge.dll", "modinfo.json", "README.txt", "LICENSE.txt") }
+            @{ Id = "launchergoserverbridge"; Files = @("serverbridge.dll", "modinfo.json", "README.txt", "LICENSE.txt") },
+            @{ Id = "servermap"; Files = @("ServerMap.dll", "modinfo.json", "README.txt", "LICENSE.txt", "THIRD_PARTY_NOTICES.txt", "VS-LiveMap-Revival-LICENSE.txt") }
           )
 
           foreach ($mod in $mods) {
@@ -455,31 +461,6 @@ jobs:
 
           Compress-Archive -Path (Join-Path $staging "*") -DestinationPath $zipPath -CompressionLevel Optimal
 
-      - name: Prepare small package artifact
-        shell: pwsh
-        run: |
-          $version = "${{ steps.meta.outputs.version }}"
-          $staging = "artifacts/small-package/LauncherGo-small-package-$version-win-x64"
-          $zipPath = "artifacts/small-package/LauncherGo-small-package-$version-win-x64.zip"
-          $publishRoot = "artifacts/publish/small-package"
-
-          if (Test-Path $staging) {
-            Remove-Item -LiteralPath $staging -Recurse -Force
-          }
-
-          New-Item -ItemType Directory -Force -Path $staging | Out-Null
-          Copy-Item -Path (Join-Path $publishRoot "*") -Destination $staging -Recurse -Force
-
-          if (!(Test-Path (Join-Path $staging "LauncherGo.App.exe"))) {
-            throw "Missing small package executable."
-          }
-
-          if (Test-Path $zipPath) {
-            Remove-Item -LiteralPath $zipPath -Force
-          }
-
-          Compress-Archive -Path (Join-Path $staging "*") -DestinationPath $zipPath -CompressionLevel Optimal
-
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
@@ -499,26 +480,6 @@ jobs:
             "/DOutputDir=$outputDir" `
             "installer/LauncherGo.iss"
 
-      - name: Build small installer package
-        shell: pwsh
-        run: |
-          $version = "${{ steps.meta.outputs.version }}"
-          Set-Content -LiteralPath "artifacts/publish/small-package/launchergo-package-kind.txt" -Value "SmallInstaller" -NoNewline
-          $buildDir = (Resolve-Path "artifacts/publish/small-package").Path
-          $outputDir = (Resolve-Path "artifacts/installer").Path
-          $outputBaseName = "LauncherGo-Small-Setup-$version-win-x64"
-
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
-            "/DMyAppVersion=$version" `
-            "/DBuildDir=$buildDir" `
-            "/DOutputDir=$outputDir" `
-            "/DOutputBaseFilename=$outputBaseName" `
-            "installer/LauncherGo.iss"
-
-          if (!(Test-Path (Join-Path $outputDir "$outputBaseName.exe"))) {
-            throw "Missing small installer output."
-          }
-
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
@@ -531,5 +492,4 @@ jobs:
           files: |
             artifacts/installer/*.exe
             artifacts/portable/LauncherGo-portable-${{ steps.meta.outputs.version }}-win-x64.zip
-            artifacts/small-package/LauncherGo-small-package-${{ steps.meta.outputs.version }}-win-x64.zip
             artifacts/embedded-mods/*.zip

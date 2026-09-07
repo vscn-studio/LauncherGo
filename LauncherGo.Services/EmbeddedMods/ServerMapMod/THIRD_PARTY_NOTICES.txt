@@ -22,7 +22,9 @@ vendor/leaflet/LICENSE.txt.
 
 VS-LiveMap-Revival
 Copyright (c) 2024 William Blake Galbreath.
-MIT License. This project informed the tile and layer architecture; its implementation is not copied into ServerMap.
+MIT License. This project informed the tile and layer architecture; its
+implementation is not copied into ServerMap. The complete license text is in
+VS-LiveMap-Revival-LICENSE.txt.
 
 WebCartographer
 Copyright (c) 2023 Th3Dilli.

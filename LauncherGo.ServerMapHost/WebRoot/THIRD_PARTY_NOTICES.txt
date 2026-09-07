@@ -18,7 +18,8 @@ vendor/WebCartographer-LICENSE.txt.
 VS-LiveMap-Revival
 Copyright (c) 2024 William Blake Galbreath.
 Licensed under the MIT License. ServerMap was informed by its map and layer
-design; no VS-LiveMap-Revival source is distributed in this web package.
+design; no VS-LiveMap-Revival source is distributed in this web package. The
+complete license text is in vendor/VS-LiveMap-Revival-LICENSE.txt.
 
 All third-party notices and license files must be retained when redistributing
 the ServerMap web interface.

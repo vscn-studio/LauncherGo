@@ -120,6 +120,7 @@ copyright and complete license text beside the files they cover:
 | --- | --- | --- | --- |
 | Leaflet | 1.9.4 | Copyright (c) 2010-2023, Volodymyr Agafonkin and Leaflet contributors | `WebRoot/vendor/leaflet/LICENSE.txt` (BSD-2-Clause) |
 | WebCartographer route planner core | 2023 | Copyright (c) 2023 Th3Dilli | `WebRoot/vendor/WebCartographer-LICENSE.txt` (MIT) |
+| VS-LiveMap-Revival (design reference) | 2024 | Copyright (c) 2024 William Blake Galbreath | `WebRoot/vendor/VS-LiveMap-Revival-LICENSE.txt` (MIT) |
 
 ServerMap was informed by VS-LiveMap-Revival (Copyright (c) 2024 William Blake
 Galbreath, MIT), but no VS-LiveMap-Revival source is distributed in the web
