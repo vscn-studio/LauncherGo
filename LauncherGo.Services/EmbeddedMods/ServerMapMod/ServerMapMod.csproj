@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>ServerMap</AssemblyName>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <OutputPath>bin\$(Configuration)\package</OutputPath>
+    <PackagePath>bin\$(Configuration)\servermap.zip</PackagePath>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="VintagestoryAPI" HintPath="$(VINTAGE_STORY)\VintagestoryAPI.dll" Private="false" />
+    <Reference Include="VintagestoryLib" HintPath="$(VINTAGE_STORY)\VintagestoryLib.dll" Private="false" />
+    <Reference Include="VintagestoryServer" HintPath="$(VINTAGE_STORY)\VintagestoryServer.dll" Private="false" />
+    <Reference Include="VSSurvivalMod" HintPath="$(VINTAGE_STORY)\Mods\VSSurvivalMod.dll" Private="false" />
+    <Reference Include="VSEssentials" HintPath="$(VINTAGE_STORY)\Mods\VSEssentials.dll" Private="false" />
+    <Reference Include="Microsoft.Data.Sqlite" HintPath="$(VINTAGE_STORY)\Lib\Microsoft.Data.Sqlite.dll" Private="false" />
+    <Reference Include="protobuf-net" HintPath="$(VINTAGE_STORY)\Lib\protobuf-net.dll" Private="false" />
+    <Reference Include="0Harmony" HintPath="$(VINTAGE_STORY)\Lib\0Harmony.dll" Private="false" />
+    <Reference Include="SkiaSharp" HintPath="$(VINTAGE_STORY)\Lib\SkiaSharp.dll" Private="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="modinfo.json;THIRD_PARTY_NOTICES.txt;assets\**" CopyToOutputDirectory="PreserveNewest" />
+    <Compile Remove="src\Render\MaterialCatalog.cs;src\Render\MeshTile.cs" />
+  </ItemGroup>
+  <Target Name="Package" AfterTargets="Build">
+    <ZipDirectory SourceDirectory="$(OutputPath)" DestinationFile="$(PackagePath)" Overwrite="true" />
+  </Target>
+</Project>

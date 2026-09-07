@@ -1208,6 +1208,7 @@
                                     <Button x:Name="ConnectionFrpTabButton" Classes="SidebarNavButton" Content="FRP" Click="OnConnectionFrpTabClick" />
                                     <Button x:Name="ConnectionEasyTierTabButton" Classes="SidebarNavButton" Content="EasyTier" Click="OnConnectionEasyTierTabClick" />
                                     <Button x:Name="ConnectionGatewayTabButton" Classes="SidebarNavButton" Content="网关" Click="OnConnectionGatewayTabClick" />
+                                    <Button x:Name="ConnectionServerMapTabButton" Classes="SidebarNavButton" Content="服务器地图" Click="OnConnectionServerMapTabClick" />
 
                                     <TextBlock x:Name="SettingsNavSectionTitleTextBlock" Classes="SidebarSectionTitle" Text="设置" />
                                     <Button x:Name="ServerSettingsTabButton" Classes="SidebarNavButton" Content="服务器设置" Click="OnServerSettingsTabClick" />
@@ -3532,6 +3533,24 @@
                                             </Border>
                                                 </StackPanel>
                                             </Grid>
+                                        </StackPanel>
+                                    </ScrollViewer>
+
+                                    <ScrollViewer x:Name="ConnectionServerMapPanel" Margin="0,-8,0,0" IsVisible="False">
+                                        <StackPanel Spacing="10">
+                                            <TextBlock Text="服务器地图" Classes="PageTitleText" />
+                                            <TextBlock x:Name="ServerMapStatusTextBlock" Text="未启动" Classes="TableSubCellText" />
+                                            <WrapPanel Orientation="Horizontal" ItemHeight="34" ItemWidth="110">
+                                                <Button Content="保存配置" Classes="ActionButton" Click="OnServerMapSaveClick" />
+                                                <Button Content="启动地图" Classes="SecondaryActionButton" Click="OnServerMapStartClick" />
+                                                <Button Content="停止地图" Classes="SecondaryActionButton" Click="OnServerMapStopClick" />
+                                                <Button Content="打开地图" Classes="SecondaryActionButton" Click="OnServerMapOpenClick" />
+                                            </WrapPanel>
+                                            <CheckBox x:Name="ServerMapEnabledCheckBox" Content="启用服务器地图" IsChecked="True" />
+                                            <CheckBox x:Name="ServerMapHttpsCheckBox" Content="启用 HTTPS（需证书）" />
+                                            <TextBox x:Name="ServerMapListenPortTextBox" Watermark="监听端口" Text="5081" />
+                                            <TextBox x:Name="ServerMapCertificateTextBox" Watermark="证书路径 (.crt/.pem)" />
+                                            <TextBox x:Name="ServerMapPrivateKeyTextBox" Watermark="私钥路径 (.key/.pem)" />
                                         </StackPanel>
                                     </ScrollViewer>
                                 </Grid>

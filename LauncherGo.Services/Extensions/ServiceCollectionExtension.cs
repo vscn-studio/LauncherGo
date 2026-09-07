@@ -29,6 +29,7 @@ public static class ServiceCollectionExtension
         services.AddSingleton<IModListExportService, ModListExportService>();
         services.AddSingleton<IModUpdateService, ModUpdateService>();
         services.AddSingleton<IServerAuthService, ServerAuthService>();
+        services.AddSingleton<IServerMapService, ServerMapService>();
         services.AddSingleton<IServerBridgeService, ServerBridgeService>();
         services.AddSingleton<ServerBridgeStateStore>();
         services.AddSingleton<IServerBridgeMigrationService, ServerBridgeMigrationService>();

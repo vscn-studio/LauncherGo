@@ -280,6 +280,7 @@ public partial class LauncherMainWindow : Window
     private readonly IModListExportService _modListExportService;
     private readonly IModUpdateService _modUpdateService;
     private readonly IServerAuthService _serverAuthService;
+    private readonly IServerMapService _serverMapService;
     private readonly IServerBridgeService _serverBridgeService;
     private readonly ILauncherUpdateService _launcherUpdateService;
     private readonly ILocalizationService _localizationService;
@@ -443,6 +444,7 @@ public partial class LauncherMainWindow : Window
             ServiceLocator.GetRequiredService<IModListExportService>(),
             ServiceLocator.GetRequiredService<IModUpdateService>(),
             ServiceLocator.GetRequiredService<IServerAuthService>(),
+            ServiceLocator.GetRequiredService<IServerMapService>(),
             ServiceLocator.GetRequiredService<IServerBridgeService>(),
             ServiceLocator.GetRequiredService<ILauncherUpdateService>(),
             ServiceLocator.GetRequiredService<ILogger<LauncherMainWindow>>(),
@@ -471,6 +473,7 @@ public partial class LauncherMainWindow : Window
         IModListExportService modListExportService,
         IModUpdateService modUpdateService,
         IServerAuthService serverAuthService,
+        IServerMapService serverMapService,
         IServerBridgeService serverBridgeService,
         ILauncherUpdateService launcherUpdateService,
         ILogger<LauncherMainWindow>? logger = null,
@@ -497,6 +500,7 @@ public partial class LauncherMainWindow : Window
         _modListExportService = modListExportService;
         _modUpdateService = modUpdateService;
         _serverAuthService = serverAuthService;
+        _serverMapService = serverMapService;
         _serverBridgeService = serverBridgeService;
         _launcherUpdateService = launcherUpdateService;
         _localizationService = localizationService ?? new LocalizationService();
@@ -580,6 +584,7 @@ public partial class LauncherMainWindow : Window
             _ = _frpService.StopAsync(TimeSpan.FromSeconds(2));
             _ = _thirdPartyFrpcService.StopAsync(TimeSpan.FromSeconds(2));
             _ = _easyTierService.StopAsync(TimeSpan.FromSeconds(2));
+            _ = _serverMapService.StopAllAsync();
         };
     }
 
@@ -3698,6 +3703,7 @@ public partial class LauncherMainWindow : Window
         ConnectionDiscordPanel.IsVisible = tab == ConnectionTab.Discord;
         ConnectionGatewayPanel.IsVisible = tab == ConnectionTab.Gateway;
         ConnectionAuthPanel.IsVisible = tab == ConnectionTab.Auth;
+        ConnectionServerMapPanel.IsVisible = tab == ConnectionTab.ServerMap;
         RefreshSidebarSelection();
         RefreshConnectionSettingsEditor();
         RefreshConnectionRuntimeStatus();
@@ -3745,6 +3751,7 @@ public partial class LauncherMainWindow : Window
         SetSelectedClass(ConnectionGatewayTabButton, !_logsNavSelected && _selectedTab == MainTab.Connection && _selectedConnectionTab == ConnectionTab.Gateway);
         SetSelectedClass(ConnectionRobotTabButton, !_logsNavSelected && _selectedTab == MainTab.Connection && _selectedConnectionTab == ConnectionTab.Robot);
         SetSelectedClass(ConnectionDiscordTabButton, !_logsNavSelected && _selectedTab == MainTab.Connection && _selectedConnectionTab == ConnectionTab.Discord);
+        SetSelectedClass(ConnectionServerMapTabButton, !_logsNavSelected && _selectedTab == MainTab.Connection && _selectedConnectionTab == ConnectionTab.ServerMap);
         SetSelectedClass(ServerSettingsTabButton, !_logsNavSelected && _selectedTab == MainTab.Settings && _selectedSettingsTab == SettingsTab.Server);
         SetSelectedClass(AppearanceSettingsTabButton, !_logsNavSelected && _selectedTab == MainTab.Settings && _selectedSettingsTab == SettingsTab.Appearance);
         SetSelectedClass(NetworkSettingsTabButton, !_logsNavSelected && _selectedTab == MainTab.Settings && _selectedSettingsTab == SettingsTab.Network);
@@ -8846,6 +8853,68 @@ public partial class LauncherMainWindow : Window
         RefreshConnectionRuntimeStatus();
     }
 
+    private void OnConnectionServerMapTabClick(object? sender, RoutedEventArgs e)
+    {
+        SelectTab(MainTab.Connection);
+        SelectConnectionTab(ConnectionTab.ServerMap);
+        _ = RefreshServerMapEditorAsync();
+    }
+
+    private async Task RefreshServerMapEditorAsync()
+    {
+        var profile = GetSelectedConfigProfile() ?? _profileService.GetProfiles().FirstOrDefault();
+        if (profile is null) return;
+        var settings = await _serverMapService.LoadSettingsAsync(profile);
+        ServerMapEnabledCheckBox.IsChecked = settings.Enabled;
+        ServerMapHttpsCheckBox.IsChecked = settings.UseHttps;
+        ServerMapListenPortTextBox.Text = settings.ListenPort.ToString();
+        ServerMapCertificateTextBox.Text = settings.CertificatePath;
+        ServerMapPrivateKeyTextBox.Text = settings.PrivateKeyPath;
+        var status = _serverMapService.GetStatus(profile);
+        ServerMapStatusTextBlock.Text = status.IsRunning ? $"运行中：{status.Url}" : "未启动";
+    }
+
+    private async void OnServerMapSaveClick(object? sender, RoutedEventArgs e)
+    {
+        var profile = GetSelectedConfigProfile() ?? _profileService.GetProfiles().FirstOrDefault(); if (profile is null) return;
+        var current = await _serverMapService.LoadSettingsAsync(profile);
+        var settings = new ServerMapSettings
+        {
+            Enabled = ServerMapEnabledCheckBox.IsChecked == true,
+            UseHttps = ServerMapHttpsCheckBox.IsChecked == true,
+            ListenPort = int.TryParse(ServerMapListenPortTextBox.Text, out var port) ? port : current.ListenPort,
+            CertificatePath = ServerMapCertificateTextBox.Text ?? string.Empty,
+            PrivateKeyPath = ServerMapPrivateKeyTextBox.Text ?? string.Empty,
+            ListenAddress = current.ListenAddress,
+            BackendPort = current.BackendPort,
+            BackendToken = current.BackendToken,
+            WebRoot = current.WebRoot,
+            PublicUrl = current.PublicUrl
+        };
+        await _serverMapService.SaveSettingsAsync(profile, settings);
+        await RefreshServerMapEditorAsync();
+    }
+
+    private async void OnServerMapStartClick(object? sender, RoutedEventArgs e)
+    {
+        var profile = GetSelectedConfigProfile() ?? _profileService.GetProfiles().FirstOrDefault(); if (profile is null) return;
+        try { await _serverMapService.StartAsync(profile); await RefreshServerMapEditorAsync(); }
+        catch (Exception ex) { ShowToast(ex.Message); }
+    }
+
+    private async void OnServerMapStopClick(object? sender, RoutedEventArgs e)
+    {
+        var profile = GetSelectedConfigProfile() ?? _profileService.GetProfiles().FirstOrDefault(); if (profile is null) return;
+        await _serverMapService.StopAsync(profile); await RefreshServerMapEditorAsync();
+    }
+
+    private void OnServerMapOpenClick(object? sender, RoutedEventArgs e)
+    {
+        var profile = GetSelectedConfigProfile() ?? _profileService.GetProfiles().FirstOrDefault(); if (profile is null) return;
+        var url = _serverMapService.GetStatus(profile).Url;
+        if (!string.IsNullOrWhiteSpace(url)) Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+    }
+
     private async void OnDiscordSaveClick(object? sender, RoutedEventArgs e)
     {
         if (!TryCollectDiscordSettings(out var discord, out var validationMessage))
@@ -11863,7 +11932,8 @@ public partial class LauncherMainWindow : Window
         Robot,
         Discord,
         Gateway,
-        Auth
+        Auth,
+        ServerMap
     }
 
     private enum ConnectionProcessKind

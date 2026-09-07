@@ -46,6 +46,8 @@
                       ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\LauncherGo.GatewayHost\LauncherGo.GatewayHost.csproj"
                       ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\LauncherGo.ServerMapHost\LauncherGo.ServerMapHost.csproj"
+                      ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\LauncherGo.Ui\LauncherGo.Ui.csproj" />
   </ItemGroup>
 
@@ -116,6 +118,23 @@
     <Copy SourceFiles="@(_GatewayHostBuildFile)"
           DestinationFolder="$(TargetDir)"
           SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyServerMapHostBuildOutput" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
+    <PropertyGroup><_ServerMapHostBuildDir>$(MSBuildProjectDirectory)\..\LauncherGo.ServerMapHost\bin\$(Configuration)\net10.0\</_ServerMapHostBuildDir></PropertyGroup>
+    <ItemGroup>
+      <_ServerMapHostBuildFile Include="$(_ServerMapHostBuildDir)LauncherGo.ServerMapHost.exe" />
+      <_ServerMapHostBuildFile Include="$(_ServerMapHostBuildDir)LauncherGo.ServerMapHost.dll" />
+      <_ServerMapHostBuildFile Include="$(_ServerMapHostBuildDir)LauncherGo.ServerMapHost.deps.json" />
+      <_ServerMapHostBuildFile Include="$(_ServerMapHostBuildDir)LauncherGo.ServerMapHost.runtimeconfig.json" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_ServerMapHostBuildFile)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(_ServerMapHostBuildDir)WebRoot\index.html" DestinationFiles="$(TargetDir)WebRoot\index.html" SkipUnchangedFiles="true" />
+    <MakeDir Directories="$(TargetDir)EmbeddedMods\servermap" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\LauncherGo.Services\bin\$(Configuration)\net10.0\EmbeddedMods\servermap\servermap.zip"
+          DestinationFiles="$(TargetDir)EmbeddedMods\servermap\servermap.zip"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(MSBuildProjectDirectory)\..\LauncherGo.Services\bin\$(Configuration)\net10.0\EmbeddedMods\servermap\servermap.zip')" />
   </Target>
 
   <Target Name="BuildServerBridgeMod"

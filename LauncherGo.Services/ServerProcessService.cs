@@ -30,6 +30,7 @@ public sealed partial class ServerProcessService : IServerProcessService
     private readonly IInstanceProfileService? _profileService;
     private readonly ILauncherPreferencesService? _preferencesService;
     private readonly IServerAuthService? _serverAuthService;
+    private readonly IServerMapService? _serverMapService;
     private readonly IServerBridgeService? _serverBridgeService;
     private readonly ServerBridgeStateStore? _serverBridgeStateStore;
     private readonly IAutomationLifecycleService? _automationLifecycleService;
@@ -50,11 +51,13 @@ public sealed partial class ServerProcessService : IServerProcessService
         ILauncherPreferencesService? preferencesService = null,
         IServerBridgeService? serverBridgeService = null,
         IAutomationLifecycleService? automationLifecycleService = null,
-        ServerBridgeStateStore? serverBridgeStateStore = null)
+        ServerBridgeStateStore? serverBridgeStateStore = null,
+        IServerMapService? serverMapService = null)
     {
         _profileService = profileService;
         _preferencesService = preferencesService;
         _serverAuthService = serverAuthService;
+        _serverMapService = serverMapService;
         _serverBridgeService = serverBridgeService;
         _serverBridgeStateStore = serverBridgeStateStore;
         _automationLifecycleService = automationLifecycleService;

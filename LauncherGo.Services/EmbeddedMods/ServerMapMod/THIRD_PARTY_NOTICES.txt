@@ -1,0 +1,13 @@
+ServerMap includes or is informed by the following open-source projects.
+
+Leaflet 1.9.4
+Copyright (c) 2010-2023, Volodymyr Agafonkin and Leaflet contributors.
+BSD-2-Clause License. The complete license text is in web/vendor/leaflet/LICENSE.txt.
+
+VS-LiveMap-Revival
+Copyright (c) 2024 William Blake Galbreath.
+MIT License. This project informed the tile and layer architecture; its implementation is not copied into ServerMap.
+
+WebCartographer
+Copyright (c) 2023 Th3Dilli.
+MIT License. This project informed the world-data and GeoJSON layer architecture. Its dependency-free route-planner core is included as web/vendor/webcartographer-route.js; the complete license text is in web/vendor/WebCartographer-LICENSE.txt.

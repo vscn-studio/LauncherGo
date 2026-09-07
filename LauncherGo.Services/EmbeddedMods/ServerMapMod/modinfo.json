@@ -1,0 +1,10 @@
+{
+  "type": "code",
+  "modid": "servermap",
+  "name": "ServerMap",
+  "authors": ["VSCN-Studio"],
+  "description": "2D and free-flight 3D browser maps for Vintage Story servers.",
+  "version": "0.2.0",
+  "side": "Universal",
+  "dependencies": { "game": "1.22.3" }
+}

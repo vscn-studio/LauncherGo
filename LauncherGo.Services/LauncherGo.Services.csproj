@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <EmbeddedServerMapModProject>$(MSBuildThisFileDirectory)EmbeddedMods\ServerMapMod\ServerMapMod.csproj</EmbeddedServerMapModProject>
+    <EmbeddedServerMapModBuildOutput>$(MSBuildThisFileDirectory)EmbeddedMods\ServerMapMod\bin\$(Configuration)\</EmbeddedServerMapModBuildOutput>
     <EmbeddedAuthModProject>$(MSBuildThisFileDirectory)EmbeddedMods\VsslAuthMod\VsslAuthMod.csproj</EmbeddedAuthModProject>
     <EmbeddedAuthModBuildOutput>$(MSBuildThisFileDirectory)EmbeddedMods\VsslAuthMod\bin\$(Configuration)\net10.0\</EmbeddedAuthModBuildOutput>
     <EmbeddedAuthRoot>$(MSBuildThisFileDirectory)EmbeddedMods\launchergoauth\</EmbeddedAuthRoot>
@@ -62,6 +64,16 @@
     <MSBuild Projects="$(EmbeddedAuthModProject)"
              Targets="Build"
              Properties="Configuration=$(Configuration);VINTAGE_STORY=$(VINTAGE_STORY);NoRestore=true" />
+  </Target>
+
+  <Target Name="BuildEmbeddedServerMapMod" BeforeTargets="BeforeBuild" Condition="'$(BuildEmbeddedServerMapMod)' == 'true'">
+    <MSBuild Projects="$(EmbeddedServerMapModProject)" Targets="Build" Properties="Configuration=$(Configuration);VINTAGE_STORY=$(VINTAGE_STORY);NoRestore=true" />
+  </Target>
+
+  <Target Name="CopyBuiltEmbeddedServerMapModToOutput" AfterTargets="Build" Condition="'$(BuildEmbeddedServerMapMod)' == 'true' and Exists('$(EmbeddedServerMapModBuildOutput)servermap.zip')">
+    <PropertyGroup><_EmbeddedServerMapOutputDir>$(TargetDir)EmbeddedMods\servermap\</_EmbeddedServerMapOutputDir></PropertyGroup>
+    <MakeDir Directories="$(_EmbeddedServerMapOutputDir)" />
+    <Copy SourceFiles="$(EmbeddedServerMapModBuildOutput)servermap.zip" DestinationFolder="$(_EmbeddedServerMapOutputDir)" SkipUnchangedFiles="true" />
   </Target>
 
   <Target Name="BuildEmbeddedRedirectMod" BeforeTargets="BeforeBuild" Condition="'$(BuildEmbeddedRedirectMod)' == 'true'">
