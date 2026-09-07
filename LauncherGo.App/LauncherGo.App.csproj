@@ -129,7 +129,13 @@
       <_ServerMapHostBuildFile Include="$(_ServerMapHostBuildDir)LauncherGo.ServerMapHost.runtimeconfig.json" />
     </ItemGroup>
     <Copy SourceFiles="@(_ServerMapHostBuildFile)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="$(_ServerMapHostBuildDir)WebRoot\index.html" DestinationFiles="$(TargetDir)WebRoot\index.html" SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <_ServerMapWebFiles Include="$(_ServerMapHostBuildDir)WebRoot\**\*" />
+    </ItemGroup>
+    <MakeDir Directories="$(TargetDir)WebRoot" />
+    <Copy SourceFiles="@(_ServerMapWebFiles)"
+          DestinationFolder="$(TargetDir)WebRoot\%(RecursiveDir)"
+          SkipUnchangedFiles="true" />
     <MakeDir Directories="$(TargetDir)EmbeddedMods\servermap" />
     <Copy SourceFiles="$(MSBuildProjectDirectory)\..\LauncherGo.Services\bin\$(Configuration)\net10.0\EmbeddedMods\servermap\servermap.zip"
           DestinationFiles="$(TargetDir)EmbeddedMods\servermap\servermap.zip"
