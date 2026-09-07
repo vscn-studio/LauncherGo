@@ -1,0 +1,8 @@
+ServerMap web interface
+
+Copyright (C) 2026 HansJack, LauncherGo project owner (VSCN-Studio team).
+Licensed under the MIT License. See the LauncherGo repository LICENSE file.
+
+This directory contains the first-party ServerMap web interface. Third-party
+components and their copyright notices are listed in THIRD_PARTY_NOTICES.txt;
+complete license texts are kept beside the corresponding vendor files.

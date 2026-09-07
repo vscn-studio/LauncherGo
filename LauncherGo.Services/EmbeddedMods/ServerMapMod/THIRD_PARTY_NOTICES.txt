@@ -1,8 +1,24 @@
 ServerMap includes or is informed by the following open-source projects.
 
+ServerMap mod source
+Copyright (C) 2026 HansJack, LauncherGo project owner (VSCN-Studio team).
+The mod source and the files in this package are first-party LauncherGo code
+licensed under MIT. See LICENSE.txt.
+
+Vintage Story API
+The mod is compiled against the official Vintage Story API assemblies. Those
+assemblies are build-time references supplied by the game installation and are
+not redistributed in this package.
+
+Microsoft.Data.Sqlite, protobuf-net, 0Harmony and SkiaSharp
+These libraries are loaded from the Vintage Story installation at runtime.
+Their upstream license and copyright notices remain with the game installation
+and are not copied into this mod package.
+
 Leaflet 1.9.4
 Copyright (c) 2010-2023, Volodymyr Agafonkin and Leaflet contributors.
-BSD-2-Clause License. The complete license text is in web/vendor/leaflet/LICENSE.txt.
+BSD-2-Clause License. The web package ships the complete license text in
+vendor/leaflet/LICENSE.txt.
 
 VS-LiveMap-Revival
 Copyright (c) 2024 William Blake Galbreath.

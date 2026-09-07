@@ -1,0 +1,24 @@
+ServerMap web interface third-party notices
+
+First-party web interface
+Copyright (C) 2026 HansJack, LauncherGo project owner (VSCN-Studio team).
+Licensed under the MIT License. See LICENSE.txt and the LauncherGo repository
+LICENSE file.
+
+Leaflet 1.9.4
+Copyright (c) 2010-2023, Volodymyr Agafonkin and Leaflet contributors.
+Licensed under the BSD 2-Clause License. The complete license text is in
+vendor/leaflet/LICENSE.txt.
+
+WebCartographer route planner core
+Copyright (c) 2023 Th3Dilli.
+Licensed under the MIT License. The complete license text is in
+vendor/WebCartographer-LICENSE.txt.
+
+VS-LiveMap-Revival
+Copyright (c) 2024 William Blake Galbreath.
+Licensed under the MIT License. ServerMap was informed by its map and layer
+design; no VS-LiveMap-Revival source is distributed in this web package.
+
+All third-party notices and license files must be retained when redistributing
+the ServerMap web interface.

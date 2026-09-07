@@ -21,7 +21,7 @@
     <Reference Include="SkiaSharp" HintPath="$(VINTAGE_STORY)\Lib\SkiaSharp.dll" Private="false" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="modinfo.json;THIRD_PARTY_NOTICES.txt;assets\**" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="modinfo.json;README.txt;LICENSE.txt;THIRD_PARTY_NOTICES.txt;assets\**" CopyToOutputDirectory="PreserveNewest" />
     <Compile Remove="src\Render\MaterialCatalog.cs;src\Render\MeshTile.cs" />
   </ItemGroup>
   <Target Name="Package" AfterTargets="Build">
