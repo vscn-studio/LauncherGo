@@ -6,7 +6,7 @@ on:
       version:
         description: "Version number (for example: 1.2.3)"
         required: true
-        default: "2.6.5"
+        default: "2.6.8"
         type: string
       vintage_story_version:
         description: "Vintage Story server version used to build embedded mods"

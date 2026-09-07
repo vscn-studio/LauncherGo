@@ -31,11 +31,11 @@ LauncherGo 是面向 Vintage Story 服务器的图形化开服器。项目目标
 
 | 项目 | 当前情况 |
 | --- | --- |
-| 软件版本 | 本地开发默认显示 `2.6.8-pre.4`；Windows 打包和 Release 发布由 `.github/workflows/windows-packages.yml`、`.github/workflows/publish-release.yml` 的版本输入或 `v*` 标签覆盖 `Version` 与 `InformationalVersion` |
+| 软件版本 | 当前版本 `2.6.8`；Windows 打包和 Release 发布由 `.github/workflows/windows-packages.yml`、`.github/workflows/publish-release.yml` 的版本输入或 `v*` 标签覆盖 `Version` 与 `InformationalVersion` |
 | 产品阶段 | 第二代开服器，持续开发中 |
 | 目标框架 | `.NET net10.0` |
 | 桌面 UI | `Avalonia 12.0.1` 与 `Semi.Avalonia 12.0.1` |
-| 默认运行平台 | 当前发布工作流打包 `win-x64`，产出自包含安装包、便携单文件包、框架依赖小体积包和嵌入 ServerAuth 模组包 |
+| 默认运行平台 | 当前发布工作流打包 `win-x64`，产出自包含安装包、便携单文件包和内嵌模组包 |
 | Vintage Story 服务端版本 | 由官方或第三方服务端索引下载，实例档案按选择的服务端版本运行 |
 | 第一方嵌入模组 | `serverauth.dll`、`launchergoredirect.dll`、`serverbridge.dll`，与 LauncherGo 源码同为 MIT 许可证 |
 | 模组构建参考 | GitHub Actions 默认使用 Vintage Story `1.22.2` 的服务端 API 引用构建，可在工作流输入中修改 |
@@ -56,10 +56,10 @@ LauncherGo 是面向 Vintage Story 服务器的图形化开服器。项目目标
 | 下载版本 | 服务端版本列表、搜索、下载、导入服务端压缩包、下载缓存清理 |
 | 连接功能 | 常规内网穿透、第三方 FRPC、Server Bridge 服务器桥接、QQ 机器人、ServerAuth 密码、Discourse SSO 与 OAuth2/OIDC 认证配置 |
 | 设置 | 服务器设置、外观、网络、高级、关于、赞助者、贡献者，以及 GitHub 代理和 LauncherGo 自动或手动更新检查 |
-| LauncherGo 更新 | 支持完整安装版、精简安装版、单文件便携版和 Small 目录版，包含安装方式识别、SHA-256 校验和 Markdown 更新日志 |
+| LauncherGo 更新 | 支持完整安装版和单文件便携版，包含安装方式识别、SHA-256 校验和 Markdown 更新日志 |
 | 日志 | 软件日志文件、控制台日志、自动化运行日志、服务端日志导出，以及直接打开每个档案的 `Logs` 文件夹 |
 | 国际化 | 中英文资源与运行时语言切换 |
-| 发布 | Windows 打包、框架依赖小体积分发、预发布、正式发布、嵌入 ServerAuth 模组构建 |
+| 发布 | Windows 打包、预发布、正式发布、嵌入模组和 ServerMap 构建 |
 | 赞助者数据 | 通过 `https://vscn.studio/api/afdian/sponsors` 获取，客户端不保存爱发电 USERID 或 Token |
 
 ## 开发团队
@@ -99,8 +99,9 @@ LauncherGo 是面向 Vintage Story 服务器的图形化开服器。项目目标
 | `LauncherGo.Services/EmbeddedMods/VsslAuthMod` | 嵌入式 ServerAuth 模组源码 |
 | `LauncherGo.Services/EmbeddedMods/LauncherGoRedirectMod` | 嵌入式 Gateway Redirect 模组源码 |
 | `LauncherGo.Services/EmbeddedMods/LauncherGoServerBridgeMod` | 嵌入式 Server Bridge 模组源码 |
+| `LauncherGo.Services/EmbeddedMods/ServerMapMod` | 嵌入式 ServerMap 模组源码 |
 | `installer` | Inno Setup Windows 安装包脚本 |
-| `.github/workflows` | Windows 打包、小体积分发打包、Release 发布与嵌入认证模组构建工作流 |
+| `.github/workflows` | Windows 打包、Release 发布与嵌入模组构建工作流 |
 
 服务器桥接仅绑定本机 `127.0.0.1`，使用协议版本 2 的 NDJSON 查询、命令和事件订阅。旧 OpenServerQuery HTTP 客户端不再兼容；首次启动会迁移并清理旧 OSQ 配置与快照数据。
 
@@ -169,18 +170,6 @@ dotnet test .\LauncherGo.Tests\LauncherGo.Tests.csproj -c Release --no-build
 ```
 
 主应用构建会同时构建 Server Bridge 模组。若单独构建第一方嵌入模组，需要设置 `VINTAGE_STORY` 指向含有相应 Vintage Story API 程序集的服务端目录；这些 API 仅作本地编译引用，不包含在 LauncherGo 发布包中。
-
-## 小体积分发打包
-
-```powershell
-dotnet publish .\LauncherGo.App\LauncherGo.App.csproj -c Release -p:PublishProfile=SmallPackage-win-x64 -p:Version=0.0.0 -p:InformationalVersion=0.0.0 -o .\artifacts\publish\small-package
-```
-
-`SmallPackage-win-x64` 发布配置会生成 `framework-dependent` 的 Windows x64 分发目录，并在发布结束后自动移除 `.pdb` 调试符号；手动使用该配置时需要预装 `.NET 10 Runtime (x64)`。
-
-`.github/workflows/windows-small-package.yml` 会生成自包含的 Windows x64 小体积分发包：保留 .NET Runtime，但移除全部 `.pdb` 调试符号。
-
-同一工作流还会生成 `LauncherGo-Small-Setup-<version>-win-x64.exe`，无需预装 .NET。完整安装器保留调试符号，仍由 `installer/LauncherGo.iss` 生成。
 
 ## 构建嵌入式 ServerAuth 模组
 

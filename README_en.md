@@ -31,11 +31,11 @@ This project is open source under the MIT License. You may use, copy, modify, di
 
 | Item | Current Status |
 | --- | --- |
-| Application version | Local development builds default to `2.6.8-pre.4`; Windows packaging and Release publishing override `Version` and `InformationalVersion` through `.github/workflows/windows-packages.yml`, `.github/workflows/publish-release.yml`, or `v*` tags |
+| Application version | Current version `2.6.8`; Windows packaging and Release publishing override `Version` and `InformationalVersion` through `.github/workflows/windows-packages.yml`, `.github/workflows/publish-release.yml`, or `v*` tags |
 | Product stage | Second-generation server launcher, under active development |
 | Target framework | `.NET net10.0` |
 | Desktop UI | `Avalonia 12.0.1` and `Semi.Avalonia 12.0.1` |
-| Default release platform | The current release workflows package `win-x64` as a self-contained installer, portable single-file package, framework-dependent small package, and embedded ServerAuth mod package |
+| Default release platform | The current release workflows package `win-x64` as a self-contained installer, portable single-file package, and embedded mod packages |
 | Vintage Story server version | Server versions are downloaded from the official or configured third-party server catalog, and each profile runs the selected version |
 | First-party embedded mods | `serverauth.dll`, `launchergoredirect.dll`, and `serverbridge.dll`, all licensed under MIT with LauncherGo source |
 | Mod build reference | GitHub Actions defaults to Vintage Story `1.22.2` server API references, and the version can be changed in workflow inputs |
@@ -56,10 +56,10 @@ This project is open source under the MIT License. You may use, copy, modify, di
 | Downloads | Server version list, search, download, server package import, and download cache cleanup |
 | Connections | Regular FRP, third-party FRPC, Server Bridge, QQ bot, and ServerAuth password, Discourse SSO, and OAuth2/OIDC configuration |
 | Settings | Server, appearance, network, advanced, about, sponsors, and contributors pages; GitHub proxy selection and automatic or manual LauncherGo update checks |
-| Launcher updates | Installation-aware updates for the full installer, small installer, portable single-file build, and Small directory package, with SHA-256 verification and Markdown release notes |
+| Launcher updates | Installation-aware updates for the full installer and portable single-file build, with SHA-256 verification and Markdown release notes |
 | Logging | Application log files, console logs, automation runtime logs, server log export, and direct access to each profile's `Logs` directory |
 | Internationalization | Chinese and English resources with runtime language switching |
-| Release | Windows packaging, framework-dependent small-package distribution, prerelease, official release, and embedded ServerAuth build |
+| Release | Windows packaging, prerelease, official release, embedded mod builds, and ServerMap packaging |
 | Sponsor data | Fetched from `https://vscn.studio/api/afdian/sponsors`; the client does not store Afdian USERID or Token |
 
 ## Development Team
@@ -99,8 +99,9 @@ This project is open source under the MIT License. You may use, copy, modify, di
 | `LauncherGo.Services/EmbeddedMods/VsslAuthMod` | Embedded ServerAuth mod source code |
 | `LauncherGo.Services/EmbeddedMods/LauncherGoRedirectMod` | Embedded Gateway Redirect mod source code |
 | `LauncherGo.Services/EmbeddedMods/LauncherGoServerBridgeMod` | Embedded Server Bridge mod source code |
+| `LauncherGo.Services/EmbeddedMods/ServerMapMod` | Embedded ServerMap mod source code |
 | `installer` | Inno Setup script for Windows installer packages |
-| `.github/workflows` | Windows packaging, small-package distribution, Release publishing, and embedded authentication mod build workflows |
+| `.github/workflows` | Windows packaging, Release publishing, and embedded mod build workflows |
 
 Server Bridge binds only to local `127.0.0.1` and uses protocol version 2 NDJSON for queries, commands, and event subscriptions. Legacy OpenServerQuery HTTP clients are not compatible; the first launch migrates and removes legacy OSQ configuration and snapshot data.
 
@@ -168,18 +169,6 @@ dotnet test .\LauncherGo.Tests\LauncherGo.Tests.csproj -c Release --no-build
 ```
 
 Building the main application also builds the Server Bridge mod. To build a first-party embedded mod independently, set `VINTAGE_STORY` to a server directory containing the required Vintage Story API assemblies. Those APIs are local build references only and are not included in LauncherGo release packages.
-
-## Small Package Publishing
-
-```powershell
-dotnet publish .\LauncherGo.App\LauncherGo.App.csproj -c Release -p:PublishProfile=SmallPackage-win-x64 -p:Version=0.0.0 -p:InformationalVersion=0.0.0 -o .\artifacts\publish\small-package
-```
-
-The `SmallPackage-win-x64` publish profile produces a framework-dependent Windows x64 distribution folder and automatically removes `.pdb` debug symbols after publish. Manual use of this profile requires `.NET 10 Runtime (x64)` to be installed.
-
-`.github/workflows/windows-small-package.yml` produces a self-contained Windows x64 small package: it retains the .NET Runtime while removing all `.pdb` debug symbols.
-
-The same workflow also produces `LauncherGo-Small-Setup-<version>-win-x64.exe`, which does not require a preinstalled .NET Runtime. The full self-contained installer retains debug symbols and is still generated by `installer/LauncherGo.iss`.
 
 ## Building the Embedded ServerAuth Mod
 

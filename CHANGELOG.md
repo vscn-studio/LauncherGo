@@ -1,5 +1,32 @@
 # 更新日志
 
+## 2.6.8 - 2026-09-08
+
+### 新增
+
+- 集成 ServerMap：网页端、服务端模组和独立 Map Host 统一由 LauncherGo 管理。
+- 服务器地图按档案独立配置和部署，支持手动启动、停止、浏览器打开，以及 HTTP/HTTPS 监听。
+- HTTPS 支持 `.crt/.pem` 证书与 `.key/.pem` 私钥，启动前校验证书有效期和私钥匹配关系。
+- ServerMap 网页资源独立于游戏模组，可通过 Host 反向代理访问模组 API，并保留 Leaflet、WebCartographer 和 VS-LiveMap-Revival 的版权声明。
+- 服务器地图移入“管理”菜单，提供档案列表、编辑、部署、启动/停止和证书文件浏览操作。
+- QQ 机器人新增 `/tp <设置点名称>` 传送流程及时空齿轮消耗校验。
+- Discord 机器人支持 Profile、Guild、Channel 绑定、管理员权限、玩家绑定、自定义 Slash Command 和服务器状态查询。
+
+### 修复
+
+- 修复服务器地图页面因面板挂载在错误页面容器中而显示空白的问题。
+- 修复地图网页 `vendor` 下的 Leaflet 和路径规划脚本返回 404，导致 `L is not defined` 的问题。
+- 修复地图 Host Release 发布时 RID 输出目录不一致导致的复制失败。
+- 修复 ServerHost、GatewayHost 和 ServerMapHost 发布文件及网页资源未完整复制到发布目录的问题。
+- 修复更新完成后安装包和 Host 运行时副本持续累积的问题。
+
+### 优化
+
+- ServerHost 和 GatewayHost 在普通安装包中共享主程序 .NET 运行时，显著降低安装包体积；portable 包保留自包含 Host 以保证独立启动。
+- Host 运行时缓存默认不保留历史版本，更新缓存默认不保留历史安装包；清理时跳过正在使用的进程目录。
+- GitHub Release 工作流移除 small package 和 small installer，仅发布标准安装包、portable 包及嵌入模组包。
+- 补齐 ServerMap 模组和网页的作者、版权、MIT、Leaflet BSD-2-Clause、WebCartographer MIT 及 VS-LiveMap-Revival MIT 声明。
+
 ## 2.6.8-pre.4 - 2026-09-07
 
 ### 新增
