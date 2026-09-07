@@ -8878,6 +8878,7 @@ public partial class LauncherMainWindow : Window
         ServerMapSaveButton.IsVisible = false;
         ServerMapDeployButton.IsVisible = false;
         ServerMapToggleButton.IsVisible = false;
+        ServerMapOpenButton.IsVisible = false;
         Grid.SetColumn(ServerMapRefreshButton, 1);
         RefreshServerMapConfigItems();
     }
@@ -8892,6 +8893,7 @@ public partial class LauncherMainWindow : Window
         ServerMapSaveButton.IsVisible = true;
         ServerMapDeployButton.IsVisible = true;
         ServerMapToggleButton.IsVisible = true;
+        ServerMapOpenButton.IsVisible = true;
         Grid.SetColumn(ServerMapRefreshButton, 3);
         ServerMapProfileComboBox.SelectedItem = _serverMapProfileItems.FirstOrDefault(p => p.Id.Equals(profile.Id, StringComparison.OrdinalIgnoreCase)) ?? profile;
         await LoadServerMapForProfileAsync(profile);

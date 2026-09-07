@@ -52,7 +52,6 @@ public sealed class ServerMapService : IServerMapService
         Directory.CreateDirectory(directory);
         await File.WriteAllTextAsync(GetSettingsPath(profile), JsonSerializer.Serialize(settings, JsonOptions), cancellationToken);
         await WriteModConfigurationAsync(profile, settings, cancellationToken);
-        if (settings.Enabled) await EnsureMapModDeployedAsync(profile, cancellationToken);
     }
 
     public async Task EnsureMapModDeployedAsync(InstanceProfile profile, CancellationToken cancellationToken = default)

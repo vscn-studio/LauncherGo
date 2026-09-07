@@ -333,7 +333,8 @@ public sealed partial class ServerProcessService : IServerProcessService
                 _logger,
                 _preferencesService,
                 _serverBridgeService,
-                _automationLifecycleService);
+                _automationLifecycleService,
+                _serverMapService);
             _controllers[profile.Id] = controller;
             _controllerProfiles[profile.Id] = profile;
             _statuses[profile.Id] = new ServerRuntimeStatus { ProfileId = profile.Id };
@@ -604,6 +605,7 @@ internal sealed partial class SingleServerProcessController
     private readonly IInstanceProfileService? _profileService;
     private readonly ILauncherPreferencesService? _preferencesService;
     private readonly IServerAuthService? _serverAuthService;
+    private readonly IServerMapService? _serverMapService;
     private readonly IServerBridgeService? _serverBridgeService;
     private readonly IAutomationLifecycleService? _automationLifecycleService;
     private readonly ILogger<ServerProcessService> _logger;
@@ -638,11 +640,13 @@ internal sealed partial class SingleServerProcessController
         ILogger<ServerProcessService>? logger = null,
         ILauncherPreferencesService? preferencesService = null,
         IServerBridgeService? serverBridgeService = null,
-        IAutomationLifecycleService? automationLifecycleService = null)
+        IAutomationLifecycleService? automationLifecycleService = null,
+        IServerMapService? serverMapService = null)
     {
         _profileService = profileService;
         _preferencesService = preferencesService;
         _serverAuthService = serverAuthService;
+        _serverMapService = serverMapService;
         _serverBridgeService = serverBridgeService;
         _automationLifecycleService = automationLifecycleService;
         _logger = logger ?? NullLogger<ServerProcessService>.Instance;
