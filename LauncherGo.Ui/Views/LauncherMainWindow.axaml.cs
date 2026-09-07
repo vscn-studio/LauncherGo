@@ -339,6 +339,8 @@ public partial class LauncherMainWindow : Window
     private readonly ObservableCollection<DiscordCustomCommandItem> _discordCustomCommandItems = [];
     private readonly ObservableCollection<TcpGatewayBackend> _gatewayBackendItems = [];
     private readonly ObservableCollection<GatewayBackendRuntimeItem> _gatewayBackendRuntimeItems = [];
+    private readonly ObservableCollection<InstanceProfile> _serverMapProfileItems = [];
+    private readonly ObservableCollection<ProfileConfigListItem> _serverMapConfigItems = [];
     private readonly HashSet<GatewayBackendStatisticsWindow> _gatewayStatisticsWindows = [];
     private readonly ObservableCollection<DashboardServerItem> _dashboardServerItems = [];
     private readonly ObservableCollection<DashboardPlayerItem> _dashboardOnlinePlayerItems = [];
@@ -408,6 +410,8 @@ public partial class LauncherMainWindow : Window
     private readonly List<string> _modImportPaths = [];
     private bool _isRefreshingAuth;
     private bool _isRefreshingServerBridge;
+    private bool _isRefreshingServerMap;
+    private string _editingServerMapProfileId = string.Empty;
     private bool _toastPointerOver;
     private string _editingConfigProfileId = string.Empty;
     private string _pendingConfigLoadProfileId = string.Empty;
@@ -3602,6 +3606,7 @@ public partial class LauncherMainWindow : Window
         DownloadVersionsPanel.IsVisible = tab == InstanceManageTab.DownloadVersions;
         LogsPanel.IsVisible = tab == InstanceManageTab.Logs;
         ServerBridgePanel.IsVisible = tab == InstanceManageTab.ServerBridge;
+        ServerMapPanel.IsVisible = tab == InstanceManageTab.ServerMap;
         RefreshSidebarSelection();
 
         if (tab == InstanceManageTab.Config)
@@ -3632,6 +3637,11 @@ public partial class LauncherMainWindow : Window
         {
             ShowServerBridgeList();
             _ = RefreshServerBridgeProfilesAsync();
+        }
+        else if (tab == InstanceManageTab.ServerMap)
+        {
+            ShowServerMapList();
+            _ = RefreshServerMapProfilesAsync();
         }
 
         RequestStaticUiTranslations();
@@ -3703,7 +3713,6 @@ public partial class LauncherMainWindow : Window
         ConnectionDiscordPanel.IsVisible = tab == ConnectionTab.Discord;
         ConnectionGatewayPanel.IsVisible = tab == ConnectionTab.Gateway;
         ConnectionAuthPanel.IsVisible = tab == ConnectionTab.Auth;
-        ConnectionServerMapPanel.IsVisible = tab == ConnectionTab.ServerMap;
         RefreshSidebarSelection();
         RefreshConnectionSettingsEditor();
         RefreshConnectionRuntimeStatus();
@@ -3751,7 +3760,7 @@ public partial class LauncherMainWindow : Window
         SetSelectedClass(ConnectionGatewayTabButton, !_logsNavSelected && _selectedTab == MainTab.Connection && _selectedConnectionTab == ConnectionTab.Gateway);
         SetSelectedClass(ConnectionRobotTabButton, !_logsNavSelected && _selectedTab == MainTab.Connection && _selectedConnectionTab == ConnectionTab.Robot);
         SetSelectedClass(ConnectionDiscordTabButton, !_logsNavSelected && _selectedTab == MainTab.Connection && _selectedConnectionTab == ConnectionTab.Discord);
-        SetSelectedClass(ConnectionServerMapTabButton, !_logsNavSelected && _selectedTab == MainTab.Connection && _selectedConnectionTab == ConnectionTab.ServerMap);
+        SetSelectedClass(ServerMapTabButton, !_logsNavSelected && _selectedTab == MainTab.InstanceManage && _selectedInstanceManageTab == InstanceManageTab.ServerMap);
         SetSelectedClass(ServerSettingsTabButton, !_logsNavSelected && _selectedTab == MainTab.Settings && _selectedSettingsTab == SettingsTab.Server);
         SetSelectedClass(AppearanceSettingsTabButton, !_logsNavSelected && _selectedTab == MainTab.Settings && _selectedSettingsTab == SettingsTab.Appearance);
         SetSelectedClass(NetworkSettingsTabButton, !_logsNavSelected && _selectedTab == MainTab.Settings && _selectedSettingsTab == SettingsTab.Network);
@@ -8853,36 +8862,81 @@ public partial class LauncherMainWindow : Window
         RefreshConnectionRuntimeStatus();
     }
 
-    private void OnConnectionServerMapTabClick(object? sender, RoutedEventArgs e)
+    private void OnServerMapSubTabClick(object? sender, RoutedEventArgs e)
     {
-        SelectTab(MainTab.Connection);
-        SelectConnectionTab(ConnectionTab.ServerMap);
-        _ = RefreshServerMapEditorAsync();
+        SelectTab(MainTab.InstanceManage);
+        SelectInstanceManageTab(InstanceManageTab.ServerMap);
     }
 
-    private async Task RefreshServerMapEditorAsync()
+    private void ShowServerMapList()
     {
-        var profile = GetSelectedConfigProfile() ?? _profileService.GetProfiles().FirstOrDefault();
-        if (profile is null) return;
+        _editingServerMapProfileId = string.Empty;
+        ServerMapListPanel.IsVisible = true;
+        ServerMapEditorPanel.IsVisible = false;
+        ServerMapClearButton.IsVisible = true;
+        ServerMapBackButton.IsVisible = false;
+        ServerMapSaveButton.IsVisible = false;
+        ServerMapDeployButton.IsVisible = false;
+        ServerMapToggleButton.IsVisible = false;
+        Grid.SetColumn(ServerMapRefreshButton, 1);
+        RefreshServerMapConfigItems();
+    }
+
+    private async Task ShowServerMapEditorAsync(InstanceProfile profile)
+    {
+        _editingServerMapProfileId = profile.Id;
+        ServerMapListPanel.IsVisible = false;
+        ServerMapEditorPanel.IsVisible = true;
+        ServerMapClearButton.IsVisible = false;
+        ServerMapBackButton.IsVisible = true;
+        ServerMapSaveButton.IsVisible = true;
+        ServerMapDeployButton.IsVisible = true;
+        ServerMapToggleButton.IsVisible = true;
+        Grid.SetColumn(ServerMapRefreshButton, 3);
+        ServerMapProfileComboBox.SelectedItem = _serverMapProfileItems.FirstOrDefault(p => p.Id.Equals(profile.Id, StringComparison.OrdinalIgnoreCase)) ?? profile;
+        await LoadServerMapForProfileAsync(profile);
+    }
+
+    private async Task RefreshServerMapProfilesAsync()
+    {
+        if (_isRefreshingServerMap) return;
+        _isRefreshingServerMap = true;
+        try
+        {
+            var selectedId = _editingServerMapProfileId;
+            _serverMapProfileItems.Clear();
+            foreach (var profile in _profileService.GetProfiles()) _serverMapProfileItems.Add(profile);
+            ServerMapProfileComboBox.ItemsSource = _serverMapProfileItems;
+            RefreshServerMapConfigItems(_serverMapProfileItems);
+            var target = _serverMapProfileItems.FirstOrDefault(p => p.Id.Equals(selectedId, StringComparison.OrdinalIgnoreCase)) ?? _serverMapProfileItems.FirstOrDefault();
+            ServerMapProfileComboBox.SelectedItem = target;
+            if (target is not null && ServerMapEditorPanel.IsVisible) await LoadServerMapForProfileAsync(target);
+        }
+        finally { _isRefreshingServerMap = false; }
+    }
+
+    private async Task LoadServerMapForProfileAsync(InstanceProfile profile)
+    {
         var settings = await _serverMapService.LoadSettingsAsync(profile);
         ServerMapEnabledCheckBox.IsChecked = settings.Enabled;
         ServerMapHttpsCheckBox.IsChecked = settings.UseHttps;
-        ServerMapListenPortTextBox.Text = settings.ListenPort.ToString();
+        ServerMapListenPortNumericUpDown.Value = settings.ListenPort;
         ServerMapCertificateTextBox.Text = settings.CertificatePath;
         ServerMapPrivateKeyTextBox.Text = settings.PrivateKeyPath;
         var status = _serverMapService.GetStatus(profile);
         ServerMapStatusTextBlock.Text = status.IsRunning ? $"运行中：{status.Url}" : "未启动";
+        ServerMapToggleButton.Content = status.IsRunning ? "停止地图" : "启动地图";
     }
 
     private async void OnServerMapSaveClick(object? sender, RoutedEventArgs e)
     {
-        var profile = GetSelectedConfigProfile() ?? _profileService.GetProfiles().FirstOrDefault(); if (profile is null) return;
+        if (ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile) { SetServerMapStatus("请先选择档案。"); return; }
         var current = await _serverMapService.LoadSettingsAsync(profile);
         var settings = new ServerMapSettings
         {
             Enabled = ServerMapEnabledCheckBox.IsChecked == true,
             UseHttps = ServerMapHttpsCheckBox.IsChecked == true,
-            ListenPort = int.TryParse(ServerMapListenPortTextBox.Text, out var port) ? port : current.ListenPort,
+            ListenPort = (int?)ServerMapListenPortNumericUpDown.Value ?? current.ListenPort,
             CertificatePath = ServerMapCertificateTextBox.Text ?? string.Empty,
             PrivateKeyPath = ServerMapPrivateKeyTextBox.Text ?? string.Empty,
             ListenAddress = current.ListenAddress,
@@ -8892,27 +8946,82 @@ public partial class LauncherMainWindow : Window
             PublicUrl = current.PublicUrl
         };
         await _serverMapService.SaveSettingsAsync(profile, settings);
-        await RefreshServerMapEditorAsync();
+        await LoadServerMapForProfileAsync(profile);
+        SetServerMapStatus("服务器地图配置已保存。");
     }
 
-    private async void OnServerMapStartClick(object? sender, RoutedEventArgs e)
+    private async void OnServerMapDeployClick(object? sender, RoutedEventArgs e)
     {
-        var profile = GetSelectedConfigProfile() ?? _profileService.GetProfiles().FirstOrDefault(); if (profile is null) return;
-        try { await _serverMapService.StartAsync(profile); await RefreshServerMapEditorAsync(); }
-        catch (Exception ex) { ShowToast(ex.Message); }
+        if (ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile) { SetServerMapStatus("请先选择档案。"); return; }
+        try { await _serverMapService.EnsureMapModDeployedAsync(profile); SetServerMapStatus("服务器地图模组已部署。"); }
+        catch (Exception ex) { SetServerMapStatus($"部署失败：{ex.Message}"); }
     }
 
-    private async void OnServerMapStopClick(object? sender, RoutedEventArgs e)
+    private async void OnServerMapToggleClick(object? sender, RoutedEventArgs e)
     {
-        var profile = GetSelectedConfigProfile() ?? _profileService.GetProfiles().FirstOrDefault(); if (profile is null) return;
-        await _serverMapService.StopAsync(profile); await RefreshServerMapEditorAsync();
+        if (ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile) { SetServerMapStatus("请先选择档案。"); return; }
+        try
+        {
+            if (_serverMapService.GetStatus(profile).IsRunning) await _serverMapService.StopAsync(profile);
+            else await _serverMapService.StartAsync(profile);
+            await LoadServerMapForProfileAsync(profile);
+        }
+        catch (Exception ex) { SetServerMapStatus($"操作失败：{ex.Message}"); }
     }
 
     private void OnServerMapOpenClick(object? sender, RoutedEventArgs e)
     {
-        var profile = GetSelectedConfigProfile() ?? _profileService.GetProfiles().FirstOrDefault(); if (profile is null) return;
+        if (ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile) return;
         var url = _serverMapService.GetStatus(profile).Url;
         if (!string.IsNullOrWhiteSpace(url)) Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+    }
+
+    private async void OnServerMapProfileSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (!_isRefreshingServerMap && ServerMapEditorPanel.IsVisible && ServerMapProfileComboBox.SelectedItem is InstanceProfile profile)
+            await LoadServerMapForProfileAsync(profile);
+    }
+
+    private async void OnServerMapRefreshClick(object? sender, RoutedEventArgs e)
+    {
+        if (ServerMapEditorPanel.IsVisible && ServerMapProfileComboBox.SelectedItem is InstanceProfile profile) await LoadServerMapForProfileAsync(profile);
+        else await RefreshServerMapProfilesAsync();
+    }
+
+    private async void OnServerMapEditConfigClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: ProfileConfigListItem item } && _profileService.GetProfileById(item.ProfileId) is { } profile)
+            await ShowServerMapEditorAsync(profile);
+    }
+
+    private void OnServerMapBackClick(object? sender, RoutedEventArgs e) => ShowServerMapList();
+
+    private async void OnServerMapClearClick(object? sender, RoutedEventArgs e)
+    {
+        foreach (var item in _serverMapConfigItems.Where(i => i.IsSelected))
+            if (_profileService.GetProfileById(item.ProfileId) is { } profile)
+                await _serverMapService.SaveSettingsAsync(profile, new ServerMapSettings { Enabled = false });
+        RefreshServerMapConfigItems();
+    }
+
+    private async void OnServerMapCertificateBrowseClick(object? sender, RoutedEventArgs e) => await BrowseServerMapFileAsync(ServerMapCertificateTextBox, "证书文件", ["*.crt", "*.pem"]);
+    private async void OnServerMapPrivateKeyBrowseClick(object? sender, RoutedEventArgs e) => await BrowseServerMapFileAsync(ServerMapPrivateKeyTextBox, "私钥文件", ["*.key", "*.pem"]);
+
+    private async Task BrowseServerMapFileAsync(TextBox target, string title, IReadOnlyList<string> patterns)
+    {
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions { Title = title, AllowMultiple = false, FileTypeFilter = [new FilePickerFileType(title) { Patterns = patterns.ToArray() }] });
+        var path = TryGetLocalPath(files.FirstOrDefault());
+        if (!string.IsNullOrWhiteSpace(path)) target.Text = path;
+    }
+
+    private void SetServerMapStatus(string message) => ServerMapStatusTextBlock.Text = message;
+
+    private void RefreshServerMapConfigItems(IReadOnlyList<InstanceProfile>? profiles = null)
+    {
+        _serverMapConfigItems.Clear();
+        foreach (var profile in profiles ?? _profileService.GetProfiles())
+            _serverMapConfigItems.Add(ProfileConfigListItem.FromPath(profile, Path.Combine(_serverMapService.GetProfileDirectory(profile), "launchergo-map.json")));
+        ServerMapConfigItemsControl.ItemsSource = _serverMapConfigItems;
     }
 
     private async void OnDiscordSaveClick(object? sender, RoutedEventArgs e)
@@ -11911,7 +12020,8 @@ public partial class LauncherMainWindow : Window
         Logs,
         Mods,
         DownloadVersions,
-        ServerBridge
+        ServerBridge,
+        ServerMap
     }
 
     private enum SettingsTab

@@ -1199,6 +1199,7 @@
                                     <Button x:Name="AutomationTabButton" Classes="SidebarNavButton" Content="自动化" Click="OnAutomationSubTabClick" />
                                     <Button x:Name="ConnectionAuthTabButton" Classes="SidebarNavButton" Content="认证" Click="OnConnectionAuthTabClick" />
                                     <Button x:Name="ServerBridgeTabButton" Classes="SidebarNavButton" Content="服务器桥接" Click="OnServerBridgeSubTabClick" />
+                                    <Button x:Name="ServerMapTabButton" Classes="SidebarNavButton" Content="服务器地图" Click="OnServerMapSubTabClick" />
                                     <Button x:Name="LogsNavButton" Classes="SidebarNavButton" Content="日志" Click="OnLogsNavClick" />
                                     <Button x:Name="DownloadVersionsNavButton" Classes="SidebarNavButton" Content="下载版本" Click="OnDownloadVersionsSubTabClick" />
 
@@ -1208,7 +1209,6 @@
                                     <Button x:Name="ConnectionFrpTabButton" Classes="SidebarNavButton" Content="FRP" Click="OnConnectionFrpTabClick" />
                                     <Button x:Name="ConnectionEasyTierTabButton" Classes="SidebarNavButton" Content="EasyTier" Click="OnConnectionEasyTierTabClick" />
                                     <Button x:Name="ConnectionGatewayTabButton" Classes="SidebarNavButton" Content="网关" Click="OnConnectionGatewayTabClick" />
-                                    <Button x:Name="ConnectionServerMapTabButton" Classes="SidebarNavButton" Content="服务器地图" Click="OnConnectionServerMapTabClick" />
 
                                     <TextBlock x:Name="SettingsNavSectionTitleTextBlock" Classes="SidebarSectionTitle" Text="设置" />
                                     <Button x:Name="ServerSettingsTabButton" Classes="SidebarNavButton" Content="服务器设置" Click="OnServerSettingsTabClick" />
@@ -3536,21 +3536,22 @@
                                         </StackPanel>
                                     </ScrollViewer>
 
-                                    <ScrollViewer x:Name="ConnectionServerMapPanel" Margin="0,-8,0,0" IsVisible="False">
+                                    <ScrollViewer x:Name="ServerMapPanel" IsVisible="False" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Hidden">
                                         <StackPanel Spacing="10">
-                                            <TextBlock Text="服务器地图" Classes="PageTitleText" />
-                                            <TextBlock x:Name="ServerMapStatusTextBlock" Text="未启动" Classes="TableSubCellText" />
-                                            <WrapPanel Orientation="Horizontal" ItemHeight="34" ItemWidth="110">
-                                                <Button Content="保存配置" Classes="ActionButton" Click="OnServerMapSaveClick" />
-                                                <Button Content="启动地图" Classes="SecondaryActionButton" Click="OnServerMapStartClick" />
-                                                <Button Content="停止地图" Classes="SecondaryActionButton" Click="OnServerMapStopClick" />
-                                                <Button Content="打开地图" Classes="SecondaryActionButton" Click="OnServerMapOpenClick" />
-                                            </WrapPanel>
-                                            <CheckBox x:Name="ServerMapEnabledCheckBox" Content="启用服务器地图" IsChecked="True" />
-                                            <CheckBox x:Name="ServerMapHttpsCheckBox" Content="启用 HTTPS（需证书）" />
-                                            <TextBox x:Name="ServerMapListenPortTextBox" Watermark="监听端口" Text="5081" />
-                                            <TextBox x:Name="ServerMapCertificateTextBox" Watermark="证书路径 (.crt/.pem)" />
-                                            <TextBox x:Name="ServerMapPrivateKeyTextBox" Watermark="私钥路径 (.key/.pem)" />
+                                            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*" ColumnSpacing="8">
+                                                <ComboBox x:Name="ServerMapProfileComboBox" IsVisible="False" Classes="CompactCombo" SelectionChanged="OnServerMapProfileSelectionChanged"><ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" /></DataTemplate></ComboBox.ItemTemplate></ComboBox>
+                                                <Button x:Name="ServerMapClearButton" Classes="SecondaryActionButton DangerButton" Content="清空" Click="OnServerMapClearClick" />
+                                                <Button x:Name="ServerMapBackButton" Grid.Column="1" Classes="SecondaryActionButton" Content="返回" Click="OnServerMapBackClick" IsVisible="False" />
+                                                <Button x:Name="ServerMapSaveButton" Grid.Column="2" Classes="ActionButton" Content="保存" Click="OnServerMapSaveClick" IsVisible="False" />
+                                                <Button x:Name="ServerMapRefreshButton" Grid.Column="3" Classes="SecondaryActionButton" Content="刷新" Click="OnServerMapRefreshClick" />
+                                                <Button x:Name="ServerMapDeployButton" Grid.Column="4" Classes="SecondaryActionButton" Content="部署服务器地图模组" Click="OnServerMapDeployClick" IsVisible="False" />
+                                                <Button x:Name="ServerMapToggleButton" Grid.Column="5" Classes="SecondaryActionButton" Content="启动地图" Click="OnServerMapToggleClick" IsVisible="False" />
+                                            </Grid>
+                                            <TextBlock x:Name="ServerMapStatusTextBlock" Classes="ConfigHintText" TextWrapping="Wrap" />
+                                            <Grid>
+                                                <Grid x:Name="ServerMapListPanel" RowDefinitions="Auto,*"><Border Grid.Row="0" Classes="TableHeader"><Grid ColumnDefinitions="44,1.2*,2.4*,1*,Auto" ColumnSpacing="8"><TextBlock Classes="TableHeaderText" Text="选择" HorizontalAlignment="Center" /><TextBlock Grid.Column="1" Classes="TableHeaderText" Text="服务器名称" /><TextBlock Grid.Column="2" Classes="TableHeaderText" Text="配置路径" /><TextBlock Grid.Column="3" Classes="TableHeaderText" Text="修改时间" /><TextBlock Grid.Column="4" Classes="TableHeaderText" Text="操作" HorizontalAlignment="Center" /></Grid></Border><Border Grid.Row="1" Classes="TableBody"><ItemsControl x:Name="ServerMapConfigItemsControl"><ItemsControl.ItemTemplate><DataTemplate><Border Classes="TableRow"><Grid ColumnDefinitions="44,1.2*,2.4*,1*,Auto" ColumnSpacing="8"><CheckBox Classes="TableSelectCheck" IsChecked="{Binding IsSelected, Mode=TwoWay}" /><TextBlock Grid.Column="1" Classes="TableCellText" Text="{Binding ProfileName}" FontWeight="SemiBold" /><Button Grid.Column="2" Classes="DownloadTextButton TablePathButton" Tag="{Binding ConfigPath}" HorizontalAlignment="Stretch" Click="OnOpenConfigFileClick"><TextBlock Classes="TableCellText TablePathText" Text="{Binding ConfigPath}" Foreground="{DynamicResource DownloadActionTextBrush}" /></Button><TextBlock Grid.Column="3" Classes="TableCellText" Text="{Binding ModifiedText}" /><Button Grid.Column="4" Classes="SecondaryActionButton" Tag="{Binding}" Content="修改" Click="OnServerMapEditConfigClick" /></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></Border></Grid>
+                                                <StackPanel x:Name="ServerMapEditorPanel" Spacing="10" IsVisible="False"><Border Classes="ConfigCard"><StackPanel Spacing="10"><WrapPanel Orientation="Horizontal"><StackPanel Classes="ToggleField"><TextBlock Classes="ConfigFieldLabel" Text="启用服务器地图" /><ToggleSwitch x:Name="ServerMapEnabledCheckBox" Classes="LabelledToggle" /></StackPanel><StackPanel Classes="ToggleField"><TextBlock Classes="ConfigFieldLabel" Text="启用 HTTPS" /><ToggleSwitch x:Name="ServerMapHttpsCheckBox" Classes="LabelledToggle" /></StackPanel><StackPanel Classes="ConfigFormField"><TextBlock Classes="ConfigFieldLabel" Text="监听端口" /><NumericUpDown x:Name="ServerMapListenPortNumericUpDown" Classes="CompactNumber" Minimum="1024" Maximum="65535" /></StackPanel></WrapPanel><TextBlock Classes="ConfigFieldLabel" Text="证书路径" /><Grid ColumnDefinitions="*,Auto" ColumnSpacing="8"><TextBox x:Name="ServerMapCertificateTextBox" PlaceholderText=".crt / .pem" /><Button Classes="SecondaryActionButton" Content="浏览" Click="OnServerMapCertificateBrowseClick" /></Grid><TextBlock Classes="ConfigFieldLabel" Text="私钥路径" /><Grid ColumnDefinitions="*,Auto" ColumnSpacing="8"><TextBox x:Name="ServerMapPrivateKeyTextBox" PlaceholderText=".key / .pem" /><Button Classes="SecondaryActionButton" Content="浏览" Click="OnServerMapPrivateKeyBrowseClick" /></Grid></StackPanel></Border></StackPanel>
+                                            </Grid>
                                         </StackPanel>
                                     </ScrollViewer>
                                 </Grid>
