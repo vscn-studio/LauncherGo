@@ -15,6 +15,7 @@ namespace LauncherGo.Services;
 public sealed class LauncherUpdateService : ILauncherUpdateService
 {
     private const string Repository = "vscn-studio/LauncherGo";
+    private const int RetainedUpdateDirectories = 2;
     private static readonly HttpClient HttpClient = CreateHttpClient();
     private static readonly HttpRangeFileDownloader FileDownloader = new(HttpClient);
     private readonly ILauncherPreferencesService _preferencesService;
@@ -22,6 +23,7 @@ public sealed class LauncherUpdateService : ILauncherUpdateService
     public LauncherUpdateService(ILauncherPreferencesService preferencesService)
     {
         _preferencesService = preferencesService;
+        CleanupUpdateCache();
     }
 
     public string CurrentVersion => ReadCurrentVersion();
@@ -116,6 +118,7 @@ public sealed class LauncherUpdateService : ILauncherUpdateService
         var asset = update.SelectedAsset ?? throw new InvalidOperationException(
             $"未找到适用于当前安装方式（{update.PackageKind}）的更新文件。");
         var updateRoot = Path.Combine(LauncherPathHelper.AppRoot, "updates", update.LatestVersion);
+        CleanupUpdateCache();
         Directory.CreateDirectory(updateRoot);
         var fileName = Path.GetFileName(asset.Name);
         if (string.IsNullOrWhiteSpace(fileName))
@@ -199,6 +202,31 @@ public sealed class LauncherUpdateService : ILauncherUpdateService
             _ => string.Empty
         };
         return prefix + url;
+    }
+
+    internal static int CleanupUpdateCache(string? updateRoot = null, int retainCount = RetainedUpdateDirectories)
+    {
+        updateRoot ??= Path.Combine(LauncherPathHelper.AppRoot, "updates");
+        if (!Directory.Exists(updateRoot))
+            return 0;
+
+        var directories = Directory.EnumerateDirectories(updateRoot)
+            .Select(static path => new DirectoryInfo(path))
+            .OrderByDescending(static directory => directory.LastWriteTimeUtc)
+            .ToList();
+        var removed = 0;
+        foreach (var directory in directories.Skip(Math.Max(0, retainCount)))
+        {
+            try
+            {
+                directory.Delete(recursive: true);
+                removed++;
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        return removed;
     }
 
     private static string RemoveProxyPrefix(string body, GitHubProxyKind proxy)
@@ -312,6 +340,7 @@ try {
     Copy-Item -Path (Join-Path $stage '*') -Destination $InstallDir -Recurse -Force
     Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
   }
+  Remove-Item -LiteralPath $Asset -Force -ErrorAction SilentlyContinue
   Start-Process -FilePath $Executable
 } catch {
   Add-Content -LiteralPath (Join-Path $PSScriptRoot 'update-error.log') -Value $_

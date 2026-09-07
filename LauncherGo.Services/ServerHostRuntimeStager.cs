@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -7,6 +8,7 @@ namespace LauncherGo.Services;
 internal static class ServerHostRuntimeStager
 {
     private const string CompletionMarkerName = ".complete";
+    private const int DefaultRetainedVersions = 2;
     private static readonly object Gate = new();
 
     public static string Prepare(string sourceExecutablePath, string? runtimeRoot = null)
@@ -58,8 +60,74 @@ internal static class ServerHostRuntimeStager
                 }
             }
 
+            Cleanup(runtimeRoot, targetDirectory, DefaultRetainedVersions);
+
             return targetExecutablePath;
         }
+    }
+
+    /// <summary>
+    /// Removes completed runtime copies that are not recent and are not used by a live process.
+    /// </summary>
+    internal static int Cleanup(string runtimeRoot, string? preserveDirectory = null, int retainCount = DefaultRetainedVersions)
+    {
+        if (string.IsNullOrWhiteSpace(runtimeRoot) || !Directory.Exists(runtimeRoot))
+            return 0;
+
+        var directories = Directory.EnumerateDirectories(runtimeRoot)
+            .Select(static path => new DirectoryInfo(path))
+            .Where(directory => File.Exists(Path.Combine(directory.FullName, CompletionMarkerName)))
+            .OrderByDescending(static directory => directory.LastWriteTimeUtc)
+            .ToList();
+        var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(preserveDirectory))
+            keep.Add(Path.GetFullPath(preserveDirectory));
+        foreach (var directory in directories.Take(Math.Max(0, retainCount)))
+            keep.Add(directory.FullName);
+
+        var removed = 0;
+        foreach (var directory in directories)
+        {
+            if (keep.Contains(directory.FullName) || IsUsedByLiveProcess(directory.FullName))
+                continue;
+
+            try
+            {
+                directory.Delete(recursive: true);
+                removed++;
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        return removed;
+    }
+
+    private static bool IsUsedByLiveProcess(string directory)
+    {
+        var normalizedDirectory = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        foreach (var process in Process.GetProcesses())
+        {
+            try
+            {
+                if (process.HasExited)
+                    continue;
+                var executablePath = process.MainModule?.FileName;
+                if (!string.IsNullOrWhiteSpace(executablePath) &&
+                    Path.GetFullPath(executablePath).StartsWith(normalizedDirectory, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            catch
+            {
+                // A process can exit or deny module inspection while the cleanup is running.
+            }
+            finally
+            {
+                process.Dispose();
+            }
+        }
+
+        return false;
     }
 
     private static IReadOnlyList<string> ResolveRuntimeFiles(

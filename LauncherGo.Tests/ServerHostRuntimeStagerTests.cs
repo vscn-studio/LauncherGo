@@ -89,4 +89,33 @@ public sealed class ServerHostRuntimeStagerTests
                 Directory.Delete(runtimeRoot, recursive: true);
         }
     }
+
+    [Fact]
+    public void Cleanup_RemovesOldCompletedCopiesAndKeepsRecentCopy()
+    {
+        var runtimeRoot = Path.Combine(Path.GetTempPath(), $"launchergo-host-cleanup-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(runtimeRoot);
+            for (var index = 0; index < 3; index++)
+            {
+                var directory = Path.Combine(runtimeRoot, $"version-{index}");
+                Directory.CreateDirectory(directory);
+                File.WriteAllText(Path.Combine(directory, ".complete"), index.ToString());
+                Directory.SetLastWriteTimeUtc(directory, DateTime.UtcNow.AddMinutes(-index));
+            }
+
+            var removed = ServerHostRuntimeStager.Cleanup(runtimeRoot, retainCount: 1);
+
+            Assert.Equal(2, removed);
+            Assert.True(Directory.Exists(Path.Combine(runtimeRoot, "version-0")));
+            Assert.False(Directory.Exists(Path.Combine(runtimeRoot, "version-1")));
+            Assert.False(Directory.Exists(Path.Combine(runtimeRoot, "version-2")));
+        }
+        finally
+        {
+            if (Directory.Exists(runtimeRoot))
+                Directory.Delete(runtimeRoot, recursive: true);
+        }
+    }
 }

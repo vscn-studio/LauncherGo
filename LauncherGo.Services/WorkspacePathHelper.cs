@@ -108,6 +108,11 @@ internal static partial class WorkspacePathHelper
         Directory.CreateDirectory(EasyTierRoot);
         Directory.CreateDirectory(RobotRoot);
         Directory.CreateDirectory(DiscordRoot);
+
+        // Runtime staging is content-addressed so a running Host is never overwritten.
+        // Prune completed copies during workspace initialization while preserving live Hosts.
+        ServerHostRuntimeStager.Cleanup(ServerHostRuntimeRoot);
+        ServerHostRuntimeStager.Cleanup(GatewayHostRuntimeRoot);
     }
 
     public static string GetProfileConfigPath(string profileDataPath) =>

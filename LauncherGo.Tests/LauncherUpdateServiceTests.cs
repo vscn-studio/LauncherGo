@@ -81,4 +81,33 @@ public sealed class LauncherUpdateServiceTests
         Assert.Equal("v2.6.7-preview.1", tag);
     }
 
+    [Fact]
+    public void CleanupUpdateCache_RemovesOlderDirectories()
+    {
+        var updateRoot = Path.Combine(Path.GetTempPath(), $"launchergo-update-cleanup-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(updateRoot);
+            for (var index = 0; index < 3; index++)
+            {
+                var directory = Path.Combine(updateRoot, $"2.6.{index}");
+                Directory.CreateDirectory(directory);
+                File.WriteAllText(Path.Combine(directory, "asset.exe"), index.ToString());
+                Directory.SetLastWriteTimeUtc(directory, DateTime.UtcNow.AddMinutes(-index));
+            }
+
+            var removed = LauncherUpdateService.CleanupUpdateCache(updateRoot, retainCount: 1);
+
+            Assert.Equal(2, removed);
+            Assert.True(Directory.Exists(Path.Combine(updateRoot, "2.6.0")));
+            Assert.False(Directory.Exists(Path.Combine(updateRoot, "2.6.1")));
+            Assert.False(Directory.Exists(Path.Combine(updateRoot, "2.6.2")));
+        }
+        finally
+        {
+            if (Directory.Exists(updateRoot))
+                Directory.Delete(updateRoot, recursive: true);
+        }
+    }
+
 }
