@@ -89,6 +89,8 @@ public sealed class TcpGatewayHostRunnerTests
             var backendStatus = Assert.Single(stopped.Backends);
             Assert.True(backendStatus.Statistics.ClientToBackendBytes >= payload.Length);
             Assert.True(backendStatus.Statistics.BackendToClientBytes >= payload.Length);
+            Assert.True(backendStatus.Statistics.CurrentClientToBackendMbps > 0);
+            Assert.True(backendStatus.Statistics.CurrentBackendToClientMbps > 0);
             Assert.True(backendStatus.Statistics.PeakConnections >= 1);
             Assert.True(backendStatus.Statistics.EstablishedConnections >= 1);
             Assert.Contains(backendStatus.Statistics.RecentDisconnects, record => record.Type == "GatewayStopped");

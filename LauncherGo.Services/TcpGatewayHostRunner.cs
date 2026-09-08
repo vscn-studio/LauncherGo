@@ -616,7 +616,10 @@ public static class TcpGatewayHostRunner
                     // TCP forwarding continues independently and the next iteration retries the snapshot.
                 }
 
-                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
+                // Publish snapshots frequently enough for the launcher UI to observe
+                // short-lived traffic bursts. Bandwidth itself is calculated from a
+                // sliding window in BackendState.
+                await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -1010,6 +1013,7 @@ public static class TcpGatewayHostRunner
 
     private sealed class BackendState
     {
+        private static readonly TimeSpan RateWindow = TimeSpan.FromSeconds(2);
         private readonly object _gate = new();
         private TcpGatewayBackend _definition;
         private bool _isHealthy;
@@ -1018,13 +1022,14 @@ public static class TcpGatewayHostRunner
         private DateTimeOffset? _lastDisconnectAtUtc;
         private readonly Queue<TcpGatewayDisconnectRecord> _recentDisconnects = [];
         private readonly DateTimeOffset _statisticsStartedAtUtc = DateTimeOffset.UtcNow;
-        private DateTimeOffset _lastRateSampleAtUtc = DateTimeOffset.UtcNow;
         private int _activeConnections;
         private int _peakConnections;
         private long _clientToBackendBytes;
         private long _backendToClientBytes;
-        private long _lastClientToBackendBytes;
-        private long _lastBackendToClientBytes;
+        private readonly Queue<BandwidthSample> _clientToBackendRateSamples = [];
+        private readonly Queue<BandwidthSample> _backendToClientRateSamples = [];
+        private long _clientToBackendRateBytes;
+        private long _backendToClientRateBytes;
         private long _establishedConnections;
         private long _failedConnections;
         private long _backendConnectLatencyTicks;
@@ -1110,9 +1115,25 @@ public static class TcpGatewayHostRunner
             }
         }
 
-        public void AddClientToBackendBytes(int bytes) => Interlocked.Add(ref _clientToBackendBytes, bytes);
+        public void AddClientToBackendBytes(int bytes)
+        {
+            if (bytes <= 0) return;
+            Interlocked.Add(ref _clientToBackendBytes, bytes);
+            lock (_gate)
+            {
+                AppendRateSample(_clientToBackendRateSamples, ref _clientToBackendRateBytes, bytes, DateTimeOffset.UtcNow);
+            }
+        }
 
-        public void AddBackendToClientBytes(int bytes) => Interlocked.Add(ref _backendToClientBytes, bytes);
+        public void AddBackendToClientBytes(int bytes)
+        {
+            if (bytes <= 0) return;
+            Interlocked.Add(ref _backendToClientBytes, bytes);
+            lock (_gate)
+            {
+                AppendRateSample(_backendToClientRateSamples, ref _backendToClientRateBytes, bytes, DateTimeOffset.UtcNow);
+            }
+        }
 
         public void RecordDisconnect(string type, string details)
         {
@@ -1148,17 +1169,16 @@ public static class TcpGatewayHostRunner
             {
                 var clientToBackendBytes = Interlocked.Read(ref _clientToBackendBytes);
                 var backendToClientBytes = Interlocked.Read(ref _backendToClientBytes);
-                var sampleDuration = now - _lastRateSampleAtUtc;
-                if (sampleDuration > TimeSpan.Zero)
-                {
-                    _currentClientToBackendMbps = ToMbps(clientToBackendBytes - _lastClientToBackendBytes, sampleDuration);
-                    _currentBackendToClientMbps = ToMbps(backendToClientBytes - _lastBackendToClientBytes, sampleDuration);
-                    _peakClientToBackendMbps = Math.Max(_peakClientToBackendMbps, _currentClientToBackendMbps);
-                    _peakBackendToClientMbps = Math.Max(_peakBackendToClientMbps, _currentBackendToClientMbps);
-                    _lastClientToBackendBytes = clientToBackendBytes;
-                    _lastBackendToClientBytes = backendToClientBytes;
-                    _lastRateSampleAtUtc = now;
-                }
+                _currentClientToBackendMbps = GetCurrentRateMbps(
+                    _clientToBackendRateSamples,
+                    ref _clientToBackendRateBytes,
+                    now);
+                _currentBackendToClientMbps = GetCurrentRateMbps(
+                    _backendToClientRateSamples,
+                    ref _backendToClientRateBytes,
+                    now);
+                _peakClientToBackendMbps = Math.Max(_peakClientToBackendMbps, _currentClientToBackendMbps);
+                _peakBackendToClientMbps = Math.Max(_peakBackendToClientMbps, _currentBackendToClientMbps);
 
                 var statisticsDuration = now - _statisticsStartedAtUtc;
                 var durationSeconds = Math.Max(statisticsDuration.TotalSeconds, 0.001);
@@ -1223,6 +1243,45 @@ public static class TcpGatewayHostRunner
 
         private static double ToMbps(long bytes, TimeSpan duration) =>
             duration <= TimeSpan.Zero ? 0 : bytes * 8d / duration.TotalSeconds / 1_000_000d;
+
+        private static void AppendRateSample(
+            Queue<BandwidthSample> samples,
+            ref long totalBytes,
+            int bytes,
+            DateTimeOffset timestamp)
+        {
+            samples.Enqueue(new BandwidthSample(timestamp, bytes));
+            totalBytes += bytes;
+            TrimRateSamples(samples, ref totalBytes, timestamp);
+        }
+
+        private static double GetCurrentRateMbps(
+            Queue<BandwidthSample> samples,
+            ref long totalBytes,
+            DateTimeOffset now)
+        {
+            TrimRateSamples(samples, ref totalBytes, now);
+            return ToMbps(totalBytes, RateWindow);
+        }
+
+        private static void TrimRateSamples(
+            Queue<BandwidthSample> samples,
+            ref long totalBytes,
+            DateTimeOffset now)
+        {
+            var cutoff = now - RateWindow;
+            while (samples.Count > 0 && samples.Peek().Timestamp < cutoff)
+            {
+                totalBytes -= samples.Dequeue().Bytes;
+            }
+
+            if (totalBytes < 0)
+            {
+                totalBytes = 0;
+            }
+        }
+
+        private readonly record struct BandwidthSample(DateTimeOffset Timestamp, int Bytes);
 
         private static TcpGatewayBackend CloneDefinition(TcpGatewayBackend source) => new()
         {
