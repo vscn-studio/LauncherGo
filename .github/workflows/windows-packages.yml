@@ -289,6 +289,12 @@ jobs:
             }
           }
 
+      - name: Verify embedded licenses and map ZIP contents
+        shell: pwsh
+        run: |
+          ./scripts/verify-embedded-licenses.ps1 -OutputRoot artifacts/publish/win-x64
+          ./scripts/verify-embedded-licenses.ps1 -OutputRoot artifacts/publish/portable
+
       - name: Prepare embedded mod artifacts
         shell: pwsh
         run: |

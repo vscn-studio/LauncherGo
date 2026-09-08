@@ -1,25 +1,39 @@
-ServerMap web interface third-party notices
+LauncherGo ServerMap web interface notices
 
-First-party web interface
-Copyright (C) 2026 HansJack, LauncherGo project owner (VSCN-Studio team).
-Licensed under the MIT License. See LICENSE.txt and the LauncherGo repository
-LICENSE file.
+LauncherGo code and modifications
+Author: VSCN-Studio
+Copyright (c) 2026 HansJack, LauncherGo project owner (VSCN-Studio team).
+LauncherGo-specific interface code and modifications are licensed under MIT;
+see LICENSE.txt. Third-party portions retain the copyrights listed below.
 
 Leaflet 1.9.4
-Copyright (c) 2010-2023, Volodymyr Agafonkin and Leaflet contributors.
-Licensed under the BSD 2-Clause License. The complete license text is in
-vendor/leaflet/LICENSE.txt.
+Source: https://github.com/Leaflet/Leaflet/tree/v1.9.4
+Copyright (c) 2010-2023, Volodymyr Agafonkin.
+Copyright (c) 2010-2011, CloudMade.
+BSD-2-Clause License; full text: vendor/leaflet/LICENSE.txt.
+Distributed files: vendor/leaflet/leaflet.js, leaflet.css and images/.
 
-WebCartographer route planner core
-Copyright (c) 2023 Th3Dilli.
-Licensed under the MIT License. The complete license text is in
-vendor/WebCartographer-LICENSE.txt.
-
-VS-LiveMap-Revival
+VS-LiveMap-Revival / VS-LiveMap
+Source: https://github.com/mja00/VS-LiveMap-Revival
+Referenced snapshot: old branch, 36cfe158f17b925305162f65fd97142c87c41962.
 Copyright (c) 2024 William Blake Galbreath.
-Licensed under the MIT License. ServerMap was informed by its map and layer
-design; no VS-LiveMap-Revival source is distributed in this web package. The
-complete license text is in vendor/VS-LiveMap-Revival-LICENSE.txt.
+MIT License; full text: vendor/VS-LiveMap-Revival-LICENSE.txt.
+assets/icons/center.svg, home.svg, house.svg, layers.svg, marker.svg, pick.svg,
+pin.svg, player.svg, spiral.svg and trader.svg are copied from web/src/svg/.
+The map controls and layer presentation also draw on that project's web UI.
+The separately distributed ServerMap mod adapts its rendering and colormap code.
 
-All third-party notices and license files must be retained when redistributing
-the ServerMap web interface.
+WebCartographer
+Source: https://gitlab.com/th3dilli_vintagestory/WebCartographer
+Referenced snapshot: 924537d6eff099404caa26d36a07a6d1cf08ba67.
+Copyright (c) 2023 Th3Dilli.
+MIT License; full text: vendor/WebCartographer-LICENSE.txt.
+vendor/webcartographer-route.js is adapted from WebCartographer/html/route.js.
+assets/sky.png is copied from WebCartographer/html/assets/sky.png.
+assets/icons/spawn.png is an unmodified copy of the server/spawn marker at
+WebCartographer/html/assets/icons/temporal_gear.png.
+The map uses its translocator route-planning approach with ServerMap-specific
+coordinate, elevation, display and interaction changes.
+
+Keep this notice, LICENSE.txt and all vendor license files when copying,
+customizing or redistributing this web directory.

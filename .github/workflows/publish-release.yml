@@ -406,6 +406,12 @@ jobs:
             }
           }
 
+      - name: Verify embedded licenses and map ZIP contents
+        shell: pwsh
+        run: |
+          ./scripts/verify-embedded-licenses.ps1 -OutputRoot artifacts/publish/win-x64
+          ./scripts/verify-embedded-licenses.ps1 -OutputRoot artifacts/publish/portable
+
       - name: Prepare embedded mod artifacts
         shell: pwsh
         run: |
@@ -433,8 +439,18 @@ jobs:
               Remove-Item -LiteralPath $zipPath -Force
             }
 
-            Compress-Archive -Path (Join-Path $modRoot "*") -DestinationPath $zipPath -CompressionLevel Optimal
+            if ($mod.Id -eq "servermap") {
+              $builtMapPackage = "LauncherGo.Services/EmbeddedMods/ServerMapMod/bin/$env:CONFIGURATION/servermap.zip"
+              if (!(Test-Path -LiteralPath $builtMapPackage)) {
+                throw "Missing built ServerMap package: $builtMapPackage"
+              }
+              Copy-Item -LiteralPath $builtMapPackage -Destination $zipPath
+            } else {
+              Compress-Archive -Path (Join-Path $modRoot "*") -DestinationPath $zipPath -CompressionLevel Optimal
+            }
           }
+
+          ./scripts/verify-embedded-licenses.ps1 -MapPackage artifacts/embedded-mods/servermap.zip
 
       - name: Prepare portable artifact
         shell: pwsh

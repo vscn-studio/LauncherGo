@@ -118,6 +118,13 @@
           SkipUnchangedFiles="true" />
   </Target>
 
+  <Target Name="BuildServerMapMod" BeforeTargets="Build" Condition="'$(DesignTimeBuild)' != 'true' and '$(BuildEmbeddedServerMapMod)' != 'false'">
+    <MSBuild Projects="$(MSBuildProjectDirectory)\..\LauncherGo.Services\EmbeddedMods\ServerMapMod\ServerMapMod.csproj"
+             Targets="Restore;Build"
+             RemoveProperties="RuntimeIdentifier;SelfContained;PublishSingleFile;PublishDir"
+             Properties="Configuration=$(Configuration);VINTAGE_STORY=$(VINTAGE_STORY)" />
+  </Target>
+
   <Target Name="CopyServerMapHostBuildOutput" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
     <PropertyGroup>
       <_ServerMapHostBuildDir>$(MSBuildProjectDirectory)\..\LauncherGo.ServerMapHost\bin\$(Configuration)\net10.0\</_ServerMapHostBuildDir>
@@ -137,11 +144,11 @@
     <Copy SourceFiles="@(_ServerMapWebFiles)"
           DestinationFolder="$(TargetDir)WebRoot\%(RecursiveDir)"
           SkipUnchangedFiles="true" />
+    <Delete Files="$(TargetDir)WebRoot\assets\icons\temporal-gear.png" />
     <MakeDir Directories="$(TargetDir)EmbeddedMods\servermap" />
-    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\LauncherGo.Services\bin\$(Configuration)\net10.0\EmbeddedMods\servermap\servermap.zip"
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\LauncherGo.Services\EmbeddedMods\ServerMapMod\bin\$(Configuration)\servermap.zip"
           DestinationFiles="$(TargetDir)EmbeddedMods\servermap\servermap.zip"
-          SkipUnchangedFiles="true"
-          Condition="Exists('$(MSBuildProjectDirectory)\..\LauncherGo.Services\bin\$(Configuration)\net10.0\EmbeddedMods\servermap\servermap.zip')" />
+          SkipUnchangedFiles="true" />
   </Target>
 
   <Target Name="PublishServerMapHost" AfterTargets="Publish" Condition="'$(RuntimeIdentifier)' != '' and Exists('$(PublishDir)')">
@@ -167,11 +174,11 @@
     <Copy SourceFiles="@(_ServerMapHostWebFiles)"
           DestinationFolder="$(PublishDir)WebRoot\%(RecursiveDir)"
           SkipUnchangedFiles="true" />
+    <Delete Files="$(PublishDir)WebRoot\assets\icons\temporal-gear.png" />
     <MakeDir Directories="$(PublishDir)EmbeddedMods\servermap" />
-    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\LauncherGo.Services\bin\$(Configuration)\net10.0\EmbeddedMods\servermap\servermap.zip"
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\LauncherGo.Services\EmbeddedMods\ServerMapMod\bin\$(Configuration)\servermap.zip"
           DestinationFiles="$(PublishDir)EmbeddedMods\servermap\servermap.zip"
-          SkipUnchangedFiles="true"
-          Condition="Exists('$(MSBuildProjectDirectory)\..\LauncherGo.Services\bin\$(Configuration)\net10.0\EmbeddedMods\servermap\servermap.zip')" />
+          SkipUnchangedFiles="true" />
   </Target>
 
   <Target Name="BuildServerBridgeMod"
@@ -201,7 +208,7 @@
     <Copy SourceFiles="$(_ServerBridgeBuildDir)serverbridge.dll"
           DestinationFiles="$(_ServerBridgeOutputDir)serverbridge.dll"
           SkipUnchangedFiles="true" />
-    <Copy SourceFiles="$(_ServerBridgeContentDir)modinfo.json;$(_ServerBridgeContentDir)README.txt"
+    <Copy SourceFiles="$(_ServerBridgeContentDir)modinfo.json;$(_ServerBridgeContentDir)README.txt;$(_ServerBridgeContentDir)LICENSE.txt"
           DestinationFolder="$(_ServerBridgeOutputDir)"
           SkipUnchangedFiles="true" />
   </Target>
@@ -219,7 +226,7 @@
     <Copy SourceFiles="$(_ServerBridgeBuildDir)serverbridge.dll"
           DestinationFiles="$(_ServerBridgePublishDir)serverbridge.dll"
           SkipUnchangedFiles="true" />
-    <Copy SourceFiles="$(_ServerBridgeContentDir)modinfo.json;$(_ServerBridgeContentDir)README.txt"
+    <Copy SourceFiles="$(_ServerBridgeContentDir)modinfo.json;$(_ServerBridgeContentDir)README.txt;$(_ServerBridgeContentDir)LICENSE.txt"
           DestinationFolder="$(_ServerBridgePublishDir)"
           SkipUnchangedFiles="true" />
   </Target>

@@ -64,12 +64,21 @@ public sealed class ServerMapService : IServerMapService
         cancellationToken.ThrowIfCancellationRequested();
         var source = Path.Combine(AppContext.BaseDirectory, "EmbeddedMods", "servermap", "servermap.zip");
         if (!File.Exists(source)) throw new FileNotFoundException("内置 ServerMap 模组包不存在。", source);
+        ValidateMapModPackage(source);
         var mods = WorkspacePathHelper.GetProfileModsPath(profile.DirectoryPath);
         Directory.CreateDirectory(mods);
         var target = Path.Combine(mods, "servermap.zip");
         await using var input = File.OpenRead(source);
         await using var output = File.Create(target);
         await input.CopyToAsync(output, cancellationToken);
+    }
+
+    internal static void ValidateMapModPackage(string path)
+    {
+        using var archive = ZipFile.OpenRead(path);
+        foreach (var name in new[] { "LICENSE.txt", "THIRD_PARTY_NOTICES.txt", "VS-LiveMap-Revival-LICENSE.txt" })
+            if (archive.GetEntry(name) is not { Length: > 0 })
+                throw new InvalidDataException($"内置 ServerMap 模组包缺少版权文件 {name}，请重新构建或更新 LauncherGo。");
     }
 
     public async Task<int> UpdateWebRootAsync(InstanceProfile profile, ServerMapSettings settings, CancellationToken cancellationToken = default)

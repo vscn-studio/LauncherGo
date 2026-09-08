@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using LauncherGo.Domains.Models;
 using LauncherGo.Services;
 using Xunit;
@@ -99,6 +100,49 @@ public sealed class ServerMapServiceTests : IDisposable
         cancel.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ServerMapService.CopyWebRootAsync(Source, Target, cancel.Token));
         Assert.Empty(Directory.EnumerateFileSystemEntries(Target));
+    }
+
+    [Fact]
+    public void ValidateMapModPackage_AcceptsCompleteLicenses()
+    {
+        ServerMapService.ValidateMapModPackage(CreateModPackage());
+    }
+
+    [Theory]
+    [InlineData("LICENSE.txt", false)]
+    [InlineData("THIRD_PARTY_NOTICES.txt", false)]
+    [InlineData("VS-LiveMap-Revival-LICENSE.txt", false)]
+    [InlineData("LICENSE.txt", true)]
+    [InlineData("THIRD_PARTY_NOTICES.txt", true)]
+    [InlineData("VS-LiveMap-Revival-LICENSE.txt", true)]
+    public void ValidateMapModPackage_RejectsMissingOrEmptyLicense(string name, bool empty)
+    {
+        var package = CreateModPackage(name, empty);
+        var error = Assert.Throws<InvalidDataException>(() => ServerMapService.ValidateMapModPackage(package));
+        Assert.Contains(name, error.Message);
+    }
+
+    [Fact]
+    public void ValidateMapModPackage_RejectsInvalidArchive()
+    {
+        var package = Path.Combine(root, "invalid.zip");
+        File.WriteAllText(package, "not a ZIP archive");
+        Assert.Throws<InvalidDataException>(() => ServerMapService.ValidateMapModPackage(package));
+    }
+
+    private string CreateModPackage(string? excluded = null, bool empty = false)
+    {
+        var path = Path.Combine(root, "servermap.zip");
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+        foreach (var name in new[] { "LICENSE.txt", "THIRD_PARTY_NOTICES.txt", "VS-LiveMap-Revival-LICENSE.txt" })
+        {
+            if (name == excluded && !empty) continue;
+            var entry = archive.CreateEntry(name);
+            if (name == excluded) continue;
+            using var writer = new StreamWriter(entry.Open());
+            writer.Write("license text");
+        }
+        return path;
     }
 
     public void Dispose() => Directory.Delete(root, true);

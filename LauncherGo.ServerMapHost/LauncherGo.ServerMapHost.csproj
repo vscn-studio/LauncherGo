@@ -10,4 +10,8 @@
     <ProjectReference Include="..\LauncherGo.Domains\LauncherGo.Domains.csproj" />
     <Content Include="WebRoot\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
+  <Target Name="RemoveRetiredWebAssets" AfterTargets="Build;Publish" Condition="'$(DesignTimeBuild)' != 'true'">
+    <Delete Files="$(TargetDir)WebRoot\assets\icons\temporal-gear.png" Condition="'$(TargetDir)' != ''" />
+    <Delete Files="$(PublishDir)WebRoot\assets\icons\temporal-gear.png" Condition="'$(PublishDir)' != ''" />
+  </Target>
 </Project>

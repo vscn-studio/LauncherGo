@@ -1,3 +1,5 @@
+// Rendering/shadow portions adapted from VS-LiveMap-Revival (MIT).
+// Copyright (c) 2024 William Blake Galbreath. See VS-LiveMap-Revival-LICENSE.txt.
 using ServerMap.World;
 using ServerMap.Util;
 using Vintagestory.API.Common;

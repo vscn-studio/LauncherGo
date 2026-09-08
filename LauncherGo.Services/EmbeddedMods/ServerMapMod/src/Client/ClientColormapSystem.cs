@@ -1,3 +1,5 @@
+// Colormap sampling portions adapted from VS-LiveMap-Revival (MIT).
+// Copyright (c) 2024 William Blake Galbreath. See VS-LiveMap-Revival-LICENSE.txt.
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;

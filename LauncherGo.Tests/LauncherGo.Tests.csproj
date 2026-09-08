@@ -22,4 +22,13 @@
     <ProjectReference Include="..\LauncherGo.Ui\LauncherGo.Ui.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\LICENSE" Link="LicenseFixtures\LauncherGo.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\LICENSE.txt" Link="LicenseFixtures\MapMod.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\LauncherGo.ServerMapHost\WebRoot\LICENSE.txt" Link="LicenseFixtures\MapWeb.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\VS-LiveMap-Revival-LICENSE.txt" Link="LicenseFixtures\LiveMapMod.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\LauncherGo.ServerMapHost\WebRoot\vendor\VS-LiveMap-Revival-LICENSE.txt" Link="LicenseFixtures\LiveMapWeb.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\LauncherGo.ServerMapHost\WebRoot\assets\icons\spawn.png" Link="LicenseFixtures\spawn.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

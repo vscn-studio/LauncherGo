@@ -1,4 +1,6 @@
 /*
+ * Adapted from WebCartographer/html/route.js.
+ * Copyright (c) 2023 Th3Dilli. MIT; see WebCartographer-LICENSE.txt.
  * Translocator route-planner core logic.
  *
  * Pure, dependency-free routing math shared by the browser map

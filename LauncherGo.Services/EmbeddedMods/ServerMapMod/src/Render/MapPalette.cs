@@ -1,3 +1,5 @@
+// Block/color selection adapted from VS-LiveMap-Revival (MIT).
+// Copyright (c) 2024 William Blake Galbreath. See VS-LiveMap-Revival-LICENSE.txt.
 using System.Text.Json;
 using System.Security.Cryptography;
 using System.Text;

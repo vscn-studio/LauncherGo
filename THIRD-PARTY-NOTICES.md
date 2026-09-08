@@ -5,7 +5,7 @@ license texts are shipped in `THIRD-PARTY-LICENSES/`; this file provides the
 package mapping and release checks. When making a release, keep this file,
 `NOTICE`, `LICENSE`, and `THIRD-PARTY-LICENSES/` in the distributed package.
 
-Audit date: 2026-09-05
+Runtime dependency audit: 2026-09-05. Embedded mod and map web notices updated: 2026-09-08.
 
 ## LauncherGo License
 
@@ -105,26 +105,40 @@ LauncherGo components:
 Each standalone embedded mod ZIP should include `LICENSE.txt` copied from the
 repository `LICENSE` file.
 
+The ServerMap mod additionally includes `THIRD_PARTY_NOTICES.txt` and the
+unmodified `VS-LiveMap-Revival-LICENSE.txt`. Its shadow rendering, block/color
+selection and client colormap code adapt VS-LiveMap-Revival at
+https://github.com/mja00/VS-LiveMap-Revival, `old` branch snapshot
+`36cfe158f17b925305162f65fd97142c87c41962` (MIT, Copyright (c) 2024 William Blake
+Galbreath). LauncherGo's copyright covers its own code and modifications,
+not exclusive ownership of these third-party portions.
+
 The embedded mods list `VSCN-Studio` as their author. Copyright in these
 first-party mods belongs to HansJack, the LauncherGo project owner, who is a
 member of the VSCN-Studio team. The project distributes them under MIT.
 
 ## ServerMap Web Assets
 
-The ServerMap web interface is first-party LauncherGo content. Copyright (C)
-2026 HansJack, LauncherGo project owner (VSCN-Studio team), licensed under MIT.
+LauncherGo-specific ServerMap web interface code and modifications are
+Copyright (c) 2026 HansJack, LauncherGo project owner (VSCN-Studio team), MIT.
 The web package includes the following third-party components and retains their
 copyright and complete license text beside the files they cover:
 
 | Component | Version | Copyright | License text |
 | --- | --- | --- | --- |
-| Leaflet | 1.9.4 | Copyright (c) 2010-2023, Volodymyr Agafonkin and Leaflet contributors | `WebRoot/vendor/leaflet/LICENSE.txt` (BSD-2-Clause) |
-| WebCartographer route planner core | 2023 | Copyright (c) 2023 Th3Dilli | `WebRoot/vendor/WebCartographer-LICENSE.txt` (MIT) |
-| VS-LiveMap-Revival (design reference) | 2024 | Copyright (c) 2024 William Blake Galbreath | `WebRoot/vendor/VS-LiveMap-Revival-LICENSE.txt` (MIT) |
+| Leaflet | 1.9.4 | Copyright (c) 2010-2023, Volodymyr Agafonkin; (c) 2010-2011, CloudMade | `WebRoot/vendor/leaflet/LICENSE.txt` (BSD-2-Clause) |
+| WebCartographer route planner, sky image and spawn icon | `924537d6eff099404caa26d36a07a6d1cf08ba67` | Copyright (c) 2023 Th3Dilli | `WebRoot/vendor/WebCartographer-LICENSE.txt` (MIT) |
+| VS-LiveMap-Revival icons and UI reference | `36cfe158f17b925305162f65fd97142c87c41962` | Copyright (c) 2024 William Blake Galbreath | `WebRoot/vendor/VS-LiveMap-Revival-LICENSE.txt` (MIT) |
 
-ServerMap was informed by VS-LiveMap-Revival (Copyright (c) 2024 William Blake
-Galbreath, MIT), but no VS-LiveMap-Revival source is distributed in the web
-package. The complete notice is also included in `WebRoot/THIRD_PARTY_NOTICES.txt`.
+The web package contains ten SVG icons copied from VS-LiveMap-Revival and a
+sky image and spawn icon copied from WebCartographer. `WebRoot/THIRD_PARTY_NOTICES.txt` lists
+the exact files, upstream URLs and referenced snapshots. Its `LICENSE.txt`
+contains the complete LauncherGo MIT license, so custom WebRoot deployments
+retain the license even when copied separately from the application.
+
+`WebRoot/assets/icons/spawn.png` is an unmodified copy of WebCartographer's
+`WebCartographer/html/assets/icons/temporal_gear.png`. The previous user-supplied
+image has been removed from the web distribution.
 
 ## Release Audit Notes
 

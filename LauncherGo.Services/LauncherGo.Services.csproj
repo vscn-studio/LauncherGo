@@ -66,8 +66,10 @@
              Properties="Configuration=$(Configuration);VINTAGE_STORY=$(VINTAGE_STORY);NoRestore=true" />
   </Target>
 
-  <Target Name="BuildEmbeddedServerMapMod" BeforeTargets="BeforeBuild" Condition="'$(BuildEmbeddedServerMapMod)' == 'true'">
-    <MSBuild Projects="$(EmbeddedServerMapModProject)" Targets="Build" Properties="Configuration=$(Configuration);VINTAGE_STORY=$(VINTAGE_STORY);NoRestore=true" />
+  <Target Name="BuildEmbeddedServerMapMod" BeforeTargets="BeforeBuild" Condition="'$(BuildEmbeddedServerMapMod)' == 'true' and '$(DesignTimeBuild)' != 'true'">
+    <MSBuild Projects="$(EmbeddedServerMapModProject)" Targets="Restore;Build"
+             RemoveProperties="RuntimeIdentifier;SelfContained;PublishSingleFile;PublishDir"
+             Properties="Configuration=$(Configuration);VINTAGE_STORY=$(VINTAGE_STORY)" />
   </Target>
 
   <Target Name="CopyBuiltEmbeddedServerMapModToOutput" AfterTargets="Build" Condition="'$(BuildEmbeddedServerMapMod)' == 'true' and Exists('$(EmbeddedServerMapModBuildOutput)servermap.zip')">
@@ -102,7 +104,7 @@
     <Copy SourceFiles="$(EmbeddedAuthModBuildOutput)serverauth.dll"
           DestinationFiles="$(_EmbeddedAuthOutputDir)serverauth.dll"
           SkipUnchangedFiles="true" />
-    <Copy SourceFiles="$(EmbeddedAuthRoot)modinfo.json;$(EmbeddedAuthRoot)README.txt"
+    <Copy SourceFiles="$(EmbeddedAuthRoot)modinfo.json;$(EmbeddedAuthRoot)README.txt;$(EmbeddedAuthRoot)LICENSE.txt"
           DestinationFolder="$(_EmbeddedAuthOutputDir)"
           SkipUnchangedFiles="true" />
   </Target>
@@ -115,7 +117,7 @@
     <Copy SourceFiles="$(EmbeddedRedirectModBuildOutput)launchergoredirect.dll"
           DestinationFiles="$(_EmbeddedRedirectOutputDir)launchergoredirect.dll"
           SkipUnchangedFiles="true" />
-    <Copy SourceFiles="$(EmbeddedRedirectRoot)modinfo.json;$(EmbeddedRedirectRoot)README.txt"
+    <Copy SourceFiles="$(EmbeddedRedirectRoot)modinfo.json;$(EmbeddedRedirectRoot)README.txt;$(EmbeddedRedirectRoot)LICENSE.txt"
           DestinationFolder="$(_EmbeddedRedirectOutputDir)"
           SkipUnchangedFiles="true" />
   </Target>
@@ -129,7 +131,7 @@
     <Copy SourceFiles="$(EmbeddedServerBridgeModBuildOutput)serverbridge.dll"
           DestinationFiles="$(_EmbeddedServerBridgeOutputDir)serverbridge.dll"
           SkipUnchangedFiles="true" />
-    <Copy SourceFiles="$(EmbeddedServerBridgeRoot)modinfo.json;$(EmbeddedServerBridgeRoot)README.txt"
+    <Copy SourceFiles="$(EmbeddedServerBridgeRoot)modinfo.json;$(EmbeddedServerBridgeRoot)README.txt;$(EmbeddedServerBridgeRoot)LICENSE.txt"
           DestinationFolder="$(_EmbeddedServerBridgeOutputDir)"
           SkipUnchangedFiles="true" />
   </Target>
