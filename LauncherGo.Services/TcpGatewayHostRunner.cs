@@ -22,6 +22,7 @@ public static class TcpGatewayHostRunner
 
     public static async Task<int> RunAsync(string[] args)
     {
+        using var runtimeLease = ServerHostRuntimeStager.AcquireCurrentLease();
         GatewayHostOptions? options = null;
         try
         {

@@ -71,6 +71,9 @@ public partial class LauncherMainWindow : Window
 
     private static readonly (string Zh, string En)[] StaticUiTranslations =
     [
+        ("自定义 WebRoot", "Custom WebRoot"),
+        ("默认内置网页", "Built-in web pages"),
+        ("手动更新", "Update web files"),
         ("服务器", "Server"),
         ("管理", "Manage"),
         ("连接", "Connections"),
@@ -411,6 +414,7 @@ public partial class LauncherMainWindow : Window
     private bool _isRefreshingAuth;
     private bool _isRefreshingServerBridge;
     private bool _isRefreshingServerMap;
+    private bool _isUpdatingServerMapWeb;
     private string _editingServerMapProfileId = string.Empty;
     private bool _toastPointerOver;
     private string _editingConfigProfileId = string.Empty;
@@ -1555,7 +1559,6 @@ public partial class LauncherMainWindow : Window
         }
 
         UpdateCardValues(status);
-        UpdateMultiServerDashboard(statuses);
         RefreshConsoleServerItems(statuses);
         ApplyStaticUiTranslations();
         if (AutomationEditorPanel.IsVisible)
@@ -8925,6 +8928,8 @@ public partial class LauncherMainWindow : Window
         ServerMapListenPortNumericUpDown.Value = settings.ListenPort;
         ServerMapCertificateTextBox.Text = settings.CertificatePath;
         ServerMapPrivateKeyTextBox.Text = settings.PrivateKeyPath;
+        ServerMapWebRootTextBox.Text = settings.WebRoot;
+        ToolTip.SetTip(ServerMapWebRootUpdateButton, T("覆盖目标目录中的内置网页同名文件，保留其他文件。", "Replace bundled web files in the destination; keep other files."));
         var status = _serverMapService.GetStatus(profile);
         ServerMapStatusTextBlock.Text = status.IsRunning ? $"运行中：{status.Url}" : "未启动";
         ServerMapToggleButton.Content = status.IsRunning ? "停止地图" : "启动地图";
@@ -8932,24 +8937,94 @@ public partial class LauncherMainWindow : Window
 
     private async void OnServerMapSaveClick(object? sender, RoutedEventArgs e)
     {
+        if (_isUpdatingServerMapWeb) return;
         if (ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile) { SetServerMapStatus("请先选择档案。"); return; }
-        var current = await _serverMapService.LoadSettingsAsync(profile);
-        var settings = new ServerMapSettings
+        try
         {
-            Enabled = ServerMapEnabledCheckBox.IsChecked == true,
-            UseHttps = ServerMapHttpsCheckBox.IsChecked == true,
-            ListenPort = (int?)ServerMapListenPortNumericUpDown.Value ?? current.ListenPort,
-            CertificatePath = ServerMapCertificateTextBox.Text ?? string.Empty,
-            PrivateKeyPath = ServerMapPrivateKeyTextBox.Text ?? string.Empty,
+            var settings = await CollectServerMapSettingsAsync(profile);
+            var running = _serverMapService.GetStatus(profile).IsRunning;
+            await _serverMapService.SaveSettingsAsync(profile, settings);
+            await LoadServerMapForProfileAsync(profile);
+            SetServerMapStatus(running
+                ? T("配置已保存，重启地图后生效。", "Settings saved. Restart the map to apply them.")
+                : T("服务器地图配置已保存。", "Server map settings saved."));
+        }
+        catch (Exception ex) { SetServerMapStatus(T($"保存失败：{ex.Message}", $"Save failed: {ex.Message}")); }
+    }
+
+    private async Task<ServerMapSettings> CollectServerMapSettingsAsync(InstanceProfile profile)
+    {
+        var enabled = ServerMapEnabledCheckBox.IsChecked == true;
+        var https = ServerMapHttpsCheckBox.IsChecked == true;
+        var port = (int?)ServerMapListenPortNumericUpDown.Value;
+        var certificate = ServerMapCertificateTextBox.Text ?? string.Empty;
+        var privateKey = ServerMapPrivateKeyTextBox.Text ?? string.Empty;
+        var webRoot = ServerMapWebRootTextBox.Text?.Trim() ?? string.Empty;
+        var current = await _serverMapService.LoadSettingsAsync(profile);
+        return new ServerMapSettings
+        {
+            Enabled = enabled,
+            UseHttps = https,
+            ListenPort = port ?? current.ListenPort,
+            CertificatePath = certificate,
+            PrivateKeyPath = privateKey,
             ListenAddress = current.ListenAddress,
             BackendPort = current.BackendPort,
             BackendToken = current.BackendToken,
-            WebRoot = current.WebRoot,
+            WebRoot = webRoot,
             PublicUrl = current.PublicUrl
         };
-        await _serverMapService.SaveSettingsAsync(profile, settings);
-        await LoadServerMapForProfileAsync(profile);
-        SetServerMapStatus("服务器地图配置已保存。");
+    }
+
+    private void OnServerMapWebRootChanged(object? sender, TextChangedEventArgs e)
+    {
+        if (ServerMapWebRootUpdateButton is not null)
+            ServerMapWebRootUpdateButton.IsEnabled = !_isUpdatingServerMapWeb && !string.IsNullOrWhiteSpace(ServerMapWebRootTextBox.Text);
+    }
+
+    private async void OnServerMapWebRootBrowseClick(object? sender, RoutedEventArgs e)
+    {
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = T("选择地图网页目录", "Select map web directory"), AllowMultiple = false
+        });
+        var path = TryGetLocalPath(folders.FirstOrDefault());
+        if (!string.IsNullOrWhiteSpace(path)) ServerMapWebRootTextBox.Text = path;
+    }
+
+    private async void OnServerMapWebRootUpdateClick(object? sender, RoutedEventArgs e)
+    {
+        if (_isUpdatingServerMapWeb || ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile) return;
+        _isUpdatingServerMapWeb = true;
+        ServerMapEditorPanel.IsEnabled = false;
+        ServerMapSaveButton.IsEnabled = false;
+        ServerMapToggleButton.IsEnabled = false;
+        ServerMapRefreshButton.IsEnabled = false;
+        ServerMapBackButton.IsEnabled = false;
+        try
+        {
+            var settings = await CollectServerMapSettingsAsync(profile);
+            var running = _serverMapService.GetStatus(profile).IsRunning;
+            SetServerMapStatus(T("正在更新地图网页…", "Updating map web files..."));
+            var count = await _serverMapService.UpdateWebRootAsync(profile, settings);
+            if (_editingServerMapProfileId == profile.Id)
+            {
+                await LoadServerMapForProfileAsync(profile);
+                SetServerMapStatus(T($"已更新 {count} 个网页文件并保存配置。", $"Updated {count} web files and saved settings.") +
+                    (running ? T(" 同目录更新后刷新网页即可；更改目录需要重启地图。", " Refresh the page for the same directory; restart the map if the directory changed.") : string.Empty));
+            }
+        }
+        catch (Exception ex) { SetServerMapStatus(T($"网页更新失败：{ex.Message}", $"Web update failed: {ex.Message}")); }
+        finally
+        {
+            _isUpdatingServerMapWeb = false;
+            ServerMapEditorPanel.IsEnabled = true;
+            ServerMapSaveButton.IsEnabled = true;
+            ServerMapToggleButton.IsEnabled = true;
+            ServerMapRefreshButton.IsEnabled = true;
+            ServerMapBackButton.IsEnabled = true;
+            ServerMapWebRootUpdateButton.IsEnabled = !string.IsNullOrWhiteSpace(ServerMapWebRootTextBox.Text);
+        }
     }
 
     private async void OnServerMapDeployClick(object? sender, RoutedEventArgs e)

@@ -18,7 +18,8 @@ public sealed class ServerHostRuntimeStagerTests
             Directory.CreateDirectory(sourceDirectory);
             File.WriteAllText(sourcePath, "single-file-host");
 
-            var stagedPath = ServerHostRuntimeStager.Prepare(sourcePath, runtimeRoot);
+            using var prepared = ServerHostRuntimeStager.Prepare(sourcePath, runtimeRoot);
+            var stagedPath = prepared.ExecutablePath;
 
             Assert.True(File.Exists(stagedPath));
             Assert.NotEqual(Path.GetFullPath(sourcePath), Path.GetFullPath(stagedPath));
@@ -29,7 +30,8 @@ public sealed class ServerHostRuntimeStagerTests
             Assert.Equal("single-file-host", File.ReadAllText(stagedPath));
 
             File.Delete(stagedPath);
-            var rebuiltPath = ServerHostRuntimeStager.Prepare(sourcePath, runtimeRoot);
+            using var rebuilt = ServerHostRuntimeStager.Prepare(sourcePath, runtimeRoot);
+            var rebuiltPath = rebuilt.ExecutablePath;
             Assert.True(File.Exists(rebuiltPath));
             Assert.Equal("single-file-host", File.ReadAllText(rebuiltPath));
         }
@@ -55,11 +57,13 @@ public sealed class ServerHostRuntimeStagerTests
             File.WriteAllText(sourcePath, "single-file-host");
             File.WriteAllText(dependencyPath, "runtime-config");
 
-            var stagedPath = ServerHostRuntimeStager.Prepare(sourcePath, runtimeRoot);
+            using var prepared = ServerHostRuntimeStager.Prepare(sourcePath, runtimeRoot);
+            var stagedPath = prepared.ExecutablePath;
             var stagedDependency = Path.Combine(Path.GetDirectoryName(stagedPath)!, Path.GetFileName(dependencyPath));
             File.Delete(stagedDependency);
 
-            var rebuiltPath = ServerHostRuntimeStager.Prepare(sourcePath, runtimeRoot);
+            using var rebuilt = ServerHostRuntimeStager.Prepare(sourcePath, runtimeRoot);
+            var rebuiltPath = rebuilt.ExecutablePath;
 
             Assert.True(File.Exists(rebuiltPath));
             Assert.True(File.Exists(Path.Combine(Path.GetDirectoryName(rebuiltPath)!, Path.GetFileName(dependencyPath))));
@@ -92,7 +96,8 @@ public sealed class ServerHostRuntimeStagerTests
 
         try
         {
-            var stagedPath = ServerHostRuntimeStager.Prepare(sourcePath, runtimeRoot);
+            using var prepared = ServerHostRuntimeStager.Prepare(sourcePath, runtimeRoot);
+            var stagedPath = prepared.ExecutablePath;
             using var process = Process.Start(new ProcessStartInfo
             {
                 FileName = stagedPath,
@@ -127,7 +132,7 @@ public sealed class ServerHostRuntimeStagerTests
     }
 
     [Fact]
-    public void Cleanup_RemovesOldCompletedCopiesAndKeepsRecentCopy()
+    public async Task Cleanup_RemovesOldCompletedCopiesAndKeepsRecentCopy()
     {
         var runtimeRoot = Path.Combine(Path.GetTempPath(), $"launchergo-host-cleanup-{Guid.NewGuid():N}");
         try
@@ -138,12 +143,12 @@ public sealed class ServerHostRuntimeStagerTests
                 var directory = Path.Combine(runtimeRoot, $"version-{index}");
                 Directory.CreateDirectory(directory);
                 File.WriteAllText(Path.Combine(directory, ".complete"), index.ToString());
-                Directory.SetLastWriteTimeUtc(directory, DateTime.UtcNow.AddMinutes(-index));
+                File.SetLastWriteTimeUtc(Path.Combine(directory, ".complete"), DateTime.UtcNow.AddMinutes(-index * 10));
             }
 
-            var removed = ServerHostRuntimeStager.Cleanup(runtimeRoot, retainCount: 1);
+            var result = await CacheMaintenance.CleanAsync(runtimeRoot, CacheKind.Host, default);
 
-            Assert.Equal(2, removed);
+            Assert.Equal(CacheCleanupResult.RetryLater, result);
             Assert.True(Directory.Exists(Path.Combine(runtimeRoot, "version-0")));
             Assert.False(Directory.Exists(Path.Combine(runtimeRoot, "version-1")));
             Assert.False(Directory.Exists(Path.Combine(runtimeRoot, "version-2")));
@@ -156,7 +161,7 @@ public sealed class ServerHostRuntimeStagerTests
     }
 
     [Fact]
-    public void Cleanup_DoesNotDeleteHostDuringStartupGracePeriod()
+    public async Task Cleanup_DoesNotDeleteHostDuringStartupGracePeriod()
     {
         var runtimeRoot = Path.Combine(Path.GetTempPath(), $"launchergo-host-cleanup-{Guid.NewGuid():N}");
         var directory = Path.Combine(runtimeRoot, "newly-staged");
@@ -165,9 +170,9 @@ public sealed class ServerHostRuntimeStagerTests
             Directory.CreateDirectory(directory);
             File.WriteAllText(Path.Combine(directory, ".complete"), "newly-staged");
 
-            var removed = ServerHostRuntimeStager.Cleanup(runtimeRoot, retainCount: 0);
+            var result = await CacheMaintenance.CleanAsync(runtimeRoot, CacheKind.Host, default);
 
-            Assert.Equal(0, removed);
+            Assert.Equal(CacheCleanupResult.RetryLater, result);
             Assert.True(Directory.Exists(directory));
         }
         finally

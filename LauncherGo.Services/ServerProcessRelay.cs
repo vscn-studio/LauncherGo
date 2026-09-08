@@ -24,6 +24,7 @@ public static class ServerProcessRelay
 
     public static async Task<int> RunAsync(string[] args, CancellationToken cancellationToken = default)
     {
+        using var runtimeLease = ServerHostRuntimeStager.AcquireCurrentLease();
         var options = RelayOptions.Parse(args);
         using var instanceSemaphore = new Semaphore(1, 1, $"Local\\{options.PipeName}");
         var ownsInstanceSemaphore = false;

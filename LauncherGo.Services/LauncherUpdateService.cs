@@ -15,7 +15,6 @@ namespace LauncherGo.Services;
 public sealed class LauncherUpdateService : ILauncherUpdateService
 {
     private const string Repository = "vscn-studio/LauncherGo";
-    private const int RetainedUpdateDirectories = 0;
     private static readonly HttpClient HttpClient = CreateHttpClient();
     private static readonly HttpRangeFileDownloader FileDownloader = new(HttpClient);
     private readonly ILauncherPreferencesService _preferencesService;
@@ -23,7 +22,7 @@ public sealed class LauncherUpdateService : ILauncherUpdateService
     public LauncherUpdateService(ILauncherPreferencesService preferencesService)
     {
         _preferencesService = preferencesService;
-        CleanupUpdateCache();
+        CacheMaintenance.Request(Path.Combine(LauncherPathHelper.AppRoot, "updates"), CacheKind.Update);
     }
 
     public string CurrentVersion => ReadCurrentVersion();
@@ -117,9 +116,15 @@ public sealed class LauncherUpdateService : ILauncherUpdateService
 
         var asset = update.SelectedAsset ?? throw new InvalidOperationException(
             $"未找到适用于当前安装方式（{update.PackageKind}）的更新文件。");
-        var updateRoot = Path.Combine(LauncherPathHelper.AppRoot, "updates", update.LatestVersion);
-        CleanupUpdateCache();
-        Directory.CreateDirectory(updateRoot);
+        var cacheRoot = Path.Combine(LauncherPathHelper.AppRoot, "updates");
+        var updateRoot = Path.Combine(cacheRoot, WorkspacePathHelper.SanitizeFileName(update.LatestVersion) + "-" + Guid.NewGuid().ToString("N"));
+        using var updateLease = await Task.Run(() =>
+        {
+            using var gate = CacheDirectoryLease.EnterRoot(cacheRoot, wait: true, cancellationToken);
+            Directory.CreateDirectory(updateRoot);
+            return CacheDirectoryLease.Acquire(updateRoot);
+        }, cancellationToken).ConfigureAwait(false);
+        CacheMaintenance.Request(cacheRoot, CacheKind.Update);
         var fileName = Path.GetFileName(asset.Name);
         if (string.IsNullOrWhiteSpace(fileName))
             throw new InvalidDataException("更新文件名无效。");
@@ -150,8 +155,23 @@ public sealed class LauncherUpdateService : ILauncherUpdateService
             WindowStyle = ProcessWindowStyle.Hidden,
             Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\" -ParentProcessId {Environment.ProcessId} -Asset \"{assetPath}\" -Kind \"{update.PackageKind}\" -InstallDir \"{AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar)}\" -Executable \"{processPath}\""
         };
-        if (Process.Start(startInfo) is null)
-            throw new InvalidOperationException("无法启动更新程序。");
+        using var updater = Process.Start(startInfo) ?? throw new InvalidOperationException("无法启动更新程序。");
+        // Keep our lease until the updater has acquired its own, before the UI exits.
+        try
+        {
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
+            while (!File.Exists(Path.Combine(updateRoot, ".updater-ready")))
+            {
+                if (updater.HasExited || DateTimeOffset.UtcNow >= deadline)
+                    throw new InvalidOperationException("更新程序未能接管更新包，请重试。");
+                await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch
+        {
+            if (!updater.HasExited) updater.Kill(entireProcessTree: true);
+            throw;
+        }
 
     }
 
@@ -202,31 +222,6 @@ public sealed class LauncherUpdateService : ILauncherUpdateService
             _ => string.Empty
         };
         return prefix + url;
-    }
-
-    internal static int CleanupUpdateCache(string? updateRoot = null, int retainCount = RetainedUpdateDirectories)
-    {
-        updateRoot ??= Path.Combine(LauncherPathHelper.AppRoot, "updates");
-        if (!Directory.Exists(updateRoot))
-            return 0;
-
-        var directories = Directory.EnumerateDirectories(updateRoot)
-            .Select(static path => new DirectoryInfo(path))
-            .OrderByDescending(static directory => directory.LastWriteTimeUtc)
-            .ToList();
-        var removed = 0;
-        foreach (var directory in directories.Skip(Math.Max(0, retainCount)))
-        {
-            try
-            {
-                directory.Delete(recursive: true);
-                removed++;
-            }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
-        }
-
-        return removed;
     }
 
     private static string RemoveProxyPrefix(string body, GitHubProxyKind proxy)
@@ -327,26 +322,30 @@ public sealed class LauncherUpdateService : ILauncherUpdateService
         return 0;
     }
 
-    private static string BuildUpdateScript() => """
+    internal static string BuildUpdateScript() => """
 param([int]$ParentProcessId, [string]$Asset, [string]$Kind, [string]$InstallDir, [string]$Executable)
+$ErrorActionPreference = 'Stop'
+$updateLease = $null
 try {
+  $updateLease = [System.IO.File]::Open((Join-Path $PSScriptRoot '.use-lock'), [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+  [System.IO.File]::WriteAllText((Join-Path $PSScriptRoot '.updater-ready'), 'ready')
   Wait-Process -Id $ParentProcessId -Timeout 60 -ErrorAction SilentlyContinue
+  if (Get-Process -Id $ParentProcessId -ErrorAction SilentlyContinue) { throw 'LauncherGo did not exit; update cancelled.' }
   Start-Sleep -Milliseconds 500
   if ($Kind -eq 'Installer' -or $Kind -eq 'SmallInstaller') {
     Start-Process -FilePath $Asset -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
   } else {
-    $stage = Join-Path ([System.IO.Path]::GetTempPath()) ('LauncherGo-update-' + [guid]::NewGuid().ToString('N'))
+    $stage = Join-Path $PSScriptRoot 'stage'
     Expand-Archive -LiteralPath $Asset -DestinationPath $stage -Force
     Copy-Item -Path (Join-Path $stage '*') -Destination $InstallDir -Recurse -Force
-    Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
   }
   Remove-Item -LiteralPath $Asset -Force -ErrorAction SilentlyContinue
   Start-Process -FilePath $Executable
-  $cleanupRoot = $PSScriptRoot.Replace("'", "''")
-  Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @('-NoProfile', '-Command', "Start-Sleep -Seconds 2; Remove-Item -LiteralPath '$cleanupRoot' -Recurse -Force -ErrorAction SilentlyContinue")
 } catch {
   Add-Content -LiteralPath (Join-Path $PSScriptRoot 'update-error.log') -Value $_
-  Start-Process -FilePath $Executable
+  if (-not (Get-Process -Id $ParentProcessId -ErrorAction SilentlyContinue)) { Start-Process -FilePath $Executable }
+} finally {
+  if ($null -ne $updateLease) { $updateLease.Dispose() }
 }
 """;
 

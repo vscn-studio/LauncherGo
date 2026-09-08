@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -8,31 +7,28 @@ namespace LauncherGo.Services;
 internal static class ServerHostRuntimeStager
 {
     private const string CompletionMarkerName = ".complete";
-    private const int DefaultRetainedVersions = 0;
-    private static readonly TimeSpan StartupGracePeriod = TimeSpan.FromSeconds(30);
-    private static readonly object Gate = new();
-
-    public static string Prepare(string sourceExecutablePath, string? runtimeRoot = null)
+    public static PreparedHost Prepare(string sourceExecutablePath, string? runtimeRoot = null,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(sourceExecutablePath) || !File.Exists(sourceExecutablePath))
-            return sourceExecutablePath;
+            return new PreparedHost(sourceExecutablePath, null);
 
         var sourceDirectory = Path.GetDirectoryName(sourceExecutablePath);
         if (string.IsNullOrWhiteSpace(sourceDirectory))
-            return sourceExecutablePath;
+            return new PreparedHost(sourceExecutablePath, null);
 
-        lock (Gate)
+        runtimeRoot ??= WorkspacePathHelper.ServerHostRuntimeRoot;
+        var files = ResolveRuntimeFiles(sourceDirectory, sourceExecutablePath);
+        var versionKey = CreateVersionKey(files, cancellationToken);
+        using (CacheDirectoryLease.EnterRoot(runtimeRoot, wait: true, cancellationToken))
         {
-            runtimeRoot ??= WorkspacePathHelper.ServerHostRuntimeRoot;
-            var files = ResolveRuntimeFiles(sourceDirectory, sourceExecutablePath);
-            var versionKey = CreateVersionKey(files);
             var targetDirectory = Path.Combine(runtimeRoot, versionKey);
             var targetExecutablePath = Path.Combine(targetDirectory, Path.GetFileName(sourceExecutablePath));
             var completionMarkerPath = Path.Combine(targetDirectory, CompletionMarkerName);
 
             if (!IsStagedCopyComplete(sourceDirectory, targetDirectory, files, completionMarkerPath))
             {
-                TryDeleteIncompleteDirectory(targetDirectory);
+                // A Host may still be using the other files in an incomplete directory.
                 if (Directory.Exists(targetDirectory))
                 {
                     targetDirectory = Path.Combine(runtimeRoot, $"{versionKey}-{Guid.NewGuid():N}");
@@ -44,8 +40,10 @@ internal static class ServerHostRuntimeStager
                 try
                 {
                     Directory.CreateDirectory(temporaryDirectory);
+                    using (File.Create(Path.Combine(temporaryDirectory, CacheDirectoryLease.FileName))) { }
                     foreach (var sourcePath in files)
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
                         var relativePath = Path.GetRelativePath(sourceDirectory, sourcePath);
                         var targetPath = Path.Combine(temporaryDirectory, relativePath);
                         Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
@@ -75,76 +73,28 @@ internal static class ServerHostRuntimeStager
             if (!IsStagedCopyComplete(sourceDirectory, targetDirectory, files, completionMarkerPath))
                 throw new IOException($"Host runtime staging did not produce a complete copy: {targetDirectory}");
 
-            Cleanup(runtimeRoot, targetDirectory, DefaultRetainedVersions);
-
-            return targetExecutablePath;
+            File.SetLastWriteTimeUtc(completionMarkerPath, DateTime.UtcNow);
+            var lease = CacheDirectoryLease.Acquire(targetDirectory);
+            CacheMaintenance.Request(runtimeRoot, CacheKind.Host);
+            return new PreparedHost(targetExecutablePath, lease);
         }
     }
 
-    /// <summary>
-    /// Removes completed runtime copies that are not recent and are not used by a live process.
-    /// </summary>
-    internal static int Cleanup(string runtimeRoot, string? preserveDirectory = null, int retainCount = DefaultRetainedVersions)
+    internal static IDisposable? AcquireCurrentLease()
     {
-        if (string.IsNullOrWhiteSpace(runtimeRoot) || !Directory.Exists(runtimeRoot))
-            return 0;
-
-        var directories = Directory.EnumerateDirectories(runtimeRoot)
-            .Select(static path => new DirectoryInfo(path))
-            .Where(directory => File.Exists(Path.Combine(directory.FullName, CompletionMarkerName)))
-            .OrderByDescending(static directory => directory.LastWriteTimeUtc)
-            .ToList();
-        var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (!string.IsNullOrWhiteSpace(preserveDirectory))
-            keep.Add(Path.GetFullPath(preserveDirectory));
-        foreach (var directory in directories.Take(Math.Max(0, retainCount)))
-            keep.Add(directory.FullName);
-
-        var removed = 0;
-        foreach (var directory in directories)
-        {
-            if (keep.Contains(directory.FullName) ||
-                DateTime.UtcNow - directory.LastWriteTimeUtc < StartupGracePeriod ||
-                IsUsedByLiveProcess(directory.FullName))
-                continue;
-
-            try
-            {
-                directory.Delete(recursive: true);
-                removed++;
-            }
-            catch (IOException) { }
-            catch (UnauthorizedAccessException) { }
-        }
-
-        return removed;
+        var directory = AppContext.BaseDirectory;
+        return File.Exists(Path.Combine(directory, CacheDirectoryLease.ProtocolMarker))
+            ? CacheDirectoryLease.Acquire(directory) : null;
     }
 
-    private static bool IsUsedByLiveProcess(string directory)
+    internal sealed class PreparedHost(string executablePath, CacheDirectoryLease? lease) : IDisposable
     {
-        var normalizedDirectory = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        foreach (var process in Process.GetProcesses())
+        public string ExecutablePath { get; } = executablePath;
+        public void Dispose()
         {
-            try
-            {
-                if (process.HasExited)
-                    continue;
-                var executablePath = process.MainModule?.FileName;
-                if (!string.IsNullOrWhiteSpace(executablePath) &&
-                    Path.GetFullPath(executablePath).StartsWith(normalizedDirectory, StringComparison.OrdinalIgnoreCase))
-                    return true;
-            }
-            catch
-            {
-                // A process can exit or deny module inspection while the cleanup is running.
-            }
-            finally
-            {
-                process.Dispose();
-            }
+            lease?.Dispose();
+            if (lease is not null) CacheMaintenance.Request(Path.GetDirectoryName(lease.DirectoryPath)!, CacheKind.Host);
         }
-
-        return false;
     }
 
     private static bool IsStagedCopyComplete(
@@ -153,7 +103,7 @@ internal static class ServerHostRuntimeStager
         IEnumerable<string> sourceFiles,
         string completionMarkerPath)
     {
-        if (!File.Exists(completionMarkerPath))
+        if (!File.Exists(completionMarkerPath) || !File.Exists(Path.Combine(targetDirectory, CacheDirectoryLease.FileName)))
             return false;
 
         foreach (var sourcePath in sourceFiles)
@@ -275,12 +225,20 @@ internal static class ServerHostRuntimeStager
             files.Add(path);
     }
 
-    private static string CreateVersionKey(IEnumerable<string> files)
+    private static string CreateVersionKey(IEnumerable<string> files, CancellationToken cancellationToken)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        var buffer = new byte[64 * 1024];
         foreach (var file in files)
         {
-            hash.AppendData(File.ReadAllBytes(file));
+            cancellationToken.ThrowIfCancellationRequested();
+            using var input = File.OpenRead(file);
+            int read;
+            while ((read = input.Read(buffer)) > 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                hash.AppendData(buffer.AsSpan(0, read));
+            }
         }
 
         return Convert.ToHexString(hash.GetHashAndReset(), 0, 12).ToLowerInvariant();

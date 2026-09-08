@@ -14,6 +14,11 @@ public sealed class ServerMapService : IServerMapService
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true, WriteIndented = true };
     private readonly object gate = new();
     private readonly Dictionary<string, Process> processes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SemaphoreSlim webUpdateGate = new(1, 1);
+    private readonly string builtInWebRoot;
+
+    public ServerMapService() : this(Path.Combine(AppContext.BaseDirectory, "WebRoot")) { }
+    internal ServerMapService(string builtInWebRoot) => this.builtInWebRoot = builtInWebRoot;
 
     public string GetProfileDirectory(InstanceProfile profile) =>
         Path.Combine(WorkspacePathHelper.ResolveProfileDataPath(profile.DirectoryPath), "ServerMap");
@@ -67,10 +72,74 @@ public sealed class ServerMapService : IServerMapService
         await input.CopyToAsync(output, cancellationToken);
     }
 
+    public async Task<int> UpdateWebRootAsync(InstanceProfile profile, ServerMapSettings settings, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(settings.WebRoot))
+            throw new InvalidOperationException("请先选择自定义 WebRoot 目录。 ");
+        settings = Normalize(profile, settings);
+        await webUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var count = await CopyWebRootAsync(builtInWebRoot, settings.WebRoot, cancellationToken).ConfigureAwait(false);
+            await SaveSettingsAsync(profile, settings, cancellationToken).ConfigureAwait(false);
+            return count;
+        }
+        finally { webUpdateGate.Release(); }
+    }
+
+    internal static Task<int> CopyWebRootAsync(string sourceDirectory, string targetDirectory, CancellationToken cancellationToken = default) =>
+        Task.Run(async () =>
+        {
+            var source = Path.TrimEndingDirectorySeparator(Path.GetFullPath(sourceDirectory));
+            var target = Path.TrimEndingDirectorySeparator(Path.GetFullPath(targetDirectory));
+            if (target.Equals(Path.GetPathRoot(target), StringComparison.OrdinalIgnoreCase) ||
+                source.Equals(target, StringComparison.OrdinalIgnoreCase) ||
+                target.StartsWith(source + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+                source.StartsWith(target + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("自定义 WebRoot 不能与内置网页目录重叠。 ");
+            if (!File.Exists(Path.Combine(source, "index.html")))
+                throw new FileNotFoundException("内置地图网页不存在，请重新安装 LauncherGo。 ", Path.Combine(source, "index.html"));
+
+            var files = Directory.GetFiles(source, "*", SearchOption.AllDirectories)
+                .OrderBy(file => Path.GetRelativePath(source, file).Equals("index.html", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
+                .ToArray();
+            foreach (var file in files)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var destination = Path.Combine(target, Path.GetRelativePath(source, file));
+                var directory = Path.GetDirectoryName(destination)!;
+                Directory.CreateDirectory(directory);
+                var temporary = Path.Combine(directory, $".{Path.GetFileName(destination)}.{Guid.NewGuid():N}.tmp");
+                try
+                {
+                    await using (var input = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous))
+                    await using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, FileOptions.Asynchronous))
+                        await input.CopyToAsync(output, cancellationToken).ConfigureAwait(false);
+                    // Readers see either the previous complete asset or the new complete asset.
+                    for (var attempt = 0; ; attempt++)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        try { File.Move(temporary, destination, overwrite: true); break; }
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && attempt < 3)
+                        {
+                            await Task.Delay(100 * (attempt + 1), cancellationToken).ConfigureAwait(false);
+                        }
+                    }
+                }
+                finally
+                {
+                    if (File.Exists(temporary)) File.Delete(temporary);
+                }
+            }
+            return files.Length;
+        }, cancellationToken);
+
     public async Task<ServerMapRuntimeStatus> StartAsync(InstanceProfile profile, CancellationToken cancellationToken = default)
     {
         var settings = await LoadSettingsAsync(profile, cancellationToken);
         if (!settings.Enabled) throw new InvalidOperationException("请先启用服务器地图。 ");
+        if (!string.IsNullOrWhiteSpace(settings.WebRoot) && !File.Exists(Path.Combine(settings.WebRoot, "index.html")))
+            throw new InvalidOperationException("自定义 WebRoot 缺少 index.html，请先手动更新网页。 ");
         if (settings.UseHttps && !await ValidateCertificateAsync(profile, settings, cancellationToken))
             throw new InvalidOperationException("HTTPS 证书或私钥无效、已过期，或两者不匹配。 ");
         await EnsureMapModDeployedAsync(profile, cancellationToken);
@@ -172,7 +241,7 @@ public sealed class ServerMapService : IServerMapService
         UseHttps = value.UseHttps,
         CertificatePath = value.CertificatePath.Trim(),
         PrivateKeyPath = value.PrivateKeyPath.Trim(),
-        WebRoot = value.WebRoot.Trim(),
+        WebRoot = string.IsNullOrWhiteSpace(value.WebRoot) ? string.Empty : ResolveProfilePath(profile, value.WebRoot.Trim()),
         BackendPort = value.BackendPort is > 0 and <= 65535 ? value.BackendPort : AllocatePort(profile.Id, 15080),
         BackendToken = string.IsNullOrWhiteSpace(value.BackendToken) ? Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant() : value.BackendToken,
         PublicUrl = value.PublicUrl.Trim()

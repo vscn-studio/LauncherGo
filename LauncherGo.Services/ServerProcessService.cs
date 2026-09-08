@@ -1680,6 +1680,7 @@ internal sealed partial class SingleServerProcessController
 
     private void CompleteProcessExitCleanup()
     {
+        CacheMaintenance.Request(WorkspacePathHelper.ServerHostRuntimeRoot, CacheKind.Host);
         var previousProfileId = _currentProfile?.Id;
         _monitorCts?.Cancel();
         _monitorCts?.Dispose();
@@ -2031,7 +2032,9 @@ internal sealed partial class SingleServerProcessController
         string installPath,
         CancellationToken cancellationToken)
     {
-        var hostPath = ServerHostRuntimeStager.Prepare(ResolveServerHostPath());
+        using var prepared = await Task.Run(() => ServerHostRuntimeStager.Prepare(
+            ResolveServerHostPath(), cancellationToken: cancellationToken), cancellationToken).ConfigureAwait(false);
+        var hostPath = prepared.ExecutablePath;
         if (string.IsNullOrWhiteSpace(hostPath) || !File.Exists(hostPath))
             throw new InvalidOperationException(
                 $"未找到独立服务端控制程序 {ServerRelayProtocol.ServerHostExecutableName}，请重新安装或重新发布 LauncherGo。");

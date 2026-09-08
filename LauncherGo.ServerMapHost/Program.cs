@@ -63,7 +63,7 @@ app.Map("/{**path}", async context =>
 {
     var relative = context.Request.Path.Value?.TrimStart('/') ?? string.Empty;
     if (string.IsNullOrWhiteSpace(relative)) relative = "index.html";
-    var root = Path.GetFullPath(webRoot);
+    var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(webRoot)) + Path.DirectorySeparatorChar;
     var file = Path.GetFullPath(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar)));
     if (!file.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(file))
     {

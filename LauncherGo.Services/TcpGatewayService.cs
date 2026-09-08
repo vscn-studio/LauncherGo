@@ -57,9 +57,10 @@ public sealed class TcpGatewayService : ITcpGatewayService
             TryDeleteFile(WorkspacePathHelper.GatewayStatePath);
             await WriteSettingsAsync(settings, cancellationToken).ConfigureAwait(false);
 
-            var hostPath = ServerHostRuntimeStager.Prepare(
+            using var prepared = await Task.Run(() => ServerHostRuntimeStager.Prepare(
                 ResolveGatewayHostPath(),
-                WorkspacePathHelper.GatewayHostRuntimeRoot);
+                WorkspacePathHelper.GatewayHostRuntimeRoot, cancellationToken), cancellationToken).ConfigureAwait(false);
+            var hostPath = prepared.ExecutablePath;
             if (!File.Exists(hostPath))
             {
                 throw new FileNotFoundException("GatewayHost executable was not found.", hostPath);
@@ -228,6 +229,7 @@ public sealed class TcpGatewayService : ITcpGatewayService
         {
             _process?.Dispose();
             _process = null;
+            CacheMaintenance.Request(WorkspacePathHelper.GatewayHostRuntimeRoot, CacheKind.Host);
             _operationGate.Release();
         }
     }

@@ -82,7 +82,7 @@ public sealed class LauncherUpdateServiceTests
     }
 
     [Fact]
-    public void CleanupUpdateCache_RemovesOlderDirectories()
+    public async Task CleanupUpdateCache_RemovesIdleDirectoriesAndProtectsActiveDownload()
     {
         var updateRoot = Path.Combine(Path.GetTempPath(), $"launchergo-update-cleanup-{Guid.NewGuid():N}");
         try
@@ -93,12 +93,14 @@ public sealed class LauncherUpdateServiceTests
                 var directory = Path.Combine(updateRoot, $"2.6.{index}");
                 Directory.CreateDirectory(directory);
                 File.WriteAllText(Path.Combine(directory, "asset.exe"), index.ToString());
-                Directory.SetLastWriteTimeUtc(directory, DateTime.UtcNow.AddMinutes(-index));
+                using (CacheDirectoryLease.Acquire(directory)) { }
+                Directory.SetLastWriteTimeUtc(directory, DateTime.UtcNow.AddMinutes(-10));
             }
 
-            var removed = LauncherUpdateService.CleanupUpdateCache(updateRoot, retainCount: 1);
+            using var download = CacheDirectoryLease.Acquire(Path.Combine(updateRoot, "2.6.0"));
+            var result = await CacheMaintenance.CleanAsync(updateRoot, CacheKind.Update, default);
 
-            Assert.Equal(2, removed);
+            Assert.Equal(CacheCleanupResult.RetryLater, result);
             Assert.True(Directory.Exists(Path.Combine(updateRoot, "2.6.0")));
             Assert.False(Directory.Exists(Path.Combine(updateRoot, "2.6.1")));
             Assert.False(Directory.Exists(Path.Combine(updateRoot, "2.6.2")));
