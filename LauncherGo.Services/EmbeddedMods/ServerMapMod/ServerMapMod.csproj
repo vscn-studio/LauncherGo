@@ -12,7 +12,7 @@
   <ItemGroup>
     <Reference Include="VintagestoryAPI" HintPath="$(VINTAGE_STORY)\VintagestoryAPI.dll" Private="false" />
     <Reference Include="VintagestoryLib" HintPath="$(VINTAGE_STORY)\VintagestoryLib.dll" Private="false" />
-    <Reference Include="VintagestoryServer" HintPath="$(VINTAGE_STORY)\VintagestoryServer.dll" Private="false" />
+    <Reference Include="VintagestoryServer" HintPath="$(VINTAGE_STORY)\VintagestoryServer.dll" Private="false" Condition="Exists('$(VINTAGE_STORY)\VintagestoryServer.dll')" />
     <Reference Include="VSSurvivalMod" HintPath="$(VINTAGE_STORY)\Mods\VSSurvivalMod.dll" Private="false" />
     <Reference Include="VSEssentials" HintPath="$(VINTAGE_STORY)\Mods\VSEssentials.dll" Private="false" />
     <Reference Include="Microsoft.Data.Sqlite" HintPath="$(VINTAGE_STORY)\Lib\Microsoft.Data.Sqlite.dll" Private="false" />

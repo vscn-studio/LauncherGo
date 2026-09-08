@@ -60,12 +60,19 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($vsVersion)) { throw "VINTAGE_STORY_VERSION is empty." }
 
           $vsRoot = Join-Path $pwd ".vintagestory-runtime"
-          $apiDll = Join-Path $vsRoot "VintagestoryAPI.dll"
-          $libDll = Join-Path $vsRoot "VintagestoryLib.dll"
-          $protobufDll = Join-Path $vsRoot "Lib/protobuf-net.dll"
-          $survivalDll = Join-Path $vsRoot "Mods/VSSurvivalMod.dll"
-
-          if (!(Test-Path $apiDll) -or !(Test-Path $libDll) -or !(Test-Path $protobufDll) -or !(Test-Path $survivalDll)) {
+          $requiredEntries = @(
+            "VintagestoryAPI.dll",
+            "VintagestoryLib.dll",
+            "VintagestoryServer.dll",
+            "Lib/protobuf-net.dll",
+            "Mods/VSSurvivalMod.dll",
+            "Mods/VSEssentials.dll",
+            "Lib/Microsoft.Data.Sqlite.dll",
+            "Lib/0Harmony.dll",
+            "Lib/SkiaSharp.dll"
+          )
+          $missingReference = $requiredEntries | Where-Object { !(Test-Path -LiteralPath (Join-Path $vsRoot $_) -PathType Leaf) } | Select-Object -First 1
+          if ($null -ne $missingReference) {
             New-Item -ItemType Directory -Force -Path $vsRoot | Out-Null
             $zipPath = Join-Path $vsRoot "vs_server_win-x64_$vsVersion.zip"
             $downloadUrl = "https://cdn.vintagestory.at/gamefiles/stable/vs_server_win-x64_$vsVersion.zip"
@@ -74,13 +81,6 @@ jobs:
             Add-Type -AssemblyName System.IO.Compression.FileSystem
             $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
             try {
-              $requiredEntries = @(
-                "VintagestoryAPI.dll",
-                "VintagestoryLib.dll",
-                "Lib/protobuf-net.dll",
-                "Mods/VSSurvivalMod.dll"
-              )
-
               foreach ($entryName in $requiredEntries) {
                 $entry = $zip.GetEntry($entryName)
                 if ($null -eq $entry) {
