@@ -26,11 +26,14 @@ public sealed partial class ServerMapWebServer : IDisposable
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<(int X, int Z), byte>> baseTiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, long> layerVersions = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, IndexedPoint> translocators = new();
+    private readonly ConcurrentDictionary<string, byte> pendingParentBuilds = new(StringComparer.Ordinal);
     private readonly object maintenanceGate = new();
     private Task maintenance = Task.CompletedTask;
     private bool maintenanceStarted;
     private readonly DateTimeOffset startedAt = DateTimeOffset.UtcNow;
     private HttpListener? listener;
+    /// <summary>Called when the browser requests a tile that is not cached.</summary>
+    public Action<ChunkKey, bool>? RequestRender { get; set; }
 
     public ServerMapWebServer(ICoreServerAPI api, ServerMapConfig config, string root, WorldDatabaseReader reader, MapPalette materials, MapAuthStore auth, PoiStore pois, AnnouncementStore announcements)
     {
@@ -115,7 +118,18 @@ public sealed partial class ServerMapWebServer : IDisposable
     {
         if (Math.Abs((long)x) > 1_048_576 || Math.Abs((long)z) > 1_048_576) { NotFound(context); return; }
         var path = Path.Combine(root, "2d", rendererName.ToLowerInvariant(), zoom.ToString(CultureInfo.InvariantCulture), $"{x}_{z}.png");
-        var bytes = File.Exists(path) ? File.ReadAllBytes(path) : TransparentTile;
+        var exists = File.Exists(path);
+        var bytes = exists ? File.ReadAllBytes(path) : TransparentTile;
+        if (!exists && RequestRender != null)
+        {
+            // Map zoom coordinates address a group of base tiles. Queue the
+            // nearest child first so the tile currently in the viewport starts
+            // rendering ahead of the background save scan.
+            var scale = 1 << Math.Clamp(zoom, 0, 20);
+            var baseX = checked(x * scale);
+            var baseZ = checked(z * scale);
+            RequestRender(new ChunkKey(baseX, 0, baseZ), true);
+        }
         if (MapVisibility.ShouldMaskTiles(Principal(context.Request)?.IsAdmin == true, context.Request.QueryString["hideRegions"]))
             bytes = MapVisibility.MaskTile(bytes, zoom, x, z, notebook.Regions);
         context.Response.Headers["Vary"] = "Cookie";
@@ -481,8 +495,29 @@ public sealed partial class ServerMapWebServer : IDisposable
     public void Render2D(ChunkKey key, bool basicOnly = false)
     {
         var rendererNames = basicOnly ? new[] { "basic" } : Renderers;
-        foreach (var rendererName in rendererNames) if (renderer.Render2D(key, rendererName)) { baseTiles[rendererName].TryAdd((key.X, key.Z), 0); events.Publish("tile", new { renderer = rendererName, zoom = 0, x = key.X, z = key.Z }); foreach (var parent in pyramid.BuildParents(rendererName, key)) events.Publish("tile", new { renderer = rendererName, zoom = parent.Zoom, x = parent.X, z = parent.Z }); }
+        foreach (var rendererName in rendererNames) if (renderer.Render2D(key, rendererName)) { baseTiles[rendererName].TryAdd((key.X, key.Z), 0); events.Publish("tile", new { renderer = rendererName, zoom = 0, x = key.X, z = key.Z }); ScheduleParentBuild(rendererName, key); }
         var version = layerVersions.AddOrUpdate("chunks", 2, (_, old) => old + 1); events.Publish("layer", new { layer = "chunks", version, bbox = new[] { key.X * 512, key.Z * 512, (key.X + 1) * 512, (key.Z + 1) * 512 } });
+    }
+    private void ScheduleParentBuild(string rendererName, ChunkKey key)
+    {
+        // Coalesce requests arriving during a zoom/pan burst.  Multiple
+        // neighbouring base tiles often invalidate the same first parent;
+        // key the debounce by that parent instead of by the source tile.
+        var parentX = TilePyramidBuilder.FloorDiv(key.X, 2);
+        var parentZ = TilePyramidBuilder.FloorDiv(key.Z, 2);
+        var id = rendererName + ":1:" + parentX + ":" + parentZ;
+        if (!pendingParentBuilds.TryAdd(id, 0)) return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(200, stop.Token).ConfigureAwait(false);
+                foreach (var parent in pyramid.BuildParents(rendererName, key)) events.Publish("tile", new { renderer = rendererName, zoom = parent.Zoom, x = parent.X, z = parent.Z });
+            }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
+            catch (Exception ex) { api.Logger.Warning("ServerMap parent tile update failed: {0}", ex.Message); }
+            finally { pendingParentBuilds.TryRemove(id, out _); }
+        }, stop.Token);
     }
     public void NotifyColormapApplied() => events.Publish("colormap", new { month = materials.ClientColormapMonth, version = materials.ClientColormapVersion });
     public bool HasBaseTile(string rendererName, ChunkKey key) => baseTiles.TryGetValue(rendererName, out var tiles) && tiles.ContainsKey((key.X, key.Z));

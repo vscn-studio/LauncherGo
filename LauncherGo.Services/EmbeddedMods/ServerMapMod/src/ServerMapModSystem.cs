@@ -46,6 +46,7 @@ public sealed class ServerMapModSystem : ModSystem
             var announcementStore = new AnnouncementStore(Path.Combine(dataRoot, "announcement.json"));
             web = new ServerMapWebServer(api, config, dataRoot, db, materials, authStore, poiStore, announcementStore);
             queue = new Render.RenderQueue(config.RenderThreads, RenderRegion);
+            web.RequestRender = (region, priority) => queue?.Enqueue(region, priority);
             web.RenderProgress = () =>
             {
                 var progress = queue.Progress;
@@ -120,9 +121,12 @@ public sealed class ServerMapModSystem : ModSystem
             Volatile.Write(ref discoveredRegions, regions.Count);
             // A new world still needs its sepia base tile. Only narrow the
             // redraw when the non-colour tile already exists.
-            if (basicOnly && web?.HasBaseTile("sepia", region) == true) basicOnlyRegions[region] = 0;
+            if (basicOnly) basicOnlyRegions[region] = 0;
             if (force || basicOnly || web?.HasBaseTile("basic", region) != true || web.HasBaseTile("sepia", region) != true)
-                queue?.Enqueue(region);
+                // Colormap redraws must jump ahead of the initial world scan;
+                // otherwise newly discovered bottom regions can keep workers
+                // occupied while stale fallback-colour tiles remain above.
+                queue?.Enqueue(region, priority: basicOnly);
             if (regions.Count % 128 == 0) sapi?.Logger.Notification("ServerMap region scan: {0} regions discovered.", regions.Count);
         }
         sapi?.Logger.Notification("ServerMap region scan complete: {0} columns, {1} regions.", columns, regions.Count);

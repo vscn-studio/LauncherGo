@@ -138,6 +138,13 @@ public sealed class MapRenderer
             // LiveMap uses its explicit water-edge colour where a water/ice
             // column touches a non-water column.  Empty cells outside a region
             // count as water, matching BlockData.Get's null behaviour.
+            // Basic tiles must not bake the stable/fallback palette while the
+            // client colormap is still being collected.  Those provisional
+            // colours were previously persisted and remained visible until a
+            // manual full rescan.  Leave the pixel transparent; the
+            // colormap-applied event queues a redraw and the real game colour
+            // is then written in its place.
+            if (colored && !materials.HasClientColormap) continue;
             var mapColor = !colored && materials.IsMapWaterBlock(id) && IsWaterEdge(ids, hasData, pixelX, pixelZ, size)
                 ? (R: (byte)72, G: (byte)48, B: (byte)24)
                 : colored

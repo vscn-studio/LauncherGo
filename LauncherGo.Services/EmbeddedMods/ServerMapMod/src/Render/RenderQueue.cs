@@ -97,6 +97,20 @@ public sealed class RenderQueue : IDisposable
         }
     }
 
+    /// <summary>Promote a queued background job without enqueuing a duplicate.</summary>
+    public bool Promote(ChunkKey key)
+    {
+        lock (pendingGate)
+        {
+            if (disposed || !pending.TryGetValue(key, out var state)) return false;
+            if (state.IsRunning) return true;
+            if (state.Priority) return true;
+            state.Priority = true;
+            AddJobLocked(key, state);
+            return true;
+        }
+    }
+
     private void Work()
     {
         try
