@@ -19,6 +19,7 @@
 - 修复地图 Host Release 发布时 RID 输出目录不一致导致的复制失败。
 - 修复 ServerHost、GatewayHost 和 ServerMapHost 发布文件及网页资源未完整复制到发布目录的问题。
 - 修复更新完成后安装包和 Host 运行时副本持续累积的问题。
+- 修复误删 `.runtime/server-host` 中的 EXE 或依赖文件后，完整标记仍导致服务器无法启动的问题；启动时会校验并自动重建全部 Host 文件。
 
 ### 优化
 

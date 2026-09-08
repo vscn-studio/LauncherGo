@@ -27,6 +27,42 @@ public sealed class ServerHostRuntimeStagerTests
                 Path.GetFullPath(stagedPath),
                 StringComparison.OrdinalIgnoreCase);
             Assert.Equal("single-file-host", File.ReadAllText(stagedPath));
+
+            File.Delete(stagedPath);
+            var rebuiltPath = ServerHostRuntimeStager.Prepare(sourcePath, runtimeRoot);
+            Assert.True(File.Exists(rebuiltPath));
+            Assert.Equal("single-file-host", File.ReadAllText(rebuiltPath));
+        }
+        finally
+        {
+            Directory.Delete(sourceDirectory, recursive: true);
+            if (Directory.Exists(runtimeRoot))
+                Directory.Delete(runtimeRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Prepare_RepairsMissingDependencyDespiteCompletionMarker()
+    {
+        var sourceDirectory = Path.Combine(Path.GetTempPath(), $"launchergo-host-source-{Guid.NewGuid():N}");
+        var runtimeRoot = Path.Combine(Path.GetTempPath(), $"launchergo-host-runtime-{Guid.NewGuid():N}");
+        var sourcePath = Path.Combine(sourceDirectory, "LauncherGo.ServerHost.exe");
+        var dependencyPath = Path.Combine(sourceDirectory, "LauncherGo.ServerHost.runtimeconfig.json");
+
+        try
+        {
+            Directory.CreateDirectory(sourceDirectory);
+            File.WriteAllText(sourcePath, "single-file-host");
+            File.WriteAllText(dependencyPath, "runtime-config");
+
+            var stagedPath = ServerHostRuntimeStager.Prepare(sourcePath, runtimeRoot);
+            var stagedDependency = Path.Combine(Path.GetDirectoryName(stagedPath)!, Path.GetFileName(dependencyPath));
+            File.Delete(stagedDependency);
+
+            var rebuiltPath = ServerHostRuntimeStager.Prepare(sourcePath, runtimeRoot);
+
+            Assert.True(File.Exists(rebuiltPath));
+            Assert.True(File.Exists(Path.Combine(Path.GetDirectoryName(rebuiltPath)!, Path.GetFileName(dependencyPath))));
         }
         finally
         {
@@ -111,6 +147,28 @@ public sealed class ServerHostRuntimeStagerTests
             Assert.True(Directory.Exists(Path.Combine(runtimeRoot, "version-0")));
             Assert.False(Directory.Exists(Path.Combine(runtimeRoot, "version-1")));
             Assert.False(Directory.Exists(Path.Combine(runtimeRoot, "version-2")));
+        }
+        finally
+        {
+            if (Directory.Exists(runtimeRoot))
+                Directory.Delete(runtimeRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Cleanup_DoesNotDeleteHostDuringStartupGracePeriod()
+    {
+        var runtimeRoot = Path.Combine(Path.GetTempPath(), $"launchergo-host-cleanup-{Guid.NewGuid():N}");
+        var directory = Path.Combine(runtimeRoot, "newly-staged");
+        try
+        {
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Combine(directory, ".complete"), "newly-staged");
+
+            var removed = ServerHostRuntimeStager.Cleanup(runtimeRoot, retainCount: 0);
+
+            Assert.Equal(0, removed);
+            Assert.True(Directory.Exists(directory));
         }
         finally
         {

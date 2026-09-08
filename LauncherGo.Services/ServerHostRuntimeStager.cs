@@ -9,6 +9,7 @@ internal static class ServerHostRuntimeStager
 {
     private const string CompletionMarkerName = ".complete";
     private const int DefaultRetainedVersions = 0;
+    private static readonly TimeSpan StartupGracePeriod = TimeSpan.FromSeconds(30);
     private static readonly object Gate = new();
 
     public static string Prepare(string sourceExecutablePath, string? runtimeRoot = null)
@@ -29,9 +30,16 @@ internal static class ServerHostRuntimeStager
             var targetExecutablePath = Path.Combine(targetDirectory, Path.GetFileName(sourceExecutablePath));
             var completionMarkerPath = Path.Combine(targetDirectory, CompletionMarkerName);
 
-            if (!File.Exists(targetExecutablePath) || !File.Exists(completionMarkerPath))
+            if (!IsStagedCopyComplete(sourceDirectory, targetDirectory, files, completionMarkerPath))
             {
                 TryDeleteIncompleteDirectory(targetDirectory);
+                if (Directory.Exists(targetDirectory))
+                {
+                    targetDirectory = Path.Combine(runtimeRoot, $"{versionKey}-{Guid.NewGuid():N}");
+                    targetExecutablePath = Path.Combine(targetDirectory, Path.GetFileName(sourceExecutablePath));
+                    completionMarkerPath = Path.Combine(targetDirectory, CompletionMarkerName);
+                }
+
                 var temporaryDirectory = targetDirectory + $".{Guid.NewGuid():N}.tmp";
                 try
                 {
@@ -49,7 +57,11 @@ internal static class ServerHostRuntimeStager
                     {
                         Directory.Move(temporaryDirectory, targetDirectory);
                     }
-                    catch (IOException) when (File.Exists(completionMarkerPath))
+                    catch (IOException) when (IsStagedCopyComplete(
+                               sourceDirectory,
+                               targetDirectory,
+                               files,
+                               completionMarkerPath))
                     {
                         // Another LauncherGo process completed the same immutable version first.
                     }
@@ -59,6 +71,9 @@ internal static class ServerHostRuntimeStager
                     TryDeleteIncompleteDirectory(temporaryDirectory);
                 }
             }
+
+            if (!IsStagedCopyComplete(sourceDirectory, targetDirectory, files, completionMarkerPath))
+                throw new IOException($"Host runtime staging did not produce a complete copy: {targetDirectory}");
 
             Cleanup(runtimeRoot, targetDirectory, DefaultRetainedVersions);
 
@@ -88,7 +103,9 @@ internal static class ServerHostRuntimeStager
         var removed = 0;
         foreach (var directory in directories)
         {
-            if (keep.Contains(directory.FullName) || IsUsedByLiveProcess(directory.FullName))
+            if (keep.Contains(directory.FullName) ||
+                DateTime.UtcNow - directory.LastWriteTimeUtc < StartupGracePeriod ||
+                IsUsedByLiveProcess(directory.FullName))
                 continue;
 
             try
@@ -128,6 +145,25 @@ internal static class ServerHostRuntimeStager
         }
 
         return false;
+    }
+
+    private static bool IsStagedCopyComplete(
+        string sourceDirectory,
+        string targetDirectory,
+        IEnumerable<string> sourceFiles,
+        string completionMarkerPath)
+    {
+        if (!File.Exists(completionMarkerPath))
+            return false;
+
+        foreach (var sourcePath in sourceFiles)
+        {
+            var relativePath = Path.GetRelativePath(sourceDirectory, sourcePath);
+            if (!File.Exists(Path.Combine(targetDirectory, relativePath)))
+                return false;
+        }
+
+        return true;
     }
 
     private static IReadOnlyList<string> ResolveRuntimeFiles(
