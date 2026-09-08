@@ -35,7 +35,7 @@ This project is open source under the MIT License. You may use, copy, modify, di
 | Product stage | Second-generation server launcher, under active development |
 | Target framework | `.NET net10.0` |
 | Desktop UI | `Avalonia 12.0.1` and `Semi.Avalonia 12.0.1` |
-| Default release platform | The current release workflows package `win-x64` as a self-contained installer, portable single-file package, and embedded mod packages |
+| Default release platform | The current release workflows package `win-x64` as an online installer, fully self-contained portable package, and embedded mod packages |
 | Vintage Story server version | Server versions are downloaded from the official or configured third-party server catalog, and each profile runs the selected version |
 | First-party embedded mods | `serverauth.dll`, `launchergoredirect.dll`, `serverbridge.dll`, and `ServerMap.dll`, all licensed under MIT with LauncherGo source |
 | Mod build reference | GitHub Actions defaults to Vintage Story `1.22.2` server API references, and the version can be changed in workflow inputs |
@@ -56,7 +56,7 @@ This project is open source under the MIT License. You may use, copy, modify, di
 | Downloads | Server version list, search, download, server package import, and download cache cleanup |
 | Connections | Regular FRP, third-party FRPC, Server Bridge, QQ bot, and ServerAuth password, Discourse SSO, and OAuth2/OIDC configuration |
 | Settings | Server, appearance, network, advanced, about, sponsors, and contributors pages; GitHub proxy selection and automatic or manual LauncherGo update checks |
-| Launcher updates | Installation-aware updates for the full installer and portable single-file build, with SHA-256 verification and Markdown release notes |
+| Launcher updates | Installation-aware updates for the online installer and portable single-file build, with SHA-256 verification and Markdown release notes |
 | Logging | Application log files, console logs, automation runtime logs, server log export, and direct access to each profile's `Logs` directory |
 | Internationalization | Chinese and English resources with runtime language switching |
 | Release | Windows packaging, prerelease, official release, embedded mod builds, and ServerMap packaging |

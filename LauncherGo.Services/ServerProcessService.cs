@@ -2032,6 +2032,7 @@ internal sealed partial class SingleServerProcessController
         string installPath,
         CancellationToken cancellationToken)
     {
+        DotNetRuntimeRequirement.EnsureForHost(ResolveServerHostPath());
         using var prepared = await Task.Run(() => ServerHostRuntimeStager.Prepare(
             ResolveServerHostPath(), cancellationToken: cancellationToken), cancellationToken).ConfigureAwait(false);
         var hostPath = prepared.ExecutablePath;

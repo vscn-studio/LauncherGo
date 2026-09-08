@@ -5,9 +5,11 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>LauncherGo.ServerMapHost</AssemblyName>
+    <AppHostDotNetSearch Condition="'$(SelfContained)' != 'true'">Global</AppHostDotNetSearch>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\LauncherGo.Domains\LauncherGo.Domains.csproj" />
+    <ProjectReference Include="..\LauncherGo.Services\LauncherGo.Services.csproj" />
     <Content Include="WebRoot\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <Target Name="RemoveRetiredWebAssets" AfterTargets="Build;Publish" Condition="'$(DesignTimeBuild)' != 'true'">

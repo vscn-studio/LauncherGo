@@ -592,7 +592,6 @@ public partial class LauncherMainWindow : Window
             _ = _frpService.StopAsync(TimeSpan.FromSeconds(2));
             _ = _thirdPartyFrpcService.StopAsync(TimeSpan.FromSeconds(2));
             _ = _easyTierService.StopAsync(TimeSpan.FromSeconds(2));
-            _ = _serverMapService.StopAllAsync();
         };
     }
 

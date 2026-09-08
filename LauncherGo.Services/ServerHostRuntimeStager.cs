@@ -8,7 +8,7 @@ internal static class ServerHostRuntimeStager
 {
     private const string CompletionMarkerName = ".complete";
     public static PreparedHost Prepare(string sourceExecutablePath, string? runtimeRoot = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, IEnumerable<string>? additionalFiles = null)
     {
         if (string.IsNullOrWhiteSpace(sourceExecutablePath) || !File.Exists(sourceExecutablePath))
             return new PreparedHost(sourceExecutablePath, null);
@@ -18,8 +18,13 @@ internal static class ServerHostRuntimeStager
             return new PreparedHost(sourceExecutablePath, null);
 
         runtimeRoot ??= WorkspacePathHelper.ServerHostRuntimeRoot;
-        var files = ResolveRuntimeFiles(sourceDirectory, sourceExecutablePath);
-        var versionKey = CreateVersionKey(files, cancellationToken);
+        var files = ResolveRuntimeFiles(sourceDirectory, sourceExecutablePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in additionalFiles ?? [])
+        {
+            if (File.Exists(file) && IsWithinDirectory(file, sourceDirectory))
+                files.Add(file);
+        }
+        var versionKey = CreateVersionKey(files.OrderBy(path => path, StringComparer.OrdinalIgnoreCase), cancellationToken);
         using (CacheDirectoryLease.EnterRoot(runtimeRoot, wait: true, cancellationToken))
         {
             var targetDirectory = Path.Combine(runtimeRoot, versionKey);
@@ -80,16 +85,23 @@ internal static class ServerHostRuntimeStager
         }
     }
 
-    internal static IDisposable? AcquireCurrentLease()
+    public static IDisposable? AcquireCurrentLease()
     {
         var directory = AppContext.BaseDirectory;
         return File.Exists(Path.Combine(directory, CacheDirectoryLease.ProtocolMarker))
             ? CacheDirectoryLease.Acquire(directory) : null;
     }
 
-    internal sealed class PreparedHost(string executablePath, CacheDirectoryLease? lease) : IDisposable
+    public sealed class PreparedHost : IDisposable
     {
-        public string ExecutablePath { get; } = executablePath;
+        internal PreparedHost(string executablePath, CacheDirectoryLease? lease)
+        {
+            ExecutablePath = executablePath;
+            this.lease = lease;
+        }
+
+        private readonly CacheDirectoryLease? lease;
+        public string ExecutablePath { get; }
         public void Dispose()
         {
             lease?.Dispose();
@@ -114,6 +126,12 @@ internal static class ServerHostRuntimeStager
         }
 
         return true;
+    }
+
+    private static bool IsWithinDirectory(string file, string directory)
+    {
+        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory)) + Path.DirectorySeparatorChar;
+        return Path.GetFullPath(file).StartsWith(root, StringComparison.OrdinalIgnoreCase);
     }
 
     private static IReadOnlyList<string> ResolveRuntimeFiles(

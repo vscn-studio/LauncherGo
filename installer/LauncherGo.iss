@@ -43,6 +43,10 @@ Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
+Source: "{#SourcePath}Install-DotNetRuntimes.ps1"; Flags: dontcopy
+Source: "{#BuildDir}\LauncherGo.ServerHost.runtimeconfig.json"; Flags: dontcopy
+Source: "{#BuildDir}\LauncherGo.GatewayHost.runtimeconfig.json"; Flags: dontcopy
+Source: "{#BuildDir}\LauncherGo.ServerMapHost.runtimeconfig.json"; Flags: dontcopy
 Source: "{#BuildDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
@@ -51,3 +55,26 @@ Name: "{autodesktop}\LauncherGo"; Filename: "{app}\LauncherGo.App.exe"; Tasks: d
 
 [Run]
 Filename: "{app}\LauncherGo.App.exe"; Description: "{cm:LaunchProgram,LauncherGo}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Result := '';
+  ExtractTemporaryFile('Install-DotNetRuntimes.ps1');
+  ExtractTemporaryFile('LauncherGo.ServerHost.runtimeconfig.json');
+  ExtractTemporaryFile('LauncherGo.GatewayHost.runtimeconfig.json');
+  ExtractTemporaryFile('LauncherGo.ServerMapHost.runtimeconfig.json');
+  WizardForm.StatusLabel.Caption := 'Checking / installing Microsoft .NET 10 runtimes...';
+  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    ExpandConstant('-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{tmp}\Install-DotNetRuntimes.ps1" -PayloadRoot "{tmp}"'),
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    Result := 'Unable to start the .NET runtime installer.';
+    Exit;
+  end;
+  NeedsRestart := (ResultCode = 3010) or (ResultCode = 1641);
+  if (ResultCode <> 0) and not NeedsRestart then
+    Result := ExpandConstant('Could not install the required x64 .NET 10 runtimes. Check your network and retry. Details: {tmp}\dotnet-install.log');
+end;

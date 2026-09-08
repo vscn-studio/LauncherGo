@@ -261,10 +261,10 @@ jobs:
             -Name "ServerMap"
 
       - name: Publish installer payload
-        run: dotnet publish $env:PROJECT_PATH -c $env:CONFIGURATION -r $env:RUNTIME --self-contained true -p:BuildEmbeddedServerMapMod=true -p:Version=${{ steps.meta.outputs.version }} -p:InformationalVersion=${{ steps.meta.outputs.version }} -o artifacts/publish/win-x64
+        run: dotnet publish $env:PROJECT_PATH -c $env:CONFIGURATION -r $env:RUNTIME --self-contained true -p:LauncherGoHostSelfContained=false -p:LauncherGoHostPublishSingleFile=false -p:BuildEmbeddedServerMapMod=true -p:Version=${{ steps.meta.outputs.version }} -p:InformationalVersion=${{ steps.meta.outputs.version }} -o artifacts/publish/win-x64
 
       - name: Publish portable single-file
-        run: dotnet publish $env:PROJECT_PATH -c $env:CONFIGURATION -r $env:RUNTIME --self-contained true -p:BuildEmbeddedServerMapMod=true -p:StripPublishSymbols=true -p:Version=${{ steps.meta.outputs.version }} -p:InformationalVersion=${{ steps.meta.outputs.version }} -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o artifacts/publish/portable
+        run: dotnet publish $env:PROJECT_PATH -c $env:CONFIGURATION -r $env:RUNTIME --self-contained true -p:LauncherGoHostSelfContained=true -p:LauncherGoHostPublishSingleFile=true -p:BuildEmbeddedServerMapMod=true -p:StripPublishSymbols=true -p:Version=${{ steps.meta.outputs.version }} -p:InformationalVersion=${{ steps.meta.outputs.version }} -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -o artifacts/publish/portable
 
       - name: Copy .NET runtime license files
         shell: pwsh

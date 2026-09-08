@@ -143,88 +143,135 @@ public sealed class ServerMapService : IServerMapService
             return files.Length;
         }, cancellationToken);
 
+    private static string RuntimeDirectory(string profileId) =>
+        Path.Combine(WorkspacePathHelper.RuntimeRoot, "server-map", WorkspacePathHelper.SanitizeFileName(profileId));
+
     public async Task<ServerMapRuntimeStatus> StartAsync(InstanceProfile profile, CancellationToken cancellationToken = default)
     {
-        var settings = await LoadSettingsAsync(profile, cancellationToken);
-        if (!settings.Enabled) throw new InvalidOperationException("请先启用服务器地图。 ");
-        if (!string.IsNullOrWhiteSpace(settings.WebRoot) && !File.Exists(Path.Combine(settings.WebRoot, "index.html")))
-            throw new InvalidOperationException("自定义 WebRoot 缺少 index.html，请先手动更新网页。 ");
-        if (settings.UseHttps && !await ValidateCertificateAsync(profile, settings, cancellationToken))
-            throw new InvalidOperationException("HTTPS 证书或私钥无效、已过期，或两者不匹配。 ");
-        await EnsureMapModDeployedAsync(profile, cancellationToken);
-        await StopAsync(profile, cancellationToken);
+        var runtime = RuntimeDirectory(profile.Id);
+        using var control = await BackgroundHostFiles.AcquireControlAsync(runtime, cancellationToken);
+        var existing = GetStatus(profile);
+        if (existing.IsRunning) return existing;
 
-        var runtime = Path.Combine(WorkspacePathHelper.RuntimeRoot, "server-map", WorkspacePathHelper.SanitizeFileName(profile.Id));
-        Directory.CreateDirectory(runtime);
+        // Refuse to replace config/state if a Host is starting or its state is temporarily unavailable.
+        using (BackgroundHostFiles.AcquireHost(runtime)) { }
+        var settings = await LoadSettingsAsync(profile, cancellationToken);
+        if (!settings.Enabled) throw new InvalidOperationException("请先启用服务器地图。");
+        if (!string.IsNullOrWhiteSpace(settings.WebRoot) && !File.Exists(Path.Combine(settings.WebRoot, "index.html")))
+            throw new InvalidOperationException("自定义 WebRoot 缺少 index.html，请先手动更新网页。");
+        if (settings.UseHttps && !await ValidateCertificateAsync(profile, settings, cancellationToken))
+            throw new InvalidOperationException("HTTPS 证书或私钥无效、已过期，或两者不匹配。");
+        var sourceHost = ResolveServerMapHostPath();
+        DotNetRuntimeRequirement.EnsureForHost(sourceHost);
+        await EnsureMapModDeployedAsync(profile, cancellationToken);
         var runtimeConfig = Path.Combine(runtime, "host.json");
         var stop = Path.Combine(runtime, "host.stop");
+        var statePath = Path.Combine(runtime, "host.state.json");
         if (File.Exists(stop)) File.Delete(stop);
-        await File.WriteAllTextAsync(runtimeConfig, JsonSerializer.Serialize(settings, JsonOptions), cancellationToken);
-
-        var exe = Path.Combine(AppContext.BaseDirectory, "LauncherGo.ServerMapHost.exe");
-        var dll = Path.Combine(AppContext.BaseDirectory, "LauncherGo.ServerMapHost.dll");
-        var start = File.Exists(exe)
-            ? new ProcessStartInfo(exe)
-            : new ProcessStartInfo("dotnet", $"\"{dll}\"");
-        if (!File.Exists(exe) && !File.Exists(dll)) throw new FileNotFoundException("LauncherGo.ServerMapHost 未部署。", dll);
+        if (File.Exists(statePath)) File.Delete(statePath);
+        // Resolve certificates relative to the profile before writing the detached Host configuration.
+        var snapshot = JsonSerializer.SerializeToNode(settings, JsonOptions)!;
+        if (settings.UseHttps)
+        {
+            snapshot["CertificatePath"] = ResolveProfilePath(profile, settings.CertificatePath);
+            snapshot["PrivateKeyPath"] = ResolveProfilePath(profile, settings.PrivateKeyPath);
+        }
+        await File.WriteAllTextAsync(runtimeConfig, snapshot.ToJsonString(), cancellationToken);
+        var webFiles = Directory.Exists(builtInWebRoot)
+            ? Directory.GetFiles(builtInWebRoot, "*", SearchOption.AllDirectories) : [];
+        using var prepared = await Task.Run(() => ServerHostRuntimeStager.Prepare(
+            sourceHost, Path.Combine(WorkspacePathHelper.RuntimeRoot, "server-map-host"), cancellationToken, webFiles), cancellationToken);
+        var hostPath = prepared.ExecutablePath;
+        if (!File.Exists(hostPath)) throw new FileNotFoundException("LauncherGo.ServerMapHost 未部署。", hostPath);
+        var start = new ProcessStartInfo(hostPath)
+        {
+            UseShellExecute = false, CreateNoWindow = true,
+            WorkingDirectory = Path.GetDirectoryName(hostPath)!
+        };
         start.ArgumentList.Add("--config"); start.ArgumentList.Add(runtimeConfig);
         start.ArgumentList.Add("--stop"); start.ArgumentList.Add(stop);
-        start.UseShellExecute = false;
-        start.CreateNoWindow = true;
-        start.WorkingDirectory = AppContext.BaseDirectory;
-        var process = Process.Start(start) ?? throw new InvalidOperationException("无法启动 ServerMap Host。 ");
-        lock (gate) processes[profile.Id] = process;
-        await Task.Delay(350, cancellationToken);
-        if (process.HasExited) throw new InvalidOperationException($"ServerMap Host 启动失败，退出码 {process.ExitCode}。 ");
-        return GetStatus(profile);
+        start.ArgumentList.Add("--state"); start.ArgumentList.Add(statePath);
+        var process = Process.Start(start) ?? throw new InvalidOperationException("无法启动 ServerMap Host。");
+        try
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(15);
+            while (DateTime.UtcNow < deadline)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (process.HasExited)
+                    throw new InvalidOperationException($"ServerMap Host 启动失败，退出码 {process.ExitCode}。 " +
+                        BackgroundHostFiles.Read<BackgroundHostState>(statePath)?.Error);
+                var status = GetStatus(profile);
+                if (status.IsRunning && status.ProcessId == process.Id && string.IsNullOrEmpty(status.Error))
+                {
+                    lock (gate)
+                    {
+                        if (processes.Remove(profile.Id, out var previous)) previous.Dispose();
+                        processes[profile.Id] = process;
+                    }
+                    return status;
+                }
+                await Task.Delay(100, cancellationToken);
+            }
+            throw new TimeoutException("等待 ServerMap Host 监听端口超时。");
+        }
+        catch
+        {
+            if (!process.HasExited) { process.Kill(true); await process.WaitForExitAsync(); }
+            process.Dispose();
+            throw;
+        }
     }
 
-    public async Task StopAsync(InstanceProfile profile, CancellationToken cancellationToken = default)
+    public Task StopAsync(InstanceProfile profile, CancellationToken cancellationToken = default) =>
+        StopProfileAsync(profile.Id, cancellationToken);
+
+    private async Task StopProfileAsync(string profileId, CancellationToken cancellationToken)
     {
-        Process? process;
-        lock (gate) processes.Remove(profile.Id, out process);
-        if (process is null || process.HasExited) return;
-        var stop = Path.Combine(WorkspacePathHelper.RuntimeRoot, "server-map", WorkspacePathHelper.SanitizeFileName(profile.Id), "host.stop");
-        Directory.CreateDirectory(Path.GetDirectoryName(stop)!);
-        await File.WriteAllTextAsync(stop, string.Empty, cancellationToken);
+        var runtime = RuntimeDirectory(profileId);
+        using var control = await BackgroundHostFiles.AcquireControlAsync(runtime, cancellationToken);
+        var state = BackgroundHostFiles.Read<BackgroundHostState>(Path.Combine(runtime, "host.state.json"));
+        using var process = state is null ? null : BackgroundHostFiles.ResolveProcess(
+            state.ProcessId, state.ProcessStartTimeUtcTicks, state.ExecutablePath);
+        if (process is null) return;
+        await File.WriteAllTextAsync(Path.Combine(runtime, "host.stop"), "stop", cancellationToken);
         try { await process.WaitForExitAsync(cancellationToken).WaitAsync(TimeSpan.FromSeconds(5), cancellationToken); }
-        catch (TimeoutException) { process.Kill(true); }
-        finally { process.Dispose(); }
+        catch (TimeoutException)
+        {
+            if (!process.HasExited) process.Kill(true);
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        lock (gate) { if (processes.Remove(profileId, out var previous)) previous.Dispose(); }
     }
 
     public async Task StopAllAsync(CancellationToken cancellationToken = default)
     {
-        string[] ids;
-        lock (gate) ids = processes.Keys.ToArray();
-        foreach (var id in ids)
-        {
-            Process? process;
-            lock (gate) processes.Remove(id, out process);
-            if (process is null || process.HasExited) continue;
-            var stop = Path.Combine(WorkspacePathHelper.RuntimeRoot, "server-map", WorkspacePathHelper.SanitizeFileName(id), "host.stop");
-            Directory.CreateDirectory(Path.GetDirectoryName(stop)!);
-            await File.WriteAllTextAsync(stop, string.Empty, cancellationToken);
-            try { await process.WaitForExitAsync(cancellationToken).WaitAsync(TimeSpan.FromSeconds(5), cancellationToken); }
-            catch { if (!process.HasExited) process.Kill(true); }
-            finally { process.Dispose(); }
-        }
+        var root = Path.Combine(WorkspacePathHelper.RuntimeRoot, "server-map");
+        if (!Directory.Exists(root)) return;
+        foreach (var directory in Directory.GetDirectories(root))
+            await StopProfileAsync(Path.GetFileName(directory), cancellationToken);
     }
 
     public ServerMapRuntimeStatus GetStatus(InstanceProfile profile)
     {
-        Process? process;
-        lock (gate) processes.TryGetValue(profile.Id, out process);
-        var settings = File.Exists(GetSettingsPath(profile))
-            ? JsonSerializer.Deserialize<ServerMapSettings>(File.ReadAllText(GetSettingsPath(profile)), JsonOptions) ?? new()
-            : new ServerMapSettings();
-        return new ServerMapRuntimeStatus
+        var state = BackgroundHostFiles.Read<BackgroundHostState>(Path.Combine(RuntimeDirectory(profile.Id), "host.state.json"));
+        using var process = state is null ? null : BackgroundHostFiles.ResolveProcess(
+            state.ProcessId, state.ProcessStartTimeUtcTicks, state.ExecutablePath);
+        if (process is not null)
         {
-            ProfileId = profile.Id,
-            IsRunning = process is { HasExited: false },
-            ProcessId = process is { HasExited: false } ? process.Id : 0,
-            Url = BuildUrl(settings)
-        };
+            var healthy = state!.IsRunning && BackgroundHostFiles.IsFresh(state.HeartbeatUtc) &&
+                BackgroundHostFiles.IsListening(state.ListenAddress, state.ListenPort);
+            return new ServerMapRuntimeStatus
+            {
+                ProfileId = profile.Id, IsRunning = true, ProcessId = process.Id, Url = state.Url,
+                Error = healthy ? "" : "地图 Host 尚未就绪或心跳超时，请检查后停止并重新启动。"
+            };
+        }
+        var settings = BackgroundHostFiles.Read<ServerMapSettings>(GetSettingsPath(profile)) ?? new();
+        return new ServerMapRuntimeStatus { ProfileId = profile.Id, Url = BuildUrl(settings), Error = state?.Error ?? "" };
     }
+
+    private static string ResolveServerMapHostPath() => Path.Combine(AppContext.BaseDirectory, "LauncherGo.ServerMapHost.exe");
 
     public Task<bool> ValidateCertificateAsync(InstanceProfile profile, ServerMapSettings settings, CancellationToken cancellationToken = default)
     {

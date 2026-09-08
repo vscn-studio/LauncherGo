@@ -24,9 +24,11 @@ public static class TcpGatewayHostRunner
     {
         using var runtimeLease = ServerHostRuntimeStager.AcquireCurrentLease();
         GatewayHostOptions? options = null;
+        FileStream? hostLock = null;
         try
         {
             options = GatewayHostOptions.Parse(args);
+            hostLock = BackgroundHostFiles.AcquireHost(Path.GetDirectoryName(options.StatePath)!);
             var settings = LoadSettings(options.ConfigPath);
             ValidateSettings(settings);
 
@@ -42,7 +44,7 @@ public static class TcpGatewayHostRunner
         catch (Exception ex)
         {
             // The launcher reads this file when the host exits before it begins listening.
-            if (options is not null)
+            if (options is not null && hostLock is not null)
             {
                 try
                 {
@@ -59,6 +61,7 @@ public static class TcpGatewayHostRunner
 
             throw;
         }
+        finally { hostLock?.Dispose(); }
     }
 
     public static void ValidateSettings(TcpGatewaySettings settings)
@@ -836,6 +839,7 @@ public static class TcpGatewayHostRunner
 
         private TcpGatewayRuntimeStatus CreateStatus()
         {
+            using var currentProcess = Process.GetCurrentProcess();
             var configuration = GetConfiguration();
             lock (_stateGate)
             {
@@ -851,6 +855,9 @@ public static class TcpGatewayHostRunner
                     RequiresRestart = _requiresRestart,
                     PendingRestartReason = _pendingRestartReason,
                     ProcessId = Environment.ProcessId,
+                    ProcessStartTimeUtcTicks = currentProcess.StartTime.ToUniversalTime().Ticks,
+                    ExecutablePath = Environment.ProcessPath ?? "",
+                    HeartbeatUtc = DateTimeOffset.UtcNow,
                     StartedAtUtc = _startedAtUtc,
                     ListenAddress = _listenAddress,
                     ActiveConnections = _activeConnections,

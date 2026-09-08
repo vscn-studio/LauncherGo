@@ -17,6 +17,9 @@ public sealed class TcpGatewayRuntimeStatus
     public string PendingRestartReason { get; set; } = string.Empty;
 
     public int? ProcessId { get; set; }
+    public long ProcessStartTimeUtcTicks { get; set; }
+    public string ExecutablePath { get; set; } = "";
+    public DateTimeOffset HeartbeatUtc { get; set; }
 
     public DateTimeOffset? StartedAtUtc { get; set; }
 

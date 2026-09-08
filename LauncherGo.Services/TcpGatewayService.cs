@@ -45,6 +45,7 @@ public sealed class TcpGatewayService : ITcpGatewayService
         await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            using var control = await BackgroundHostFiles.AcquireControlAsync(WorkspacePathHelper.GatewayRoot, cancellationToken);
             var current = await RefreshStatusAsync(cancellationToken).ConfigureAwait(false);
             if (current.IsRunning)
             {
@@ -52,6 +53,8 @@ public sealed class TcpGatewayService : ITcpGatewayService
             }
 
             WorkspacePathHelper.EnsureWorkspace();
+            using (BackgroundHostFiles.AcquireHost(WorkspacePathHelper.GatewayRoot)) { }
+            DotNetRuntimeRequirement.EnsureForHost(ResolveGatewayHostPath());
             TryDeleteFile(WorkspacePathHelper.GatewayStopSignalPath);
             TryDeleteFile(WorkspacePathHelper.GatewayReloadSignalPath);
             TryDeleteFile(WorkspacePathHelper.GatewayStatePath);
@@ -82,9 +85,20 @@ public sealed class TcpGatewayService : ITcpGatewayService
             startInfo.ArgumentList.Add("--reload-signal");
             startInfo.ArgumentList.Add(WorkspacePathHelper.GatewayReloadSignalPath);
 
+            _process?.Dispose();
             _process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start GatewayHost.");
-            var started = await WaitForStartedAsync(_process, cancellationToken).ConfigureAwait(false);
-            SetStatus(started);
+            try
+            {
+                var started = await WaitForStartedAsync(_process, cancellationToken).ConfigureAwait(false);
+                SetStatus(started);
+            }
+            catch
+            {
+                if (!_process.HasExited) { _process.Kill(true); await _process.WaitForExitAsync(); }
+                _process.Dispose();
+                _process = null;
+                throw;
+            }
         }
         finally
         {
@@ -100,6 +114,7 @@ public sealed class TcpGatewayService : ITcpGatewayService
         await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            using var control = await BackgroundHostFiles.AcquireControlAsync(WorkspacePathHelper.GatewayRoot, cancellationToken);
             var current = await RefreshStatusAsync(cancellationToken).ConfigureAwait(false);
             if (!current.IsRunning)
             {
@@ -188,8 +203,9 @@ public sealed class TcpGatewayService : ITcpGatewayService
         await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            using var control = await BackgroundHostFiles.AcquireControlAsync(WorkspacePathHelper.GatewayRoot, cancellationToken);
             var status = await RefreshStatusAsync(cancellationToken).ConfigureAwait(false);
-            var process = ResolveLiveProcess(status.ProcessId) ?? _process;
+            using var process = BackgroundHostFiles.ResolveProcess(status.ProcessId, status.ProcessStartTimeUtcTicks, status.ExecutablePath);
             if (process is null || process.HasExited)
             {
                 SetStatus(new TcpGatewayRuntimeStatus
@@ -291,9 +307,16 @@ public sealed class TcpGatewayService : ITcpGatewayService
             status = GetCurrentStatus();
         }
 
-        var process = ResolveLiveProcess(status.ProcessId);
+        using var process = BackgroundHostFiles.ResolveProcess(status.ProcessId, status.ProcessStartTimeUtcTicks, status.ExecutablePath);
         status.RoutingHistoryLogPath = WorkspacePathHelper.GatewayRoutingHistoryPath;
         status.IsRunning = process is not null;
+        if (status.IsRunning && (!BackgroundHostFiles.IsFresh(status.HeartbeatUtc) ||
+            !System.Net.IPEndPoint.TryParse(status.ListenAddress, out var endpoint) ||
+            !BackgroundHostFiles.IsListening(endpoint.Address.ToString(), endpoint.Port)))
+        {
+            status.IsListening = false;
+            status.LastError = "GatewayHost listener is unavailable or heartbeat timed out; stop the host before restarting.";
+        }
         if (!status.IsRunning)
         {
             status.IsListening = false;
@@ -305,24 +328,6 @@ public sealed class TcpGatewayService : ITcpGatewayService
         }
 
         return status;
-    }
-
-    private static Process? ResolveLiveProcess(int? processId)
-    {
-        if (!processId.HasValue || processId.Value <= 0)
-        {
-            return null;
-        }
-
-        try
-        {
-            var process = Process.GetProcessById(processId.Value);
-            return process.HasExited ? null : process;
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     private void SetStatus(TcpGatewayRuntimeStatus status)
@@ -345,6 +350,9 @@ public sealed class TcpGatewayService : ITcpGatewayService
             RequiresRestart = source.RequiresRestart,
             PendingRestartReason = source.PendingRestartReason,
             ProcessId = source.ProcessId,
+            ProcessStartTimeUtcTicks = source.ProcessStartTimeUtcTicks,
+            ExecutablePath = source.ExecutablePath,
+            HeartbeatUtc = source.HeartbeatUtc,
             StartedAtUtc = source.StartedAtUtc,
             ListenAddress = source.ListenAddress,
             ActiveConnections = source.ActiveConnections,

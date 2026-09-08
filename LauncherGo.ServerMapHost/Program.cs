@@ -1,17 +1,40 @@
 using System.Net.Http.Headers;
+using System.Diagnostics;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using LauncherGo.Domains.Models;
+using LauncherGo.Services;
 using Microsoft.AspNetCore.StaticFiles;
 
+using var runtimeLease = ServerHostRuntimeStager.AcquireCurrentLease();
 var arguments = args.Select((value, index) => (value, index))
     .Where(item => item.value.StartsWith("--", StringComparison.Ordinal) && item.index + 1 < args.Length)
     .ToDictionary(item => item.value[2..], item => args[item.index + 1], StringComparer.OrdinalIgnoreCase);
 if (!arguments.TryGetValue("config", out var configPath) || !File.Exists(configPath))
     return 2;
+arguments.TryGetValue("state", out var statePath);
 
 var settings = JsonSerializer.Deserialize<ServerMapSettings>(await File.ReadAllTextAsync(configPath),
     new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? throw new InvalidOperationException("Invalid ServerMap host configuration.");
+using var hostLock = BackgroundHostFiles.AcquireHost(Path.GetDirectoryName(Path.GetFullPath(configPath))!);
+using var currentProcess = Process.GetCurrentProcess();
+var state = new BackgroundHostState
+{
+    ProcessId = Environment.ProcessId,
+    ProcessStartTimeUtcTicks = currentProcess.StartTime.ToUniversalTime().Ticks,
+    ExecutablePath = Environment.ProcessPath ?? "",
+    ListenAddress = settings.ListenAddress,
+    ListenPort = settings.ListenPort,
+    Url = string.IsNullOrWhiteSpace(settings.PublicUrl)
+        ? $"{(settings.UseHttps ? "https" : "http")}://{(settings.ListenAddress.Contains(':') ? "[" + settings.ListenAddress + "]" : settings.ListenAddress is "0.0.0.0" ? "127.0.0.1" : settings.ListenAddress)}:{settings.ListenPort}/"
+        : settings.PublicUrl
+};
+async Task WriteStateAsync(bool running)
+{
+    state.IsRunning = running;
+    state.HeartbeatUtc = DateTimeOffset.UtcNow;
+    if (!string.IsNullOrWhiteSpace(statePath)) await BackgroundHostFiles.WriteAsync(statePath, state);
+}
 var profileRoot = Path.GetDirectoryName(Path.GetFullPath(configPath))!;
 string Resolve(string value, string fallback) => Path.GetFullPath(string.IsNullOrWhiteSpace(value) ? fallback : Path.IsPathRooted(value) ? value : Path.Combine(profileRoot, value));
 
@@ -74,13 +97,33 @@ app.Map("/{**path}", async context =>
     await context.Response.SendFileAsync(file, context.RequestAborted);
 });
 
-if (arguments.TryGetValue("stop", out var stopPath))
+try
 {
-    _ = Task.Run(async () =>
+    await app.StartAsync();
+    await WriteStateAsync(true);
+    using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+    while (!app.Lifetime.ApplicationStopping.IsCancellationRequested)
     {
-        while (!File.Exists(stopPath)) await Task.Delay(500);
-        await app.StopAsync();
-    });
+        if (arguments.TryGetValue("stop", out var stopPath) && File.Exists(stopPath)) break;
+        try { await WriteStateAsync(true); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Keep serving during transient state-file locks; the next heartbeat retries.
+        }
+        try { await timer.WaitForNextTickAsync(app.Lifetime.ApplicationStopping); }
+        catch (OperationCanceledException) { break; }
+    }
+    await app.StopAsync();
+    return 0;
 }
-await app.RunAsync();
-return 0;
+catch (Exception ex)
+{
+    state.Error = ex.Message;
+    return 1;
+}
+finally
+{
+    await WriteStateAsync(false);
+    backend.Dispose();
+    await app.DisposeAsync();
+}

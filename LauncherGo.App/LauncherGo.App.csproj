@@ -8,6 +8,8 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\app-icon.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <LauncherGoHostSelfContained Condition="'$(LauncherGoHostSelfContained)' == ''">$(PublishSingleFile)</LauncherGoHostSelfContained>
+    <LauncherGoHostPublishSingleFile Condition="'$(LauncherGoHostPublishSingleFile)' == ''">$(PublishSingleFile)</LauncherGoHostPublishSingleFile>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
@@ -90,7 +92,7 @@
     <RemoveDir Directories="$(_ServerHostPublishDir)" />
     <MSBuild Projects="$(_ServerHostProject)"
              Targets="Publish"
-             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(PublishSingleFile);PublishSingleFile=$(PublishSingleFile);IncludeNativeLibrariesForSelfExtract=$(PublishSingleFile);DebugType=None;DebugSymbols=false;PublishDir=$(_ServerHostPublishDir)" />
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(LauncherGoHostSelfContained);PublishSingleFile=$(LauncherGoHostPublishSingleFile);IncludeNativeLibrariesForSelfExtract=$(LauncherGoHostSelfContained);DebugType=None;DebugSymbols=false;PublishDir=$(_ServerHostPublishDir)" />
     <ItemGroup>
       <_ServerHostPublishFile Include="$(_ServerHostPublishDir)LauncherGo.ServerHost.exe" Condition="Exists('$(_ServerHostPublishDir)LauncherGo.ServerHost.exe')" />
       <_ServerHostPublishFile Include="$(_ServerHostPublishDir)LauncherGo.ServerHost.dll" Condition="Exists('$(_ServerHostPublishDir)LauncherGo.ServerHost.dll')" />
@@ -159,7 +161,7 @@
     <RemoveDir Directories="$(_ServerMapHostPublishDir)" />
     <MSBuild Projects="$(_ServerMapHostProject)"
              Targets="Publish"
-             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(PublishSingleFile);PublishSingleFile=$(PublishSingleFile);IncludeNativeLibrariesForSelfExtract=$(PublishSingleFile);DebugType=None;DebugSymbols=false;PublishDir=$(_ServerMapHostPublishDir)" />
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(LauncherGoHostSelfContained);PublishSingleFile=$(LauncherGoHostPublishSingleFile);IncludeNativeLibrariesForSelfExtract=$(LauncherGoHostSelfContained);DebugType=None;DebugSymbols=false;PublishDir=$(_ServerMapHostPublishDir)" />
     <ItemGroup>
       <_ServerMapHostPublishFile Include="$(_ServerMapHostPublishDir)LauncherGo.ServerMapHost.exe" Condition="Exists('$(_ServerMapHostPublishDir)LauncherGo.ServerMapHost.exe')" />
       <_ServerMapHostPublishFile Include="$(_ServerMapHostPublishDir)LauncherGo.ServerMapHost.dll" Condition="Exists('$(_ServerMapHostPublishDir)LauncherGo.ServerMapHost.dll')" />
@@ -241,7 +243,7 @@
     <RemoveDir Directories="$(_GatewayHostPublishDir)" />
     <MSBuild Projects="$(_GatewayHostProject)"
              Targets="Publish"
-             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(PublishSingleFile);PublishSingleFile=$(PublishSingleFile);IncludeNativeLibrariesForSelfExtract=$(PublishSingleFile);DebugType=None;DebugSymbols=false;PublishDir=$(_GatewayHostPublishDir)" />
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(LauncherGoHostSelfContained);PublishSingleFile=$(LauncherGoHostPublishSingleFile);IncludeNativeLibrariesForSelfExtract=$(LauncherGoHostSelfContained);DebugType=None;DebugSymbols=false;PublishDir=$(_GatewayHostPublishDir)" />
     <ItemGroup>
       <_GatewayHostPublishFile Include="$(_GatewayHostPublishDir)LauncherGo.GatewayHost.exe" Condition="Exists('$(_GatewayHostPublishDir)LauncherGo.GatewayHost.exe')" />
       <_GatewayHostPublishFile Include="$(_GatewayHostPublishDir)LauncherGo.GatewayHost.dll" Condition="Exists('$(_GatewayHostPublishDir)LauncherGo.GatewayHost.dll')" />
