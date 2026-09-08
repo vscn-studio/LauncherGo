@@ -280,7 +280,12 @@ jobs:
             "artifacts/publish/portable/THIRD-PARTY-LICENSES/MPL-2.0.txt",
             "artifacts/publish/portable/THIRD-PARTY-LICENSES/LGPL-3.0.txt",
             "artifacts/publish/portable/THIRD-PARTY-LICENSES/CC-BY-4.0.txt",
-            "artifacts/publish/portable/LauncherGo.ServerHost.exe"
+            "artifacts/publish/portable/LauncherGo.ServerHost.exe",
+            "artifacts/publish/portable/LauncherGo.ServerHost.runtimeconfig.json",
+            "artifacts/publish/portable/LauncherGo.GatewayHost.exe",
+            "artifacts/publish/portable/LauncherGo.GatewayHost.runtimeconfig.json",
+            "artifacts/publish/portable/LauncherGo.ServerMapHost.exe",
+            "artifacts/publish/portable/LauncherGo.ServerMapHost.runtimeconfig.json"
           )
 
           foreach ($path in $requiredPaths) {
