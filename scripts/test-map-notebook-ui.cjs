@@ -98,6 +98,11 @@ async function main(){
     return route.fulfill({body,contentType:{'.html':'text/html','.css':'text/css','.js':'text/javascript','.svg':'image/svg+xml','.png':'image/png'}[path.extname(file)]||'text/plain'});
    });
    await page.goto(url);await page.waitForFunction(()=>document.querySelector('#notebookProgress').dataset.phase==='rendering');
+   const assetNotice=page.locator('#contributors [data-i18n="gameAssetNotice"]');
+   assert.match(await assetNotice.textContent(),/不随 LauncherGo 安装包、携带版或模组 ZIP 分发/);
+   await page.locator('#contributors .right').click();
+   assert.equal(await assetNotice.isVisible(),true);
+   await page.locator('#contributors .right').click();
    return {page,errors};
   }
   const {page:alice,errors:aliceErrors}=await open('alice');

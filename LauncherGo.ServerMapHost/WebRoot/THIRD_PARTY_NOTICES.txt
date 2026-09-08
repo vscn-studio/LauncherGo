@@ -51,5 +51,10 @@ assets remain under their authors' terms. Generated avatars and cached icons
 are not relicensed under LauncherGo's MIT license. Operators must respect the
 applicable asset terms when serving, exporting or redistributing those caches.
 
+游戏资源展示声明 / Game asset display notice
+本地图展示的游戏模型、贴图、路径点图标及基于这些素材生成的头像，其相关权利归 Vintage Story 官方及对应模组、资源包作者所有。LauncherGo 不主张这些素材的所有权，其开源许可证不适用于这些素材。官方原始模型、贴图及运行时同步的游戏图标仅在模组运行时调用，用于服务器地图展示，不随 LauncherGo 安装包、携带版或模组 ZIP 分发。第三方模组、资源包素材的使用仍须遵循原作者许可。
+
+Rights in game models, textures, waypoint icons and avatars generated from those assets belong to Vintage Story and the respective mod or resource-pack authors. LauncherGo claims no ownership of those assets; its open-source license does not apply to them. Original official models, textures and runtime-synced game icons are accessed only at mod runtime for server map display, not bundled in LauncherGo installers, portable packages or mod ZIPs. Third-party mod and resource-pack assets remain subject to their authors' licenses.
+
 Keep this notice, LICENSE.txt and all vendor license files when copying,
 customizing or redistributing this web directory.

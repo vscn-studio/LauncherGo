@@ -159,6 +159,12 @@ image has been removed from the web distribution.
 
 ## Release Audit Notes
 
+### Game asset display notice / 游戏资源展示声明
+
+本地图展示的游戏模型、贴图、路径点图标及基于这些素材生成的头像，其相关权利归 Vintage Story 官方及对应模组、资源包作者所有。LauncherGo 不主张这些素材的所有权，其开源许可证不适用于这些素材。官方原始模型、贴图及运行时同步的游戏图标仅在模组运行时调用，用于服务器地图展示，不随 LauncherGo 安装包、携带版或模组 ZIP 分发。第三方模组、资源包素材的使用仍须遵循原作者许可。
+
+Rights in game models, textures, waypoint icons and avatars generated from those assets belong to Vintage Story and the respective mod or resource-pack authors. LauncherGo claims no ownership of those assets; its open-source license does not apply to them. Original official models, textures and runtime-synced game icons are accessed only at mod runtime for server map display, not bundled in LauncherGo installers, portable packages or mod ZIPs. Third-party mod and resource-pack assets remain subject to their authors' licenses.
+
 Client-supplied head models, texture fragments and waypoint SVGs, generated
 avatars and optional avatar layers remain subject to the original game or
 resource-pack asset terms. They are runtime data, not bundled game resources
