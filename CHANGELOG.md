@@ -43,6 +43,7 @@
 - 补齐 ServerMap 模组和网页的作者、版权、MIT、Leaflet BSD-2-Clause、WebCartographer MIT 及 VS-LiveMap-Revival MIT 声明。
 - 按实际引用版本修正 LiveMap MIT 原文，明确地图渲染代码、网页图标、路径规划及背景图片的上游来源；独立网页保留完整 LauncherGo MIT 许可证。
 - 出生点改用 WebCartographer 随附的原始图标，移除旧时空齿轮图片及构建、发布目录残留，并补充图片来源与打包校验。
+- 参考 WebCartographer 将出生点、玩家及传送器图标改为固定屏幕像素尺寸，地点标记和领地文字统一为 10px，避免地图放大或缩小时覆盖层过大。
 
 ## 2.6.8-pre.4 - 2026-09-07
 
