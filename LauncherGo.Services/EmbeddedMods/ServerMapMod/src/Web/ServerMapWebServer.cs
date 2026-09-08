@@ -26,7 +26,9 @@ public sealed class ServerMapWebServer : IDisposable
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<(int X, int Z), byte>> baseTiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, long> layerVersions = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, IndexedPoint> translocators = new();
-    private int objectIndexStarted;
+    private readonly object maintenanceGate = new();
+    private Task maintenance = Task.CompletedTask;
+    private bool maintenanceStarted;
     private readonly DateTimeOffset startedAt = DateTimeOffset.UtcNow;
     private HttpListener? listener;
 
@@ -36,15 +38,6 @@ public sealed class ServerMapWebServer : IDisposable
         webRoot = ResolveWebRoot(api); renderer = new MapRenderer(reader, root, api.World.BlockAccessor.MapSizeY, materials); pyramid = new TilePyramidBuilder(root);
         foreach (var name in Renderers) { baseTiles[name] = LoadBaseTiles(name); layerVersions[name] = 1; }
         foreach (var name in Layers) layerVersions.TryAdd(name, 1);
-        foreach (var name in Renderers)
-        {
-            var rendererName = name;
-            _ = Task.Run(() =>
-            {
-                try { pyramid.BuildAllParents(rendererName, baseTiles[rendererName].Keys); }
-                catch (Exception ex) { api.Logger.Warning("ServerMap could not backfill {0} parent tiles: {1}", rendererName, ex.Message); }
-            });
-        }
         api.Logger.Notification("ServerMap 2D web root: {0}", webRoot);
     }
 
@@ -366,18 +359,28 @@ public sealed class ServerMapWebServer : IDisposable
         return palette[(Math.Abs(protectionLevel) + index) % palette.Length];
     }
 
-    private void BuildObjectIndex()
+    private async Task BuildObjectIndexAsync()
     {
         try
         {
-            var columns = reader.MapColumns().Select(column => (column.X, column.Z)).Distinct().ToArray();
+            stop.Token.ThrowIfCancellationRequested();
+            api.Logger.Notification("ServerMap object index started (background, paged, throttled).");
             var skippedChunks = 0;
-            foreach (var (x, z) in columns)
+            var scannedChunks = 0;
+            var lastProgress = Environment.TickCount64;
+            foreach (var column in reader.MapColumns(stop.Token))
             {
                 if (stop.IsCancellationRequested) return;
-                foreach (var y in reader.ChunkYs(x, z))
+                foreach (var y in reader.ChunkYs(column.X, column.Z))
                 {
-                    var chunk = reader.LoadChunk(new ChunkKey(x, y, z));
+                    stop.Token.ThrowIfCancellationRequested();
+                    if (++scannedChunks % 32 == 0) await Task.Delay(25, stop.Token).ConfigureAwait(false);
+                    if (Environment.TickCount64 - lastProgress >= 10000)
+                    {
+                        api.Logger.Notification("ServerMap object index progress: {0} chunks scanned.", scannedChunks);
+                        lastProgress = Environment.TickCount64;
+                    }
+                    var chunk = reader.LoadChunk(new ChunkKey(column.X, y, column.Z));
                     if (chunk == null) continue;
                     try
                     {
@@ -398,6 +401,7 @@ public sealed class ServerMapWebServer : IDisposable
             events.Publish("layer", new { layer = "translocators", version = layerVersions["translocators"] });
             api.Logger.Notification("ServerMap object index ready: translocators={0}, skipped-chunks={1}.", translocators.Count, skippedChunks);
         }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
         catch (Exception ex) { api.Logger.Warning("ServerMap object index failed: {0}", ex); }
     }
     private static (double MinX, double MinZ, double MaxX, double MaxZ)? ParseBounds(string? value)
@@ -433,16 +437,40 @@ public sealed class ServerMapWebServer : IDisposable
     }
     public void NotifyColormapApplied() => events.Publish("colormap", new { month = materials.ClientColormapMonth, version = materials.ClientColormapVersion });
     public bool HasBaseTile(string rendererName, ChunkKey key) => baseTiles.TryGetValue(rendererName, out var tiles) && tiles.ContainsKey((key.X, key.Z));
-    public void StartObjectIndex()
+    public void StartBackgroundMaintenance()
     {
-        if (Interlocked.Exchange(ref objectIndexStarted, 1) != 0) return;
-        _ = Task.Run(BuildObjectIndex);
+        lock (maintenanceGate)
+        {
+            if (maintenanceStarted || stop.IsCancellationRequested) return;
+            maintenanceStarted = true;
+            maintenance = Task.WhenAll(Task.Run(BuildObjectIndexAsync), Task.Run(() =>
+            {
+                foreach (var rendererName in Renderers)
+                {
+                    try { pyramid.BuildAllParents(rendererName, baseTiles[rendererName].Keys, stop.Token); }
+                    catch (OperationCanceledException) when (stop.IsCancellationRequested) { return; }
+                    catch (Exception ex) { api.Logger.Warning("ServerMap could not backfill {0} parent tiles: {1}", rendererName, ex.Message); }
+                }
+            }));
+        }
     }
     private static string ResolveWebRoot(ICoreServerAPI api)
     {
         var assemblyRoot = Path.GetDirectoryName(typeof(ServerMapWebServer).Assembly.Location); if (!string.IsNullOrWhiteSpace(assemblyRoot) && Directory.Exists(Path.Combine(assemblyRoot, "web"))) return Path.Combine(assemblyRoot, "web");
         var source = api.ModLoader.GetMod("servermap")?.SourcePath; var sourceRoot = string.IsNullOrWhiteSpace(source) ? null : Directory.Exists(source) ? source : Path.GetDirectoryName(source); return string.IsNullOrWhiteSpace(sourceRoot) ? Path.Combine(AppContext.BaseDirectory, "web") : Path.Combine(sourceRoot, "web");
     }
-    public void Dispose() { stop.Cancel(); events.Dispose(); try { listener?.Stop(); listener?.Close(); } catch { } }
+    public Task StopAsync()
+    {
+        lock (maintenanceGate)
+        {
+            if (!stop.IsCancellationRequested)
+            {
+                stop.Cancel(); events.Dispose();
+                try { listener?.Stop(); listener?.Close(); } catch { }
+            }
+            return maintenance;
+        }
+    }
+    public void Dispose() => _ = StopAsync();
     private sealed record IndexedPoint(string Id, string Name, string Kind, double X, double Y, double Z, double? TargetX = null, double? TargetY = null, double? TargetZ = null);
 }

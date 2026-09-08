@@ -32,14 +32,20 @@ public sealed class TilePyramidBuilder
     /// <summary>Backfills a pyramid after an upgrade. Old cache directories
     /// only contain zoom zero tiles, so doing this in the background prevents
     /// a zoom-out request from resolving to a transparent placeholder.</summary>
-    public void BuildAllParents(string renderer, IEnumerable<(int X, int Z)> regions)
+    public void BuildAllParents(string renderer, IEnumerable<(int X, int Z)> regions, CancellationToken cancellationToken = default)
     {
         var current = new HashSet<(int X, int Z)>(regions);
         for (var zoom = 1; zoom <= MaxZoom && current.Count > 0; zoom++)
         {
             var parents = new HashSet<(int X, int Z)>();
             foreach (var tile in current) parents.Add((FloorDiv(tile.X, 2), FloorDiv(tile.Z, 2)));
-            foreach (var parent in parents) BuildParent(renderer, zoom, parent.X, parent.Z);
+            foreach (var parent in parents)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                BuildParent(renderer, zoom, parent.X, parent.Z);
+                // Backfilling old caches must not saturate a busy game server.
+                if (cancellationToken.WaitHandle.WaitOne(10)) cancellationToken.ThrowIfCancellationRequested();
+            }
             current = parents;
         }
     }

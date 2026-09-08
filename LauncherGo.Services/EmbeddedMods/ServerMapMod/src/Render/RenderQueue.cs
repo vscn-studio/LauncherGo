@@ -33,6 +33,7 @@ public sealed class RenderQueue : IDisposable
     private readonly Task[] workers;
     private readonly Func<ChunkKey, RenderQueueOutcome> render;
     private bool disposed;
+    private Task? shutdown;
 
     public RenderQueue(int threadCount, Func<ChunkKey, RenderQueueOutcome> render)
     {
@@ -178,19 +179,26 @@ public sealed class RenderQueue : IDisposable
 
     public int PendingCount { get { lock (pendingGate) return pending.Count; } }
 
-    public void Dispose()
+    public Task StopAsync()
     {
         lock (pendingGate)
         {
-            if (disposed) return;
+            if (shutdown != null) return shutdown;
             disposed = true;
             jobs.CompleteAdding();
             priorityJobs.CompleteAdding();
+            stop.Cancel();
+            shutdown = FinishStopAsync();
+            return shutdown;
         }
-        stop.Cancel();
-        try { Task.WaitAll(workers, TimeSpan.FromSeconds(2)); } catch { }
-        stop.Dispose();
-        jobs.Dispose();
-        priorityJobs.Dispose();
     }
+
+    private async Task FinishStopAsync()
+    {
+        await Task.WhenAll(workers).ConfigureAwait(false);
+        jobs.Dispose(); priorityJobs.Dispose();
+        // Delayed retry continuations may still observe stop.Token.
+    }
+
+    public void Dispose() => _ = StopAsync();
 }

@@ -17,10 +17,10 @@ public sealed class WorldDatabaseReader : IDisposable
     private readonly ServerMain server;
     private readonly SqliteConnection connection;
     private readonly ChunkDataPool pool;
-    private readonly LruCache<long, ServerMapChunk> mapChunks;
-    private readonly object mapChunkGate = new();
+    private readonly ResettableCache<long, ServerMapChunk?> mapChunks;
+    private readonly ResettableCache<(int X, int Z), int[]> chunkYs;
     private readonly object queryGate = new();
-    private Dictionary<(int X, int Z), int[]>? chunkYIndex;
+    private readonly CancellationTokenSource stopping = new();
     private readonly object loadedColumnGate = new();
     private readonly Dictionary<(int X, int Z), ServerChunk?[]> loadedColumns = new();
     private readonly Dictionary<(int X, int Z), TaskCompletionSource<ServerChunk?[]>> pendingColumns = new();
@@ -41,9 +41,13 @@ public sealed class WorldDatabaseReader : IDisposable
         var thread = Field<ChunkServerThread>(server, "chunkThread")!;
         var db = Field<GameDatabase>(thread, "gameDatabase")!;
         var file = Field<SQLiteDBConnection>(db, "conn")!.GetType().GetField("databaseFileName", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(Field<SQLiteDBConnection>(db, "conn")!) as string ?? throw new InvalidOperationException("Could not resolve world database path");
-        connection = new SqliteConnection($"Data Source={file};Mode=ReadOnly;Pooling=false"); connection.Open();
+        connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = file, Mode = SqliteOpenMode.ReadOnly, Pooling = false, DefaultTimeout = 1
+        }.ToString()); connection.Open();
         pool = new ChunkDataPool(32, server);
-        mapChunks = new LruCache<long, ServerMapChunk>(cacheSize);
+        mapChunks = new ResettableCache<long, ServerMapChunk?>(cacheSize);
+        chunkYs = new ResettableCache<(int X, int Z), int[]>(cacheSize);
     }
 
     /// <summary>
@@ -177,15 +181,27 @@ public sealed class WorldDatabaseReader : IDisposable
     }
 
     private static int FloorDiv(int value, int divisor) => value >= 0 ? value / divisor : (value - divisor + 1) / divisor;
-    public IEnumerable<ChunkKey> MapColumns()
+    public IEnumerable<ChunkKey> MapColumns(CancellationToken cancellationToken = default)
     {
-        List<ChunkKey> result = [];
-        lock (queryGate)
+        long? after = null;
+        while (true)
         {
-            using var cmd = connection.CreateCommand(); cmd.CommandText = "SELECT position FROM mapchunk";
-            using var reader = cmd.ExecuteReader(); while (reader.Read()) result.Add(ChunkKey.From(reader.GetInt64(0)));
+            cancellationToken.ThrowIfCancellationRequested();
+            stopping.Token.ThrowIfCancellationRequested();
+            long[] page;
+            lock (queryGate)
+            {
+                stopping.Token.ThrowIfCancellationRequested();
+                page = SavedWorldQueries.MapPage(connection, after);
+            }
+            if (page.Length == 0) yield break;
+            foreach (var position in page)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return ChunkKey.From(position);
+            }
+            after = page[^1];
         }
-        return result;
     }
 
     /// <summary>
@@ -196,39 +212,28 @@ public sealed class WorldDatabaseReader : IDisposable
     /// </summary>
     public IReadOnlyList<int> ChunkYs(int x, int z)
     {
-        lock (queryGate)
+        return chunkYs.GetOrAdd((x, z), column =>
         {
-            if (chunkYIndex == null)
+            // Probe only this column's possible saved slices by primary key.
+            // Never rebuild a world-wide index for each newly loaded chunk.
+            var count = Math.Max(1, (api.World.BlockAccessor.MapSizeY + 31) / 32);
+            var positions = Enumerable.Range(0, count)
+                .Select(y => new ChunkKey(column.X, y, column.Z).ToIndex()).ToArray();
+            lock (queryGate)
             {
-                var index = new Dictionary<(int X, int Z), List<int>>();
-                using var cmd = connection.CreateCommand();
-                cmd.CommandText = "SELECT position FROM chunk";
-                using var rows = cmd.ExecuteReader();
-                while (rows.Read())
-                {
-                    ChunkKey key;
-                    try { key = ChunkKey.From(rows.GetInt64(0)); }
-                    catch { continue; }
-                    var list = index.GetValueOrDefault((key.X, key.Z));
-                    if (list == null) index[(key.X, key.Z)] = list = [];
-                    if (!list.Contains(key.Y)) list.Add(key.Y);
-                }
-                chunkYIndex = index.ToDictionary(
-                    pair => pair.Key,
-                    pair => pair.Value.OrderBy(value => value).ToArray());
+                stopping.Token.ThrowIfCancellationRequested();
+                return SavedWorldQueries.ColumnPositions(connection, positions)
+                    .Select(position => ChunkKey.From(position).Y).OrderBy(y => y).ToArray();
             }
-
-            return chunkYIndex.TryGetValue((x, z), out var values) ? values : Array.Empty<int>();
-        }
+        });
     }
     public ServerMapChunk? GetMapChunk(ChunkKey key)
     {
-        lock (mapChunkGate)
+        return mapChunks.GetOrAdd(key.ToIndex(), index =>
         {
-            if (mapChunks.TryGet(key.ToIndex(), out var value)) return value;
-            var bytes = Read(key.ToIndex(), "mapchunk"); if (bytes == null) return null;
-            value = ServerMapChunk.FromBytes(bytes); mapChunks.Set(key.ToIndex(), value); return value;
-        }
+            var bytes = Read(index, "mapchunk");
+            return bytes == null ? null : ServerMapChunk.FromBytes(bytes);
+        });
     }
     public int? SurfaceHeightAt(double worldX, double worldZ)
     {
@@ -378,7 +383,9 @@ public sealed class WorldDatabaseReader : IDisposable
     {
         lock (queryGate)
         {
+            stopping.Token.ThrowIfCancellationRequested();
             using var cmd = connection.CreateCommand(); cmd.CommandText = $"SELECT data FROM {table} WHERE position=@position";
+            cmd.CommandTimeout = 1;
             cmd.Parameters.AddWithValue("@position", index); return cmd.ExecuteScalar() as byte[];
         }
     }
@@ -402,16 +409,18 @@ public sealed class WorldDatabaseReader : IDisposable
     }
     public void Clear()
     {
-        mapChunks.Clear();
-        lock (queryGate) chunkYIndex = null;
+        mapChunks.Reset();
+        chunkYs.Reset();
     }
 
     public void InvalidateChunkIndex()
     {
-        lock (queryGate) chunkYIndex = null;
+        chunkYs.Reset();
     }
+    public void RequestStop() => stopping.Cancel();
     public void Dispose()
     {
+        RequestStop();
         lock (loadedColumnGate)
         {
             foreach (var chunk in transientChunks) chunk.Dispose();
@@ -419,8 +428,8 @@ public sealed class WorldDatabaseReader : IDisposable
             transientChunks.Clear();
             pendingColumns.Clear();
         }
-        lock (queryGate) chunkYIndex = null;
-        pool.SlowDispose(); connection.Dispose();
+        pool.SlowDispose();
+        lock (queryGate) connection.Dispose();
     }
     private static T? Field<T>(object instance, string name) where T : class => instance.GetType().GetField(name, BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance)?.GetValue(instance) as T;
 }

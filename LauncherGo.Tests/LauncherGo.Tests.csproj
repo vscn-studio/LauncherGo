@@ -23,6 +23,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Test the actual map scheduling/query helpers without redistributing game assemblies. -->
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Util\LruCache.cs" Link="ServerMap\LruCache.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Util\ResettableCache.cs" Link="ServerMap\ResettableCache.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Util\BackgroundMapWork.cs" Link="ServerMap\BackgroundMapWork.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\World\SavedWorldQueries.cs" Link="ServerMap\SavedWorldQueries.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="..\LICENSE" Link="LicenseFixtures\LauncherGo.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\LICENSE.txt" Link="LicenseFixtures\MapMod.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\LauncherGo.ServerMapHost\WebRoot\LICENSE.txt" Link="LicenseFixtures\MapWeb.txt" CopyToOutputDirectory="PreserveNewest" />

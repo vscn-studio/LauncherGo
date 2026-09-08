@@ -8,6 +8,7 @@ using Vintagestory.API.MathTools;
 using Vintagestory.API.Server;
 using Vintagestory.API.Config;
 using System.Reflection;
+using ServerMap.Util;
 
 namespace ServerMap;
 
@@ -21,6 +22,9 @@ public sealed class ServerMapModSystem : ModSystem
     private int requestedColormapMonth;
     private long lastColormapRequestAt;
     private bool colormapCacheInitialized;
+    private BackgroundMapWork? background;
+    private volatile bool running;
+    private volatile bool disposed;
     private MapAuthStore? authStore;
     private PoiStore? poiStore;
     private readonly DoorStateCache doorStates = new();
@@ -29,9 +33,33 @@ public sealed class ServerMapModSystem : ModSystem
     {
         sapi=api; var configDir=api.GetOrCreateDataPath("ServerMap"); dataRoot=Path.Combine(configDir,api.World.SavegameIdentifier); configPath=Path.Combine(configDir,"servermap.json"); Directory.CreateDirectory(dataRoot);
         config ??= ServerMapConfig.Load(configPath,api.Logger.Error);
+        if (!config.Enabled) { api.Logger.Notification("ServerMap disabled; no database or background scans started."); return; }
         materials ??= Render.MapPalette.Capture(api);
         EnsureCacheFormat();
-        try { db=new WorldDatabaseReader(api,config.ChunkCacheSize); authStore=new MapAuthStore(Path.Combine(dataRoot,"auth-accounts.json")); poiStore=new PoiStore(Path.Combine(dataRoot,"pois.json")); var announcementStore=new AnnouncementStore(Path.Combine(dataRoot,"announcement.json")); web=new ServerMapWebServer(api,config,dataRoot,db,materials,authStore,poiStore,announcementStore); queue=new Render.RenderQueue(config.RenderThreads, RenderRegion); colormapReceiver=new ClientColormapReceiver(api,materials,OnClientColormapApplied,Path.Combine(dataRoot,"colormap")); colormapChannel=api.Network.RegisterChannel("servermap-colormap").RegisterMessageType<ServerColormapRequestPacket>().RegisterMessageType<ClientColormapChunkPacket>().SetMessageHandler<ClientColormapChunkPacket>(colormapReceiver.Receive); web.Start(); api.Event.ChunkDirty += OnChunkDirty; api.Event.ChunkColumnLoaded += OnChunkColumnLoaded; api.Event.GameWorldSave += OnSave; api.Event.PlayerNowPlaying += OnPlayerNowPlaying; api.Event.ServerRunPhase(EnumServerRunPhase.GameReady, InitializeColormapCache); colormapRequestListenerId=api.Event.RegisterGameTickListener(_ => RequestMissingColormap(),30000); api.RegisterCommand("servermap", "ServerMap commands", "/servermap status|reload|psw <password>|render all", OnCommand, "chat"); api.Event.RegisterCallback(_ => { InitializeColormapCache(); QueueExistingRegions(); RequestMissingColormap(); }, 1000); api.Logger.Notification("ServerMap 2D-only initialized; client colormap cache will load at GameReady."); }
+        try
+        {
+            db = new WorldDatabaseReader(api, config.ChunkCacheSize);
+            authStore = new MapAuthStore(Path.Combine(dataRoot, "auth-accounts.json"));
+            poiStore = new PoiStore(Path.Combine(dataRoot, "pois.json"));
+            var announcementStore = new AnnouncementStore(Path.Combine(dataRoot, "announcement.json"));
+            web = new ServerMapWebServer(api, config, dataRoot, db, materials, authStore, poiStore, announcementStore);
+            queue = new Render.RenderQueue(config.RenderThreads, RenderRegion);
+            background = new BackgroundMapWork((job, ex) => api.Logger.Warning("ServerMap background {0} failed: {1}", job, ex));
+            colormapReceiver = new ClientColormapReceiver(api, materials, OnClientColormapApplied, Path.Combine(dataRoot, "colormap"));
+            colormapChannel = api.Network.RegisterChannel("servermap-colormap")
+                .RegisterMessageType<ServerColormapRequestPacket>().RegisterMessageType<ClientColormapChunkPacket>()
+                .SetMessageHandler<ClientColormapChunkPacket>(colormapReceiver.Receive);
+            web.Start();
+            api.Event.ChunkDirty += OnChunkDirty;
+            api.Event.ChunkColumnLoaded += OnChunkColumnLoaded;
+            api.Event.GameWorldSave += OnSave;
+            api.Event.PlayerNowPlaying += OnPlayerNowPlaying;
+            api.Event.ServerRunPhase(EnumServerRunPhase.GameReady, InitializeColormapCache);
+            api.Event.ServerRunPhase(EnumServerRunPhase.RunGame, StartBackgroundWork);
+            colormapRequestListenerId = api.Event.RegisterGameTickListener(_ => RequestMissingColormap(), 30000);
+            api.RegisterCommand("servermap", "ServerMap commands", "/servermap status|reload|psw <password>|render all", OnCommand, "chat");
+            api.Logger.Notification("ServerMap initialized; database scans deferred until RunGame.");
+        }
         catch(Exception ex){api.Logger.Error("ServerMap initialization failed: {0}",ex);}
     }
     private void OnChunkDirty(Vec3i chunkPos, IWorldChunk chunk, EnumChunkDirtyReason reason)
@@ -47,40 +75,53 @@ public sealed class ServerMapModSystem : ModSystem
         // WorldDatabaseReader intentionally reads the persisted SQLite world.
         // Rendering now would see the previous save (or half-written chunks),
         // so mirror LiveMap: remember the region and process it after save.
-        db?.InvalidateChunkIndex();
+        if (disposed) return;
         regionsAwaitingSave.TryAdd(region, 0);
     }
-    private void QueueExistingRegions()
+    private void StartBackgroundWork()
     {
-        if (db == null) return;
-        foreach (var region in db.MapColumns().Select(column => new ChunkKey(column.X >> 4, 0, column.Z >> 4)).Distinct())
-            if (web?.HasBaseTile("basic", region) != true || web.HasBaseTile("sepia", region) != true) queue?.Enqueue(region);
-    }
-    private void QueueExistingBasicRegions()
-    {
-        if (db == null) return;
-        var regions = db.MapColumns().Select(column => new ChunkKey(column.X >> 4, 0, column.Z >> 4)).Distinct().ToArray();
-        foreach (var region in regions)
+        if (disposed || running) return;
+        running = true;
+        sapi?.Logger.Notification("ServerMap RunGame reached; background scans start in 5 seconds.");
+        background?.Enqueue("startup", async token =>
         {
+            web?.StartBackgroundMaintenance();
+            await ScanRegionsAsync(false, false, token).ConfigureAwait(false);
+        });
+        background?.Start(TimeSpan.FromSeconds(5));
+    }
+    private async Task ScanRegionsAsync(bool basicOnly, bool force, CancellationToken token)
+    {
+        if (db == null) return;
+        sapi?.Logger.Notification("ServerMap region scan started (background, paged).");
+        var regions = new HashSet<ChunkKey>();
+        var columns = 0;
+        foreach (var column in db.MapColumns(token))
+        {
+            token.ThrowIfCancellationRequested();
+            if (++columns % 256 == 0) await Task.Delay(25, token).ConfigureAwait(false);
+            var region = new ChunkKey(column.X >> 4, 0, column.Z >> 4);
+            if (!regions.Add(region)) continue;
             // A new world still needs its sepia base tile. Only narrow the
             // redraw when the non-colour tile already exists.
-            if (web?.HasBaseTile("sepia", region) == true) basicOnlyRegions[region] = 0;
-            queue?.Enqueue(region);
+            if (basicOnly && web?.HasBaseTile("sepia", region) == true) basicOnlyRegions[region] = 0;
+            if (force || basicOnly || web?.HasBaseTile("basic", region) != true || web.HasBaseTile("sepia", region) != true)
+                queue?.Enqueue(region);
+            if (regions.Count % 128 == 0) sapi?.Logger.Notification("ServerMap region scan: {0} regions discovered.", regions.Count);
         }
-        sapi?.Logger.Notification("ServerMap queued {0} regions for client-color basic redraw.", regions.Length);
+        sapi?.Logger.Notification("ServerMap region scan complete: {0} columns, {1} regions.", columns, regions.Count);
     }
     private void OnClientColormapApplied()
     {
         requestedColormapMonth = 0;
         web?.NotifyColormapApplied();
-        QueueExistingBasicRegions();
+        background?.Enqueue("colormap-redraw", token => ScanRegionsAsync(true, true, token));
     }
     private void OnPlayerNowPlaying(IServerPlayer player) => RequestMissingColormap(player);
     private void InitializeColormapCache()
     {
-        if (colormapCacheInitialized || sapi?.World.Calendar == null || materials == null) return;
+        if (disposed || colormapCacheInitialized || sapi?.World.Calendar == null || materials == null) return;
         colormapCacheInitialized = true;
-        web?.StartObjectIndex();
         var month = Math.Clamp(sapi.World.Calendar.Month, 1, 12);
         var loaded = materials.LoadClientColormap(Path.Combine(dataRoot, "colormap"), month, message => sapi.Logger.Notification(message));
         sapi.Logger.Notification("ServerMap client colormap cache: month={0}, loaded={1}.", month, loaded);
@@ -88,7 +129,7 @@ public sealed class ServerMapModSystem : ModSystem
     }
     private void RequestMissingColormap(IServerPlayer? candidate = null)
     {
-        if (sapi == null || sapi.World.Calendar == null || materials == null || colormapChannel == null) return;
+        if (disposed || !running || sapi == null || sapi.World.Calendar == null || materials == null || colormapChannel == null) return;
         InitializeColormapCache();
         var month = Math.Clamp(sapi.World.Calendar.Month, 1, 12);
         if (materials.HasClientColormap && materials.ClientColormapMonth == month) return;
@@ -103,11 +144,13 @@ public sealed class ServerMapModSystem : ModSystem
     }
     private Render.RenderQueueOutcome RenderRegion(ChunkKey job)
     {
+        if (disposed) return Render.RenderQueueOutcome.Completed;
         try
         {
             if (config?.Enable2D == true) web?.Render2D(job, basicOnlyRegions.TryRemove(job, out _));
             return Render.RenderQueueOutcome.Completed;
         }
+        catch (OperationCanceledException) when (disposed) { return Render.RenderQueueOutcome.Completed; }
         catch(Exception ex)
         {
             sapi?.Logger.Warning("ServerMap render failed: {0}",ex.ToString());
@@ -116,16 +159,26 @@ public sealed class ServerMapModSystem : ModSystem
     }
     private void OnSave()
     {
-        db?.Clear();
+        if (disposed) return;
         // The game save event fires before all SQLite writes are guaranteed
         // visible to a second read-only connection.  LiveMap uses the same
         // short delay before it scans queued regions.
-        sapi?.Event.RegisterCallback(_ => FlushSavedRegions(), 1000);
+        background?.Enqueue("saved-regions", async token =>
+        {
+            await Task.Delay(1000, token).ConfigureAwait(false);
+            db?.Clear();
+            await FlushSavedRegionsAsync(token).ConfigureAwait(false);
+        });
     }
-    private void FlushSavedRegions()
+    private async Task FlushSavedRegionsAsync(CancellationToken token)
     {
+        var count = 0;
         foreach (var region in regionsAwaitingSave.Keys)
+        {
+            token.ThrowIfCancellationRequested();
             if (regionsAwaitingSave.TryRemove(region, out _)) queue?.Enqueue(region, priority: true);
+            if (++count % 256 == 0) await Task.Delay(25, token).ConfigureAwait(false);
+        }
     }
     private void OnCommand(IServerPlayer player, int groupId, CmdArgs args)
     {
@@ -153,7 +206,7 @@ public sealed class ServerMapModSystem : ModSystem
         if (command == "render" && db != null)
         {
             if (player != null && !player.HasPrivilege("root")) { Reply(player, groupId, "ServerMap render requires the root privilege."); return; }
-            foreach(var column in db.MapColumns()) queue?.Enqueue(new ChunkKey(column.X >> 4, 0, column.Z >> 4));
+            background?.Enqueue("full-render", token => ScanRegionsAsync(false, true, token));
             Reply(player, groupId, "ServerMap 2D full render queued."); return;
         }
         Reply(player, groupId, $"ServerMap 2D is running. Web: {config?.BindAddress}:{config?.Port}; queued: {queue?.PendingCount ?? 0}; client colormap: {materials?.HasClientColormap} (month {materials?.ClientColormapMonth})");
@@ -168,7 +221,33 @@ public sealed class ServerMapModSystem : ModSystem
         }
         sapi?.Logger.Notification("ServerMap: {0}", message);
     }
-    public override void Dispose(){if(sapi!=null){sapi.Event.ChunkDirty-=OnChunkDirty;sapi.Event.ChunkColumnLoaded-=OnChunkColumnLoaded;sapi.Event.GameWorldSave-=OnSave;sapi.Event.PlayerNowPlaying-=OnPlayerNowPlaying;if(colormapRequestListenerId!=0)sapi.Event.UnregisterGameTickListener(colormapRequestListenerId);}colormapReceiver?.Dispose();colormapReceiver=null;colormapChannel=null;queue?.Dispose();web?.Dispose();db?.Dispose();base.Dispose();}
+    public override void Dispose()
+    {
+        if (disposed) return;
+        disposed = true;
+        if (sapi != null)
+        {
+            sapi.Event.ChunkDirty -= OnChunkDirty;
+            sapi.Event.ChunkColumnLoaded -= OnChunkColumnLoaded;
+            sapi.Event.GameWorldSave -= OnSave;
+            sapi.Event.PlayerNowPlaying -= OnPlayerNowPlaying;
+            if (colormapRequestListenerId != 0) sapi.Event.UnregisterGameTickListener(colormapRequestListenerId);
+        }
+        colormapReceiver?.Dispose();
+        colormapReceiver = null; colormapChannel = null;
+        db?.RequestStop();
+        var scans = background?.StopAsync() ?? Task.CompletedTask;
+        var maintenance = web?.StopAsync() ?? Task.CompletedTask;
+        var renders = queue?.StopAsync() ?? Task.CompletedTask;
+        // Never make the game/shutdown thread wait for a map SQL operation.
+        _ = Task.Run(async () =>
+        {
+            try { await Task.WhenAll(scans, maintenance, renders).ConfigureAwait(false); }
+            catch (Exception ex) { sapi?.Logger.Warning("ServerMap background shutdown: {0}", ex.Message); }
+            finally { db?.Dispose(); }
+        });
+        base.Dispose();
+    }
     private void EnsureCacheFormat()
     {
         var marker = Path.Combine(dataRoot, "cache-format.txt");
