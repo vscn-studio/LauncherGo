@@ -8,6 +8,7 @@
     <AppHostDotNetSearch Condition="'$(SelfContained)' != 'true'">Global</AppHostDotNetSearch>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\WebPageMetadata.cs" Link="WebPageMetadata.cs" />
     <ProjectReference Include="..\LauncherGo.Domains\LauncherGo.Domains.csproj" />
     <ProjectReference Include="..\LauncherGo.Services\LauncherGo.Services.csproj" />
     <Content Include="WebRoot\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

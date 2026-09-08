@@ -5,6 +5,7 @@ using System.Text.Json;
 using LauncherGo.Domains.Models;
 using LauncherGo.Services;
 using Microsoft.AspNetCore.StaticFiles;
+using ServerMap.Web;
 
 using var runtimeLease = ServerHostRuntimeStager.AcquireCurrentLease();
 var arguments = args.Select((value, index) => (value, index))
@@ -39,6 +40,7 @@ var profileRoot = Path.GetDirectoryName(Path.GetFullPath(configPath))!;
 string Resolve(string value, string fallback) => Path.GetFullPath(string.IsNullOrWhiteSpace(value) ? fallback : Path.IsPathRooted(value) ? value : Path.Combine(profileRoot, value));
 
 var builder = WebApplication.CreateSlimBuilder(args);
+builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(3));
 builder.WebHost.ConfigureKestrel(options =>
 {
     var address = System.Net.IPAddress.Parse(settings.ListenAddress);
@@ -50,10 +52,24 @@ builder.WebHost.ConfigureKestrel(options =>
     });
 });
 var app = builder.Build();
+using var stopRequests = CancellationTokenSource.CreateLinkedTokenSource(app.Lifetime.ApplicationStopping);
+// Cancel upstream SSE, pending response headers, uploads and static downloads
+// before Kestrel waits for requests to drain. Browser disconnect alone is insufficient.
+app.Use(async (context, next) =>
+{
+    using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, stopRequests.Token);
+    context.RequestAborted = requestCancellation.Token;
+    using var abortOnStop = stopRequests.Token.Register(context.Abort);
+    try { await next(context); }
+    catch (OperationCanceledException) when (requestCancellation.IsCancellationRequested) { context.Abort(); }
+    catch (IOException) when (requestCancellation.IsCancellationRequested) { context.Abort(); }
+});
 var defaultWebRoot = Path.Combine(AppContext.BaseDirectory, "WebRoot");
 var webRoot = Resolve(settings.WebRoot, defaultWebRoot);
 var contentTypes = new FileExtensionContentTypeProvider();
-var backend = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false })
+// Forward only each incoming browser's Cookie header. A shared CookieContainer
+// would otherwise replay the last user's (possibly admin) session to guests.
+var backend = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false })
 {
     BaseAddress = new Uri($"http://127.0.0.1:{settings.BackendPort}/"),
     Timeout = Timeout.InfiniteTimeSpan
@@ -94,18 +110,51 @@ app.Map("/{**path}", async context =>
         return;
     }
     if (contentTypes.TryGetContentType(file, out var type)) context.Response.ContentType = type;
+    if (relative.Equals("index.html", StringComparison.OrdinalIgnoreCase))
+    {
+        // Emit metadata in the initial HTML for crawlers as well as browsers.
+        // Never let an offline game backend hold up the map shell indefinitely.
+        var site = new WebPageMetadata();
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+        timeout.CancelAfter(TimeSpan.FromSeconds(1));
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "api/v1/announcement");
+            if (!string.IsNullOrWhiteSpace(settings.BackendToken)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", settings.BackendToken);
+            using var response = await backend.SendAsync(request, timeout.Token);
+            response.EnsureSuccessStatusCode();
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(timeout.Token));
+            if (document.RootElement.TryGetProperty("site", out var value)) site = (value.Deserialize<WebPageMetadata>() ?? site).Normalize();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or JsonException or ArgumentException) { }
+        context.Response.ContentType = "text/html; charset=utf-8";
+        context.Response.Headers.CacheControl = "no-store";
+        await context.Response.WriteAsync(site.ApplyToHtml(await File.ReadAllTextAsync(file, context.RequestAborted)), context.RequestAborted);
+        return;
+    }
     await context.Response.SendFileAsync(file, context.RequestAborted);
 });
 
 try
 {
+    var lifecycleClock = Stopwatch.StartNew();
+    app.Logger.LogInformation("Map Host stage started: listen.");
     await app.StartAsync();
     await WriteStateAsync(true);
-    using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+    app.Logger.LogInformation("Map Host stage completed: listen. ElapsedMs={ElapsedMs}.", lifecycleClock.ElapsedMilliseconds);
+    using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(200));
+    var heartbeatClock = Stopwatch.StartNew();
     while (!app.Lifetime.ApplicationStopping.IsCancellationRequested)
     {
         if (arguments.TryGetValue("stop", out var stopPath) && File.Exists(stopPath)) break;
-        try { await WriteStateAsync(true); }
+        try
+        {
+            if (heartbeatClock.Elapsed >= TimeSpan.FromSeconds(1))
+            {
+                await WriteStateAsync(true);
+                heartbeatClock.Restart();
+            }
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Keep serving during transient state-file locks; the next heartbeat retries.
@@ -113,7 +162,14 @@ try
         try { await timer.WaitForNextTickAsync(app.Lifetime.ApplicationStopping); }
         catch (OperationCanceledException) { break; }
     }
+    lifecycleClock.Restart();
+    app.Logger.LogInformation("Map Host stage started: cancel-active-requests.");
+    await stopRequests.CancelAsync();
+    app.Logger.LogInformation("Map Host stage completed: cancel-active-requests. ElapsedMs={ElapsedMs}.", lifecycleClock.ElapsedMilliseconds);
+    lifecycleClock.Restart();
+    app.Logger.LogInformation("Map Host stage started: stop-listener.");
     await app.StopAsync();
+    app.Logger.LogInformation("Map Host stage completed: stop-listener. ElapsedMs={ElapsedMs}.", lifecycleClock.ElapsedMilliseconds);
     return 0;
 }
 catch (Exception ex)
@@ -123,7 +179,11 @@ catch (Exception ex)
 }
 finally
 {
-    await WriteStateAsync(false);
-    backend.Dispose();
-    await app.DisposeAsync();
+    try { await WriteStateAsync(false); }
+    finally
+    {
+        await stopRequests.CancelAsync();
+        backend.Dispose();
+        await app.DisposeAsync();
+    }
 }

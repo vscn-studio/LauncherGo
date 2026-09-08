@@ -1,0 +1,45 @@
+/* Touch layout is also used on tablets and phones in landscape. */
+#mobileTools,#sidebarShade { display:none; }
+.modal { max-height:calc(100dvh - 28px);overflow-y:auto;overscroll-behavior:contain; }
+@media (max-width:700px), (pointer:coarse) {
+  body { --glass:#18181af5; }
+  #map { height:100dvh; }
+  .map-control,aside,#announcement,#contributors,.player-tooltip,.leaflet-control-zoom a { backdrop-filter:none!important;box-shadow:none!important;text-shadow:none; }
+  #mobileTools { position:fixed;z-index:1003;top:max(8px,env(safe-area-inset-top));left:max(8px,env(safe-area-inset-left));right:max(8px,env(safe-area-inset-right));display:flex;gap:6px;pointer-events:none; }
+  #mobileTools button { pointer-events:auto;min-width:44px;min-height:44px;padding:8px 12px;border-radius:6px;font:inherit;touch-action:manipulation; }
+  #mobileTools button[aria-expanded=true] { color:#8edcf1!important;background:#294049!important; }
+  #mobileMenu { margin-right:auto; }
+  #sidebarShade:not([hidden]) { display:block;position:fixed;inset:0;z-index:1001;background:#0006;border:0; }
+  aside,aside:hover { top:calc(max(8px,env(safe-area-inset-top)) + 52px);right:0;width:min(320px,calc(100vw - 24px));height:calc(100dvh - max(8px,env(safe-area-inset-top)) - 60px - env(safe-area-inset-bottom));border-radius:8px 0 0 8px;transform:translateX(105%);visibility:hidden;transition:none;z-index:1002;overscroll-behavior:contain; }
+  aside.show,aside.show:hover { right:0;transform:none;visibility:visible; }
+  #pin { display:none; }
+  .pin-row { height:auto;min-height:52px;flex-shrink:0; }
+  #accountActions { position:static;margin-left:0;flex-wrap:wrap; }
+  #accountActions button,.tools button,aside li,#contextMenu button,.modal button,.edit-poi { min-height:44px; }
+  aside li { height:auto;white-space:normal; }
+  .layer-row label { display:flex;align-items:center;min-height:44px; }
+  .layer-row input { width:22px;height:22px; }
+  #topTools { display:none;top:calc(max(8px,env(safe-area-inset-top)) + 52px);left:max(8px,env(safe-area-inset-left));right:max(8px,env(safe-area-inset-right));transform:none;flex-wrap:wrap; }
+  body.mobile-search #topTools { display:flex; }
+  #jumpBox { width:100%; }
+  #jumpBox input { width:0;flex:1; }
+  #searchBox { flex:1 0 100%;min-width:0; }
+  #jumpBox input,#searchBox input,.modal input,.modal textarea { font-size:16px;min-height:44px; }
+  #jumpBox button,#searchBox button { min-height:44px;min-width:44px; }
+  #searchResults { max-height:calc(100dvh - 230px - env(safe-area-inset-top)); }
+  #searchResults li { min-height:44px; }
+  #announcement { display:none;top:calc(max(8px,env(safe-area-inset-top)) + 52px);left:max(8px,env(safe-area-inset-left));width:calc(100vw - max(8px,env(safe-area-inset-left)) - max(8px,env(safe-area-inset-right)));max-height:calc(100dvh - 130px - env(safe-area-inset-top));overflow-wrap:anywhere; }
+  body.mobile-announcement #announcement:not(:empty) { display:block; }
+  #announcement img { max-width:100%;height:auto; }
+  .coordinates { left:max(8px,env(safe-area-inset-left));bottom:calc(8px + env(safe-area-inset-bottom));font-size:11px;max-width:calc(100vw - 84px);overflow:hidden;text-overflow:ellipsis; }
+  .leaflet-control-zoom { left:max(8px,env(safe-area-inset-left));bottom:calc(48px + env(safe-area-inset-bottom)); }
+  .leaflet-control-zoom a { width:44px!important;height:44px!important;line-height:44px!important; }
+  #contributors,aside.show~#contributors,aside:hover~#contributors { right:max(8px,env(safe-area-inset-right));bottom:calc(8px + env(safe-area-inset-bottom));max-width:calc(100vw - 16px);z-index:1000;transition:none; }
+  #contributors .right { width:68px;flex-basis:68px;min-height:44px;padding:12px 4px;font-size:11px; }
+  #routeInfo { bottom:calc(50px + env(safe-area-inset-bottom))!important;left:62px!important;right:8px;transform:none!important;max-height:30dvh;overflow:auto;font-size:12px; }
+  #contextMenu { max-height:calc(100dvh - 80px);overflow:auto; }
+  .modal { padding:12px;max-height:calc(100dvh - 28px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+  .modal textarea { min-height:100px; }
+  .player-tip { grid-template-columns:20px 70px; }
+  .player-tip>img { width:20px;height:20px; }
+}

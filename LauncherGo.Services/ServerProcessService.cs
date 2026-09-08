@@ -735,60 +735,71 @@ internal sealed partial class SingleServerProcessController
     /// <inheritdoc />
     public async Task StartAsync(InstanceProfile profile, CancellationToken cancellationToken = default)
     {
-        await _processGate.WaitAsync(cancellationToken);
+        var stages = new ServerStartStages(profile.Id, profile.Name, _logger,
+            message => OutputReceived?.Invoke(this, message));
+        var gateLease = await stages.AcquireGateAsync(_processGate, cancellationToken).ConfigureAwait(false);
         try
         {
-            ClearTrackedProcessIfTerminated();
-            _manualStopRequested = false;
-
-            if (_process is { HasExited: false })
-                throw new InvalidOperationException("服务器已在运行中。");
-
-            if (await WaitForRestartingRelayAsync(profile, cancellationToken))
+            var attached = await stages.RunAsync("恢复已有进程 / Recover existing process", ServerStartStages.StandardTimeout, async ct =>
             {
-                return;
-            }
+                ct.ThrowIfCancellationRequested();
+                ClearTrackedProcessIfTerminated();
+                _manualStopRequested = false;
 
-            WorkspacePathHelper.EnsureWorkspace();
-            profile.DirectoryPath = WorkspacePathHelper.ResolveProfileDataPath(profile.DirectoryPath);
+                if (_process is { HasExited: false })
+                    throw new InvalidOperationException("服务器已在运行中。");
 
-            if (await TryAttachToExistingWorkspaceServerRelayAsync(
-                    profile,
-                    emitOutput: true,
-                    cancellationToken).ConfigureAwait(false) ||
-                TryAttachToExistingWorkspaceServerProcess(profile, emitOutput: true))
-            {
-                if (_currentProfile?.Id.Equals(profile.Id, StringComparison.OrdinalIgnoreCase) == true)
+                if (await WaitForRestartingRelayAsync(profile, ct))
                 {
-                    if (!HasControlChannel())
-                    {
-                        if (_relayState is not null && IsRelayHostProcess(_relayState))
-                            throw new InvalidOperationException("ServerHost 正在运行，但控制通道尚未恢复，请稍后重试。");
-
-                        throw new InvalidOperationException(
-                            $"检测到该档案存在外部或旧版服务端进程（PID={_currentStatus.ProcessId}），无法恢复命令输入。请先停止该进程，再由 LauncherGo 重新启动。");
-                    }
-
-                    return;
+                    return true;
                 }
 
-                DetachCurrentProcessTracking();
-            }
+                WorkspacePathHelper.EnsureWorkspace();
+                profile.DirectoryPath = WorkspacePathHelper.ResolveProfileDataPath(profile.DirectoryPath);
 
-            if (await HasLiveServerHostForProfileAsync(profile, cancellationToken).ConfigureAwait(false))
-                throw new InvalidOperationException("检测到该档案的 ServerHost 已在运行，控制通道正在恢复，请稍后重试。");
+                if (await TryAttachToExistingWorkspaceServerRelayAsync(
+                        profile,
+                        emitOutput: true,
+                        ct).ConfigureAwait(false) ||
+                    TryAttachToExistingWorkspaceServerProcess(profile, emitOutput: true))
+                {
+                    if (_currentProfile?.Id.Equals(profile.Id, StringComparison.OrdinalIgnoreCase) == true)
+                    {
+                        if (!HasControlChannel())
+                        {
+                            if (_relayState is not null && IsRelayHostProcess(_relayState))
+                                throw new InvalidOperationException("ServerHost 正在运行，但控制通道尚未恢复，请稍后重试。");
 
-            var installPath = _profileService?.EnsureVersionInstalled(profile.Version)
-                              ?? WorkspacePathHelper.GetServerInstallPath(profile.Version);
+                            throw new InvalidOperationException(
+                                $"检测到该档案存在外部或旧版服务端进程（PID={_currentStatus.ProcessId}），无法恢复命令输入。请先停止该进程，再由 LauncherGo 重新启动。");
+                        }
+
+                        return true;
+                    }
+
+                    DetachCurrentProcessTracking();
+                }
+
+                if (await HasLiveServerHostForProfileAsync(profile, ct).ConfigureAwait(false))
+                    throw new InvalidOperationException("检测到该档案的 ServerHost 已在运行，控制通道正在恢复，请稍后重试。");
+                return false;
+            }, cancellationToken).ConfigureAwait(false);
+            if (attached) return;
+
+            var installPath = await stages.RunAsync("检查服务端文件 / Check server files", ServerStartStages.StandardTimeout, ct =>
+            {
+                ct.ThrowIfCancellationRequested();
+                return Task.FromResult(_profileService?.EnsureVersionInstalled(profile.Version)
+                                       ?? WorkspacePathHelper.GetServerInstallPath(profile.Version));
+            }, cancellationToken).ConfigureAwait(false);
             var serverExe = LauncherWorkspacePathHelper.ResolveServerExecutablePath(installPath);
             if (!File.Exists(serverExe))
                 throw new InvalidOperationException($"未找到服务端程序：{serverExe}");
 
             if (_automationLifecycleService is not null)
             {
-                await _automationLifecycleService
-                    .ExecuteAsync(profile, AutomationScriptTrigger.BeforeStart, cancellationToken)
-                    .ConfigureAwait(false);
+                await stages.RunAsync("启动前自动化 / Before-start automation", ServerStartStages.AutomationTimeout,
+                    ct => _automationLifecycleService.ExecuteAsync(profile, AutomationScriptTrigger.BeforeStart, ct), cancellationToken).ConfigureAwait(false);
             }
 
             _logger.LogInformation(
@@ -798,29 +809,49 @@ internal sealed partial class SingleServerProcessController
                 profile.Version,
                 profile.DirectoryPath);
 
-            Directory.CreateDirectory(profile.DirectoryPath);
-            var logsPath = WorkspacePathHelper.GetProfileLogsPath(profile.DirectoryPath);
-            Directory.CreateDirectory(logsPath);
-            await EnsureBuiltInModsBeforeStartAsync(profile, cancellationToken);
+            await stages.RunAsync("准备内置模组 / Prepare built-in mods", ServerStartStages.StandardTimeout, async ct =>
+            {
+                ct.ThrowIfCancellationRequested();
+                Directory.CreateDirectory(profile.DirectoryPath);
+                Directory.CreateDirectory(WorkspacePathHelper.GetProfileLogsPath(profile.DirectoryPath));
+                ct.ThrowIfCancellationRequested();
+                await EnsureBuiltInModsBeforeStartAsync(profile, ct).ConfigureAwait(false);
+            }, cancellationToken).ConfigureAwait(false);
 
             // 缺失配置时自动生成；已有配置仅做必要的非破坏性归一化。
-            ServerConfigBootstrapper.EnsureGenerated(installPath, profile);
-            RepairLaunchModPaths(profile);
-            PrepareSaveFileForStart(profile);
-            SqliteConnection.ClearAllPools();
-
-            var relayState = await StartRelayAsync(profile, serverExe, installPath, cancellationToken);
-            AttachToRelayState(relayState, profile, emitOutput: false);
-
-            if (_automationLifecycleService is not null)
+            await stages.RunAsync("准备配置与存档 / Prepare configuration and save", ServerStartStages.StandardTimeout, ct =>
             {
-                await _automationLifecycleService
-                    .ExecuteAsync(profile, AutomationScriptTrigger.AfterStart, cancellationToken)
-                    .ConfigureAwait(false);
-            }
+                ct.ThrowIfCancellationRequested();
+                ServerConfigBootstrapper.EnsureGenerated(installPath, profile);
+                ct.ThrowIfCancellationRequested();
+                RepairLaunchModPaths(profile);
+                ct.ThrowIfCancellationRequested();
+                PrepareSaveFileForStart(profile);
+                ct.ThrowIfCancellationRequested();
+                SqliteConnection.ClearAllPools();
+                return Task.CompletedTask;
+            }, cancellationToken).ConfigureAwait(false);
+
+            var relayState = await StartRelayAsync(profile, serverExe, installPath, stages, cancellationToken);
+            AttachToRelayState(relayState, profile, emitOutput: false);
 
             OutputReceived?.Invoke(this,
                 $"[system] 服务器进程已通过后台控制通道启动，PID={relayState.ServerProcessId}，Relay PID={relayState.RelayProcessId}");
+            if (_automationLifecycleService is not null)
+            {
+                try
+                {
+                    await stages.RunAsync("启动后自动化 / After-start automation", ServerStartStages.AutomationTimeout,
+                        ct => _automationLifecycleService.ExecuteAsync(profile, AutomationScriptTrigger.AfterStart, ct), cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "After-start automation failed; server is already running. ProfileId={ProfileId}.", profile.Id);
+                    OutputReceived?.Invoke(this, $"[system] 服务器进程已启动，但启动后自动化未完成 / Server is running; after-start automation failed: {ex.Message}");
+                    if (ex is OperationCanceledException) throw;
+                }
+            }
+
             _logger.LogInformation(
                 "Vintage Story server process started through relay. ProcessId={ProcessId}, RelayProcessId={RelayProcessId}.",
                 relayState.ServerProcessId,
@@ -828,7 +859,9 @@ internal sealed partial class SingleServerProcessController
         }
         finally
         {
-            _processGate.Release();
+            // A blocked OS call may outlive its deadline. Do not allow a retry to
+            // overlap that call, and do not release a prepared Host lease too early.
+            stages.ReleaseWhenSettled(gateLease.Dispose);
         }
     }
 
@@ -855,6 +888,10 @@ internal sealed partial class SingleServerProcessController
 
             var settings = await _serverAuthService.LoadSettingsAsync(profile, cancellationToken);
             return settings.Enabled;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {
@@ -2030,72 +2067,102 @@ internal sealed partial class SingleServerProcessController
         InstanceProfile profile,
         string serverExe,
         string installPath,
+        ServerStartStages stages,
         CancellationToken cancellationToken)
     {
-        DotNetRuntimeRequirement.EnsureForHost(ResolveServerHostPath());
-        using var prepared = await Task.Run(() => ServerHostRuntimeStager.Prepare(
-            ResolveServerHostPath(), cancellationToken: cancellationToken), cancellationToken).ConfigureAwait(false);
-        var hostPath = prepared.ExecutablePath;
-        if (string.IsNullOrWhiteSpace(hostPath) || !File.Exists(hostPath))
-            throw new InvalidOperationException(
-                $"未找到独立服务端控制程序 {ServerRelayProtocol.ServerHostExecutableName}，请重新安装或重新发布 LauncherGo。");
-
-        var pipeName = ServerRelayProtocol.CreatePipeName(profile.Id);
-        var statePath = WorkspacePathHelper.GetServerRelayStatePath(profile.Id);
-        var instanceId = Guid.NewGuid().ToString("N");
-        var controlToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
-        TryDeleteFile(statePath);
-
-        var startInfo = new ProcessStartInfo
+        var sourceHost = await stages.RunAsync("检查 Host 运行时 / Check Host runtime", ServerStartStages.StandardTimeout, ct =>
         {
-            FileName = hostPath,
-            WorkingDirectory = Path.GetDirectoryName(hostPath) ?? AppContext.BaseDirectory,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-        startInfo.ArgumentList.Add("--pipe-name");
-        startInfo.ArgumentList.Add(pipeName);
-        startInfo.ArgumentList.Add("--state-path");
-        startInfo.ArgumentList.Add(statePath);
-        startInfo.ArgumentList.Add("--server-exe");
-        startInfo.ArgumentList.Add(serverExe);
-        startInfo.ArgumentList.Add("--working-dir");
-        startInfo.ArgumentList.Add(installPath);
-        startInfo.ArgumentList.Add("--data-path");
-        startInfo.ArgumentList.Add(profile.DirectoryPath);
-        startInfo.ArgumentList.Add("--profile-id");
-        startInfo.ArgumentList.Add(profile.Id);
-        startInfo.ArgumentList.Add("--profile-name");
-        startInfo.ArgumentList.Add(profile.Name);
-        startInfo.ArgumentList.Add("--version");
-        startInfo.ArgumentList.Add(profile.Version);
-        startInfo.ArgumentList.Add("--restart-on-crash");
-        startInfo.ArgumentList.Add(IsAutoRestartAfterCrashEnabled().ToString());
-        startInfo.ArgumentList.Add("--instance-id");
-        startInfo.ArgumentList.Add(instanceId);
-        startInfo.ArgumentList.Add("--control-token");
-        startInfo.ArgumentList.Add(controlToken);
-
-        using var relayProcess = new Process { StartInfo = startInfo };
-        if (!relayProcess.Start())
-            throw new InvalidOperationException("启动后台控制通道失败。");
-
+            ct.ThrowIfCancellationRequested();
+            var source = ResolveServerHostPath();
+            DotNetRuntimeRequirement.EnsureForHost(source);
+            return Task.FromResult(source);
+        }, cancellationToken).ConfigureAwait(false);
+        var prepared = await stages.RunAsync("准备 Host 缓存 / Stage Host files", ServerStartStages.PreparationTimeout,
+            ct => Task.FromResult(ServerHostRuntimeStager.Prepare(sourceHost, cancellationToken: ct,
+                progress: (step, elapsed) => _logger.LogInformation(
+                    "Host staging checkpoint. ProfileId={ProfileId}, Step={Step}, ElapsedMs={ElapsedMs}.", profile.Id, step, elapsed.TotalMilliseconds))),
+            cancellationToken).ConfigureAwait(false);
         try
         {
-            return await WaitForRelayStateAsync(
-                relayProcess,
-                statePath,
-                pipeName,
-                instanceId,
-                controlToken,
-                cancellationToken);
+            return await stages.RunAsync("启动 Host 与控制通道 / Start Host and control channel", ServerStartStages.ControlTimeout, async ct =>
+            {
+                ct.ThrowIfCancellationRequested();
+                var hostPath = prepared.ExecutablePath;
+                if (string.IsNullOrWhiteSpace(hostPath) || !File.Exists(hostPath))
+                    throw new InvalidOperationException(
+                    $"未找到独立服务端控制程序 {ServerRelayProtocol.ServerHostExecutableName}，请重新安装或重新发布 LauncherGo。");
+
+                var pipeName = ServerRelayProtocol.CreatePipeName(profile.Id);
+                var statePath = WorkspacePathHelper.GetServerRelayStatePath(profile.Id);
+                var instanceId = Guid.NewGuid().ToString("N");
+                var controlToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+                ct.ThrowIfCancellationRequested();
+                TryDeleteFile(statePath);
+
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = hostPath,
+                    WorkingDirectory = Path.GetDirectoryName(hostPath) ?? AppContext.BaseDirectory,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                startInfo.ArgumentList.Add("--pipe-name");
+                startInfo.ArgumentList.Add(pipeName);
+                startInfo.ArgumentList.Add("--state-path");
+                startInfo.ArgumentList.Add(statePath);
+                startInfo.ArgumentList.Add("--server-exe");
+                startInfo.ArgumentList.Add(serverExe);
+                startInfo.ArgumentList.Add("--working-dir");
+                startInfo.ArgumentList.Add(installPath);
+                startInfo.ArgumentList.Add("--data-path");
+                startInfo.ArgumentList.Add(profile.DirectoryPath);
+                startInfo.ArgumentList.Add("--profile-id");
+                startInfo.ArgumentList.Add(profile.Id);
+                startInfo.ArgumentList.Add("--profile-name");
+                startInfo.ArgumentList.Add(profile.Name);
+                startInfo.ArgumentList.Add("--version");
+                startInfo.ArgumentList.Add(profile.Version);
+                startInfo.ArgumentList.Add("--restart-on-crash");
+                startInfo.ArgumentList.Add(IsAutoRestartAfterCrashEnabled().ToString());
+                startInfo.ArgumentList.Add("--instance-id");
+                startInfo.ArgumentList.Add(instanceId);
+                startInfo.ArgumentList.Add("--control-token");
+                startInfo.ArgumentList.Add(controlToken);
+
+                using var relayProcess = new Process { StartInfo = startInfo };
+                try
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (!relayProcess.Start())
+                        throw new InvalidOperationException("启动后台控制通道失败。");
+                    // Windows may delay Process.Start; a late return must clean up only
+                    // the Host owned by this attempt, never proceed after cancellation.
+                    ct.ThrowIfCancellationRequested();
+                    return await WaitForRelayStateAsync(
+                        relayProcess,
+                        statePath,
+                        pipeName,
+                        instanceId,
+                        controlToken,
+                        ct);
+                }
+                catch
+                {
+                    TryKillProcessTree(relayProcess);
+                    TryDeleteFile(statePath);
+                    throw;
+                }
+            }, cancellationToken, discardResult: state =>
+            {
+                // Close the tiny race where the channel succeeds just as its deadline
+                // expires: never leave a newly created, untracked Host running.
+                using var process = TryOpenProcess(state.RelayProcessId);
+                if (process is not null && IsRelayHostProcess(state)) TryKillProcessTree(process);
+                var path = WorkspacePathHelper.GetServerRelayStatePath(profile.Id);
+                if (TryReadRelayState(path)?.InstanceId == state.InstanceId) TryDeleteFile(path);
+            }).ConfigureAwait(false);
         }
-        catch
-        {
-            TryKillProcessTree(relayProcess);
-            TryDeleteFile(statePath);
-            throw;
-        }
+        finally { stages.ReleaseWhenSettled(prepared.Dispose); }
     }
 
     private async Task<ServerRelayState> WaitForRelayStateAsync(
@@ -2106,7 +2173,6 @@ internal sealed partial class SingleServerProcessController
         string controlToken,
         CancellationToken cancellationToken)
     {
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(20);
         string? lastError = null;
         var expectedState = new ServerRelayState
         {
@@ -2116,7 +2182,8 @@ internal sealed partial class SingleServerProcessController
             ControlToken = controlToken
         };
 
-        while (DateTimeOffset.UtcNow < deadline)
+        // The caller owns this stage's deadline, including Process.Start.
+        while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -2141,17 +2208,15 @@ internal sealed partial class SingleServerProcessController
                 return liveState;
             }
 
-            lastError = response.Success
+            var error = response.Success
                 ? "后台控制通道实例身份不匹配。"
                 : response.Error;
+            if (!string.Equals(error, lastError, StringComparison.Ordinal))
+                _logger.LogDebug("Waiting for Host control channel. HostProcessId={HostProcessId}, Error={Error}.", TryGetProcessId(relayProcess), error);
+            lastError = error;
 
             await Task.Delay(250, cancellationToken);
         }
-
-        throw new InvalidOperationException(
-            string.IsNullOrWhiteSpace(lastError)
-                ? "等待后台控制通道就绪超时。"
-                : $"等待后台控制通道就绪超时：{lastError}");
     }
 
     private static bool IsRelayHostProcess(ServerRelayState state)

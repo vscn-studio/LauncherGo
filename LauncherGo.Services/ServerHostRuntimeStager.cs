@@ -1,6 +1,8 @@
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text;
 
 namespace LauncherGo.Services;
 
@@ -8,8 +10,16 @@ internal static class ServerHostRuntimeStager
 {
     private const string CompletionMarkerName = ".complete";
     public static PreparedHost Prepare(string sourceExecutablePath, string? runtimeRoot = null,
-        CancellationToken cancellationToken = default, IEnumerable<string>? additionalFiles = null)
+        CancellationToken cancellationToken = default, IEnumerable<string>? additionalFiles = null,
+        Action<string, TimeSpan>? progress = null)
     {
+        var clock = Stopwatch.StartNew();
+        void Checkpoint(string step)
+        {
+            progress?.Invoke(step, clock.Elapsed);
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+        Checkpoint("resolve-files");
         if (string.IsNullOrWhiteSpace(sourceExecutablePath) || !File.Exists(sourceExecutablePath))
             return new PreparedHost(sourceExecutablePath, null);
 
@@ -24,9 +34,13 @@ internal static class ServerHostRuntimeStager
             if (File.Exists(file) && IsWithinDirectory(file, sourceDirectory))
                 files.Add(file);
         }
-        var versionKey = CreateVersionKey(files.OrderBy(path => path, StringComparer.OrdinalIgnoreCase), cancellationToken);
+        Checkpoint("wait-cache-lock");
         using (CacheDirectoryLease.EnterRoot(runtimeRoot, wait: true, cancellationToken))
         {
+            Checkpoint("hash-files");
+            var versionKey = CreateVersionKey(sourceDirectory, runtimeRoot,
+                files.OrderBy(path => path, StringComparer.OrdinalIgnoreCase), cancellationToken, Checkpoint);
+            Checkpoint("validate-cache");
             var targetDirectory = Path.Combine(runtimeRoot, versionKey);
             var targetExecutablePath = Path.Combine(targetDirectory, Path.GetFileName(sourceExecutablePath));
             var completionMarkerPath = Path.Combine(targetDirectory, CompletionMarkerName);
@@ -44,6 +58,7 @@ internal static class ServerHostRuntimeStager
                 var temporaryDirectory = targetDirectory + $".{Guid.NewGuid():N}.tmp";
                 try
                 {
+                    Checkpoint("copy-files");
                     Directory.CreateDirectory(temporaryDirectory);
                     using (File.Create(Path.Combine(temporaryDirectory, CacheDirectoryLease.FileName))) { }
                     foreach (var sourcePath in files)
@@ -55,9 +70,11 @@ internal static class ServerHostRuntimeStager
                         File.Copy(sourcePath, targetPath, overwrite: true);
                     }
 
+                    Checkpoint("write-completion-marker");
                     File.WriteAllText(Path.Combine(temporaryDirectory, CompletionMarkerName), versionKey);
                     try
                     {
+                        Checkpoint("move-cache-directory");
                         Directory.Move(temporaryDirectory, targetDirectory);
                     }
                     catch (IOException) when (IsStagedCopyComplete(
@@ -75,13 +92,21 @@ internal static class ServerHostRuntimeStager
                 }
             }
 
+            Checkpoint("verify-staged-files");
             if (!IsStagedCopyComplete(sourceDirectory, targetDirectory, files, completionMarkerPath))
                 throw new IOException($"Host runtime staging did not produce a complete copy: {targetDirectory}");
 
+            Checkpoint("touch-completion-marker");
             File.SetLastWriteTimeUtc(completionMarkerPath, DateTime.UtcNow);
-            var lease = CacheDirectoryLease.Acquire(targetDirectory);
-            CacheMaintenance.Request(runtimeRoot, CacheKind.Host);
-            return new PreparedHost(targetExecutablePath, lease);
+            Checkpoint("acquire-cache-lease");
+            var lease = CacheDirectoryLease.Acquire(targetDirectory, cancellationToken);
+            try
+            {
+                Checkpoint("ready");
+                CacheMaintenance.Request(runtimeRoot, CacheKind.Host);
+                return new PreparedHost(targetExecutablePath, lease);
+            }
+            catch { lease.Dispose(); throw; }
         }
     }
 
@@ -121,7 +146,8 @@ internal static class ServerHostRuntimeStager
         foreach (var sourcePath in sourceFiles)
         {
             var relativePath = Path.GetRelativePath(sourceDirectory, sourcePath);
-            if (!File.Exists(Path.Combine(targetDirectory, relativePath)))
+            var target = new FileInfo(Path.Combine(targetDirectory, relativePath));
+            if (!target.Exists || target.Length != new FileInfo(sourcePath).Length)
                 return false;
         }
 
@@ -243,22 +269,63 @@ internal static class ServerHostRuntimeStager
             files.Add(path);
     }
 
-    private static string CreateVersionKey(IEnumerable<string> files, CancellationToken cancellationToken)
+    private sealed record CachedHash(FileStamp Stamp, string Hash);
+
+    private static string CreateVersionKey(string sourceDirectory, string runtimeRoot, IEnumerable<string> files,
+        CancellationToken cancellationToken, Action<string> checkpoint)
     {
+        Directory.CreateDirectory(runtimeRoot);
+        var cachePath = Path.Combine(runtimeRoot, ".source-hashes-v1.json");
+        Dictionary<string, CachedHash>? cached = null;
+        try
+        {
+            if (File.Exists(cachePath))
+                cached = JsonSerializer.Deserialize<Dictionary<string, CachedHash>>(File.ReadAllText(cachePath));
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { }
+        cached ??= new();
+        var updated = new Dictionary<string, CachedHash>();
+        var readCount = 0;
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        var buffer = new byte[64 * 1024];
         foreach (var file in files)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            using var input = File.OpenRead(file);
-            int read;
-            while ((read = input.Read(buffer)) > 0)
+            var key = Path.GetFullPath(file);
+            var stamp = FileStamp.Read(file);
+            if (!cached.TryGetValue(key, out var entry) || entry is null || entry.Stamp != stamp ||
+                entry.Hash is not { Length: 64 } || !entry.Hash.All(Uri.IsHexDigit))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                hash.AppendData(buffer.AsSpan(0, read));
+                using var contentHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                using var input = File.OpenRead(file);
+                var buffer = new byte[64 * 1024];
+                int read;
+                while ((read = input.Read(buffer)) > 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    contentHash.AppendData(buffer.AsSpan(0, read));
+                }
+                if (stamp != FileStamp.Read(file))
+                    throw new IOException("Host source changed during preparation; retry after the update finishes.");
+                entry = new(stamp, Convert.ToHexString(contentHash.GetHashAndReset()));
+                readCount++;
             }
+            updated[key] = entry;
+            // Include file boundaries and relative names, not just concatenated contents.
+            hash.AppendData(Encoding.UTF8.GetBytes(Path.GetRelativePath(sourceDirectory, file).Replace('\\', '/') + "\0"));
+            hash.AppendData(Convert.FromHexString(entry.Hash));
         }
-
+        checkpoint($"hash-files-result:read={readCount},reused={updated.Count - readCount}");
+        cancellationToken.ThrowIfCancellationRequested();
+        if (readCount != 0 || cached.Count != updated.Count)
+        {
+            var temporary = cachePath + $".{Guid.NewGuid():N}.tmp";
+            try
+            {
+                File.WriteAllText(temporary, JsonSerializer.Serialize(updated));
+                File.Move(temporary, cachePath, overwrite: true);
+            }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
+        }
         return Convert.ToHexString(hash.GetHashAndReset(), 0, 12).ToLowerInvariant();
     }
 

@@ -18,18 +18,22 @@ internal sealed class CacheDirectoryLease : IDisposable
     public string DirectoryPath { get; }
 
     // Callers creating a directory hold the root gate until its first lease is acquired.
-    internal static CacheDirectoryLease Acquire(string directory)
+    internal static CacheDirectoryLease Acquire(string directory, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
-        using var gate = EnterRoot(Path.GetDirectoryName(directory)!, wait: true);
+        using var gate = EnterRoot(Path.GetDirectoryName(directory)!, wait: true, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         var path = Path.Combine(directory, FileName);
         if (!File.Exists(path))
             using (File.Create(path)) { }
         var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (!File.Exists(Path.Combine(directory, ProtocolMarker)))
                 File.WriteAllText(Path.Combine(directory, ProtocolMarker), "1");
+            cancellationToken.ThrowIfCancellationRequested();
             return new CacheDirectoryLease(directory, stream);
         }
         catch { stream.Dispose(); throw; }

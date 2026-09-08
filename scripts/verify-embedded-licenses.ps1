@@ -1,6 +1,7 @@
 param(
     [string]$OutputRoot,
-    [string]$MapPackage
+    [string]$MapPackage,
+    [string]$WebRoot
 )
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path -Parent $PSScriptRoot
@@ -42,8 +43,9 @@ function Assert-MapPackage([string]$Path) {
     Write-Output "Verified map ZIP licenses: $Path"
 }
 
-if (!$OutputRoot -and !$MapPackage) { throw 'Specify OutputRoot or MapPackage.' }
+if (!$OutputRoot -and !$MapPackage -and !$WebRoot) { throw 'Specify OutputRoot, MapPackage or WebRoot.' }
 if ($OutputRoot) {
+    & (Join-Path $PSScriptRoot 'verify-dependency-licenses.ps1') -OutputRoot $OutputRoot
     foreach ($mod in @('launchergoauth', 'launchergoredirect', 'launchergoserverbridge')) {
         Assert-License (Join-Path $OutputRoot "EmbeddedMods/$mod/LICENSE.txt") (Join-Path $repository 'LICENSE')
     }
@@ -54,10 +56,10 @@ if ($OutputRoot) {
             Assert-License (Join-Path $mapOutput $file) (Join-Path $mapSource $file)
         }
     }
-    foreach ($file in @('LICENSE.txt', 'THIRD_PARTY_NOTICES.txt', 'vendor/leaflet/LICENSE.txt', 'vendor/WebCartographer-LICENSE.txt', 'vendor/VS-LiveMap-Revival-LICENSE.txt')) {
+    foreach ($file in @('LICENSE.txt', 'THIRD_PARTY_NOTICES.txt', 'vendor/leaflet/LICENSE.txt', 'vendor/WebCartographer-LICENSE.txt', 'vendor/VS-LiveMap-Revival-LICENSE.txt', 'vendor/Feather-LICENSE.txt')) {
         Assert-License (Join-Path $OutputRoot "WebRoot/$file") (Join-Path $webSource $file)
     }
-    foreach ($file in @('index.html', 'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css', 'vendor/webcartographer-route.js')) {
+    foreach ($file in @('index.html', 'mobile.css', 'notebook.js', 'notebook.css', 'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css', 'vendor/webcartographer-route.js')) {
         Assert-File (Join-Path $OutputRoot "WebRoot/$file")
     }
     $spawnIcon = Join-Path $OutputRoot 'WebRoot/assets/icons/spawn.png'
@@ -71,3 +73,8 @@ if ($OutputRoot) {
     Write-Output "Verified embedded mod and web licenses: $OutputRoot"
 }
 if ($MapPackage) { Assert-MapPackage $MapPackage }
+if ($WebRoot) {
+    foreach ($file in @('LICENSE.txt','THIRD_PARTY_NOTICES.txt','vendor/leaflet/LICENSE.txt','vendor/WebCartographer-LICENSE.txt','vendor/VS-LiveMap-Revival-LICENSE.txt','vendor/Feather-LICENSE.txt')) { Assert-License (Join-Path $WebRoot $file) (Join-Path $webSource $file) }
+    foreach ($file in @('index.html','mobile.css','notebook.js','notebook.css')) { Assert-File (Join-Path $WebRoot $file) }
+    Write-Output "Verified standalone web licenses: $WebRoot"
+}

@@ -94,35 +94,7 @@ public sealed class TilePyramidBuilder
 
     // ServerMap writes filter type 0 PNGs. Keeping this reader narrow avoids a
     // graphics dependency in a server-side mod and makes parent construction deterministic.
-    private static byte[] Decode(byte[] png)
-    {
-        if (png.Length < 33 || !png.AsSpan(0, 8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 })) throw new InvalidDataException();
-        var offset = 8; var width = 0; var height = 0;
-        using var compressed = new MemoryStream();
-        while (offset + 12 <= png.Length)
-        {
-            var length = BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(offset, 4));
-            if (length < 0 || offset + 12 + length > png.Length) throw new InvalidDataException();
-            var type = System.Text.Encoding.ASCII.GetString(png, offset + 4, 4);
-            var data = png.AsSpan(offset + 8, length);
-            if (type == "IHDR") { width = BinaryPrimitives.ReadInt32BigEndian(data); height = BinaryPrimitives.ReadInt32BigEndian(data[4..]); }
-            if (type == "IDAT") compressed.Write(data);
-            offset += length + 12;
-            if (type == "IEND") break;
-        }
-        if (width != TileSize || height != TileSize) throw new InvalidDataException();
-        compressed.Position = 0;
-        var raw = new byte[height * (width * 4 + 1)];
-        using (var zlib = new ZLibStream(compressed, CompressionMode.Decompress)) zlib.ReadExactly(raw);
-        var output = new byte[width * height * 4];
-        for (var y = 0; y < height; y++)
-        {
-            var row = y * (width * 4 + 1);
-            if (raw[row] != 0) throw new InvalidDataException("Unsupported PNG filter");
-            raw.AsSpan(row + 1, width * 4).CopyTo(output.AsSpan(y * width * 4));
-        }
-        return output;
-    }
+    private static byte[] Decode(byte[] png) => PngEncoder.Decode(png);
 
     public static int FloorDiv(int value, int divisor) => value >= 0 ? value / divisor : (value - divisor + 1) / divisor;
 }

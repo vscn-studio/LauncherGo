@@ -44,7 +44,6 @@ public partial class LauncherMainWindow : Window
     private const int MaxConsoleLines = 800;
     private const double ConsoleAutoScrollThreshold = 12;
     private const int ConsoleRefreshDelayMs = 80;
-    private const int ServerStartTimeoutSeconds = 30;
     private const int RunningServerLogReplayGraceSeconds = 5;
     private const int ConsoleProfileReplayLogBytes = 256 * 1024;
     private const int ConsoleProfileReplayLogLines = 220;
@@ -415,6 +414,7 @@ public partial class LauncherMainWindow : Window
     private bool _isRefreshingServerBridge;
     private bool _isRefreshingServerMap;
     private bool _isUpdatingServerMapWeb;
+    private bool _isTogglingServerMap;
     private string _editingServerMapProfileId = string.Empty;
     private bool _toastPointerOver;
     private string _editingConfigProfileId = string.Empty;
@@ -6695,6 +6695,10 @@ public partial class LauncherMainWindow : Window
 
     private static string TranslateExceptionMessage(string message)
     {
+        const string startupTimeoutEnglish = " / Server startup stage timed out: ";
+        if (message.StartsWith("启动服务器阶段超时：", StringComparison.Ordinal) &&
+            message.IndexOf(startupTimeoutEnglish, StringComparison.Ordinal) is var englishOffset && englishOffset >= 0)
+            return message[(englishOffset + 3)..];
         var exact = message switch
         {
             "档案名称不能为空。" => "Profile name is required.",
@@ -8930,13 +8934,16 @@ public partial class LauncherMainWindow : Window
         ServerMapWebRootTextBox.Text = settings.WebRoot;
         ToolTip.SetTip(ServerMapWebRootUpdateButton, T("覆盖目标目录中的内置网页同名文件，保留其他文件。", "Replace bundled web files in the destination; keep other files."));
         var status = _serverMapService.GetStatus(profile);
-        ServerMapStatusTextBlock.Text = status.IsRunning ? $"运行中：{status.Url}" : "未启动";
-        ServerMapToggleButton.Content = status.IsRunning ? "停止地图" : "启动地图";
+        if (!_isTogglingServerMap)
+        {
+            ServerMapStatusTextBlock.Text = status.IsRunning ? $"运行中：{status.Url}" : "未启动";
+            ServerMapToggleButton.Content = status.IsRunning ? "停止地图" : "启动地图";
+        }
     }
 
     private async void OnServerMapSaveClick(object? sender, RoutedEventArgs e)
     {
-        if (_isUpdatingServerMapWeb) return;
+        if (_isUpdatingServerMapWeb || _isTogglingServerMap) return;
         if (ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile) { SetServerMapStatus("请先选择档案。"); return; }
         try
         {
@@ -8993,7 +9000,7 @@ public partial class LauncherMainWindow : Window
 
     private async void OnServerMapWebRootUpdateClick(object? sender, RoutedEventArgs e)
     {
-        if (_isUpdatingServerMapWeb || ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile) return;
+        if (_isUpdatingServerMapWeb || _isTogglingServerMap || ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile) return;
         _isUpdatingServerMapWeb = true;
         ServerMapEditorPanel.IsEnabled = false;
         ServerMapSaveButton.IsEnabled = false;
@@ -9028,6 +9035,7 @@ public partial class LauncherMainWindow : Window
 
     private async void OnServerMapDeployClick(object? sender, RoutedEventArgs e)
     {
+        if (_isTogglingServerMap || _isUpdatingServerMapWeb) return;
         if (ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile) { SetServerMapStatus("请先选择档案。"); return; }
         try { await _serverMapService.EnsureMapModDeployedAsync(profile); SetServerMapStatus("服务器地图模组已部署。"); }
         catch (Exception ex) { SetServerMapStatus($"部署失败：{ex.Message}"); }
@@ -9035,14 +9043,54 @@ public partial class LauncherMainWindow : Window
 
     private async void OnServerMapToggleClick(object? sender, RoutedEventArgs e)
     {
+        if (_isTogglingServerMap || _isUpdatingServerMapWeb) return;
         if (ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile) { SetServerMapStatus("请先选择档案。"); return; }
+        _isTogglingServerMap = true;
+        ServerMapToggleButton.IsEnabled = false;
+        ServerMapSaveButton.IsEnabled = false;
+        ServerMapDeployButton.IsEnabled = false;
+        ServerMapRefreshButton.IsEnabled = false;
+        ServerMapBackButton.IsEnabled = false;
+        ServerMapProfileComboBox.IsEnabled = false;
+        ServerMapEditorPanel.IsEnabled = false;
+        string? failure = null;
         try
         {
-            if (_serverMapService.GetStatus(profile).IsRunning) await _serverMapService.StopAsync(profile);
+            ServerMapToggleButton.Content = T("处理中…", "Working…");
+            var running = await Task.Run(() => _serverMapService.GetStatus(profile).IsRunning);
+            var message = running ? T("停止中…", "Stopping…") : T("启动中…", "Starting…");
+            ServerMapToggleButton.Content = message;
+            SetServerMapStatus(message);
+            if (running) await _serverMapService.StopAsync(profile);
             else await _serverMapService.StartAsync(profile);
-            await LoadServerMapForProfileAsync(profile);
         }
-        catch (Exception ex) { SetServerMapStatus($"操作失败：{ex.Message}"); }
+        catch (Exception ex) { failure = T($"操作失败：{ex.Message}", $"Operation failed: {ex.Message}"); }
+        finally
+        {
+            // Keep the guard held while refreshing so a click cannot queue behind this operation.
+            try
+            {
+                var status = await Task.Run(() => _serverMapService.GetStatus(profile));
+                ServerMapToggleButton.Content = status.IsRunning ? T("停止地图", "Stop map") : T("启动地图", "Start map");
+                SetServerMapStatus(failure ?? (status.IsRunning ? T($"运行中：{status.Url}", $"Running: {status.Url}") : T("未启动", "Stopped")));
+            }
+            catch (Exception ex)
+            {
+                ServerMapToggleButton.Content = T("启动/停止地图", "Start/stop map");
+                SetServerMapStatus(failure ?? T($"状态刷新失败：{ex.Message}", $"Status refresh failed: {ex.Message}"));
+            }
+            finally
+            {
+                _isTogglingServerMap = false;
+                ServerMapToggleButton.IsEnabled = true;
+                ServerMapSaveButton.IsEnabled = true;
+                ServerMapDeployButton.IsEnabled = true;
+                ServerMapRefreshButton.IsEnabled = true;
+                ServerMapBackButton.IsEnabled = true;
+                ServerMapProfileComboBox.IsEnabled = true;
+                ServerMapEditorPanel.IsEnabled = true;
+            }
+        }
     }
 
     private void OnServerMapOpenClick(object? sender, RoutedEventArgs e)
@@ -9782,31 +9830,9 @@ public partial class LauncherMainWindow : Window
 
     private async Task StartServerProfileWithTimeoutAsync(InstanceProfile profile)
     {
-        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(ServerStartTimeoutSeconds));
-        try
-        {
-            var startTask = Task.Run(
-                () => _serverProcessService.StartAsync(profile, timeoutCts.Token),
-                CancellationToken.None);
-            var completedTask = await Task.WhenAny(
-                startTask,
-                Task.Delay(TimeSpan.FromSeconds(ServerStartTimeoutSeconds)));
-            if (!ReferenceEquals(completedTask, startTask))
-            {
-                await timeoutCts.CancelAsync();
-                throw new TimeoutException(T(
-                    $"启动服务器超时：{profile.Name}",
-                    $"Server start timed out: {profile.Name}"));
-            }
-
-            await startTask;
-        }
-        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
-        {
-            throw new TimeoutException(T(
-                $"启动服务器超时：{profile.Name}",
-                $"Server start timed out: {profile.Name}"));
-        }
+        // The service owns phase-specific deadlines and safe cancellation cleanup.
+        // A UI-wide deadline would incorrectly include scripts and cold Host staging.
+        await Task.Run(() => _serverProcessService.StartAsync(profile));
     }
 
     private void SetLaunchOperationBusy(string text)

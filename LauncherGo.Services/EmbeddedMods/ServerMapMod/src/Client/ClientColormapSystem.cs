@@ -42,6 +42,8 @@ public sealed class ClientColormapSystem : ModSystem
     private int sentMonth;
     private int generating;
     private bool wasConnected;
+    private Queue<ClientWaypointIconPacket>? waypointIcons;
+    private bool iconsSent;
     private bool patched;
     private bool disposed;
     private CancellationTokenSource stop = new();
@@ -63,6 +65,7 @@ public sealed class ClientColormapSystem : ModSystem
         channel = api.Network.RegisterChannel(ChannelName)
             .RegisterMessageType<ServerColormapRequestPacket>()
             .RegisterMessageType<ClientColormapChunkPacket>()
+            .RegisterMessageType<ClientWaypointIconPacket>()
             .SetMessageHandler<ServerColormapRequestPacket>(OnColormapRequested);
         harmony = new Harmony("servermap-livemap-colormap");
         tickListenerId = api.Event.RegisterGameTickListener(_ => CheckForGeneration(), 1000);
@@ -75,6 +78,7 @@ public sealed class ClientColormapSystem : ModSystem
         var connected = channel is { Connected: true };
         if (!connected)
         {
+            iconsSent = false; waypointIcons = null;
             // A server restart creates a new channel state. Do not keep the
             // previous server's sent-month marker.
             if (wasConnected)
@@ -94,6 +98,18 @@ public sealed class ClientColormapSystem : ModSystem
         }
         if (api.World.Player?.Entity == null) return;
         if (!api.World.Player.HasPrivilege(Privilege.root)) return;
+
+        // Dedicated servers omit these client assets. Send the actual game/mod
+        // icons in small batches, once per connection; the server caches them.
+        if (!iconsSent)
+        {
+            waypointIcons ??= new Queue<ClientWaypointIconPacket>(api.Assets.GetMany("textures/icons/worldmap/")
+                .Where(a => a.Name.EndsWith(".svg", StringComparison.OrdinalIgnoreCase) && a.Data.Length <= ServerMap.Web.WaypointIconStore.MaxBytes)
+                .Take(256).Select(a => new ClientWaypointIconPacket {
+                    Name = System.Text.RegularExpressions.Regex.Replace(Path.GetFileNameWithoutExtension(a.Name), "\\d+\\-", ""), Data = a.Data.ToArray() }));
+            for (var i = 0; i < 2 && waypointIcons.Count > 0; i++) channel!.SendPacket(waypointIcons.Dequeue());
+            if (waypointIcons.Count == 0) { iconsSent = true; api.Logger.Notification("ServerMap original waypoint icons sent."); }
+        }
 
         var month = requestedMonth;
         if (month is < 1 or > 12 || month == sentMonth) return;

@@ -6,6 +6,12 @@ in `../THIRD-PARTY-NOTICES.md`.
 
 License files:
 
+- `nuget-packages.json` and `packages/`: package-specific copyrights and
+  byte-preserved license/notice files, with SHA-256 checksums.
+- `upstream-sources.json` and `upstream/`: full upstream license snapshots
+  mapped to package versions and source URLs. These retain component notices
+  that the generic MIT template below cannot replace.
+- `GPL-3.0.txt`: full GPLv3 text incorporated by LGPL-3.0.
 - `MIT.txt`: MIT-licensed dependencies, including Avalonia, Microsoft runtime
   libraries, PDFsharp, SkiaSharp, and ZstdSharp.
 - `Apache-2.0.txt`: Apache-2.0 dependencies, including Serilog, protobuf-net,

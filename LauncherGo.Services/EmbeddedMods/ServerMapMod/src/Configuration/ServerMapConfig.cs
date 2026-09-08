@@ -27,6 +27,8 @@ public sealed class ServerMapConfig
     public bool PublicPlayers { get; set; } = true;
     public int MaxPoisPerPlayer { get; set; } = 10;
     public string ClientAssetsPath { get; set; } = "";
+    // Directory of rendered PNG avatar layers.
+    public string AvatarAssetsPath { get; set; } = "";
 
     public void ApplyFrom(ServerMapConfig value)
     {
@@ -35,6 +37,7 @@ public sealed class ServerMapConfig
         MeshTileSize = value.MeshTileSize; Lod = value.Lod; SurfaceOnly = value.SurfaceOnly; ScanAboveTerrain = value.ScanAboveTerrain;
         UndergroundMinY = value.UndergroundMinY; MapAmbientLight = value.MapAmbientLight; PlayerUpdateMs = value.PlayerUpdateMs;
         PublicPlayers = value.PublicPlayers; MaxPoisPerPlayer = value.MaxPoisPerPlayer; ClientAssetsPath = value.ClientAssetsPath;
+        AvatarAssetsPath = value.AvatarAssetsPath;
     }
 
     public static bool TryReload(string path, ServerMapConfig target, out string error)

@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup>
+    <Reference Include="VintagestoryAPI" HintPath="$(VINTAGE_STORY)/VintagestoryAPI.dll" Private="false" />
+    <Reference Include="VintagestoryLib" HintPath="$(VINTAGE_STORY)/VintagestoryLib.dll" Private="false" />
+    <Reference Include="VSEssentials" HintPath="$(VINTAGE_STORY)/Mods/VSEssentials.dll" Private="false" />
+    <Reference Include="ServerMap" HintPath="../../../LauncherGo.Services/EmbeddedMods/ServerMapMod/bin/Release/package/ServerMap.dll" Private="false" />
+    <Compile Include="../../../LauncherGo.Services/EmbeddedMods/ServerMapMod/src/Render/PngEncoder.cs" Link="PngEncoder.cs" />
+    <None Update="modinfo.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

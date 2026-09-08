@@ -14,7 +14,7 @@ using Vintagestory.GameContent;
 
 namespace ServerMap.Web;
 
-public sealed class ServerMapWebServer : IDisposable
+public sealed partial class ServerMapWebServer : IDisposable
 {
     private static readonly byte[] TransparentTile = PngEncoder.Encode(TilePyramidBuilder.TileSize, TilePyramidBuilder.TileSize, new byte[TilePyramidBuilder.TileSize * TilePyramidBuilder.TileSize * 4]);
     private static readonly string[] Renderers = ["basic", "sepia"];
@@ -35,6 +35,9 @@ public sealed class ServerMapWebServer : IDisposable
     public ServerMapWebServer(ICoreServerAPI api, ServerMapConfig config, string root, WorldDatabaseReader reader, MapPalette materials, MapAuthStore auth, PoiStore pois, AnnouncementStore announcements)
     {
         this.api = api; this.config = config; this.root = root; this.reader = reader; this.materials = materials; this.auth = auth; this.pois = pois; this.announcements = announcements;
+        notebook = new MapNotebookStore(Path.Combine(root, "web-notebook.json"));
+        InitializeNotebook();
+        InitializeAvatars();
         webRoot = ResolveWebRoot(api); renderer = new MapRenderer(reader, root, api.World.BlockAccessor.MapSizeY, materials); pyramid = new TilePyramidBuilder(root);
         foreach (var name in Renderers) { baseTiles[name] = LoadBaseTiles(name); layerVersions[name] = 1; }
         foreach (var name in Layers) layerVersions.TryAdd(name, 1);
@@ -63,8 +66,18 @@ public sealed class ServerMapWebServer : IDisposable
         {
             var path = context.Request.Url?.AbsolutePath.Trim('/') ?? "";
             if (path.StartsWith("servermap/", StringComparison.OrdinalIgnoreCase)) path = path[10..];
-            if (path is "" or "servermap" or "index.html") { ServeFile(context, Path.Combine(webRoot, "index.html"), "text/html; charset=utf-8", true); return; }
-            if (path.StartsWith("vendor/", StringComparison.OrdinalIgnoreCase) || path.StartsWith("assets/", StringComparison.OrdinalIgnoreCase)) { ServeWebAsset(context, path); return; }
+            if (NotebookRequest(context, path)) return;
+            if (path.StartsWith("api/v1/avatars/", StringComparison.Ordinal))
+            {
+                var key = path[15..];
+                if (!System.Text.RegularExpressions.Regex.IsMatch(key, "^[a-f0-9]{64}\\.png$")) { NotFound(context); return; }
+                var image = ClientAvatars?.Get(key[..^4]) ?? avatars?.Get(key[..^4]);
+                if (image == null) { NotFound(context); return; }
+                context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+                ServeBytes(context, image, "image/png", "public, max-age=86400, immutable"); return;
+            }
+            if (path is "" or "servermap" or "index.html") { ServeBytes(context, Encoding.UTF8.GetBytes((announcements.Current.Site ?? new()).ApplyToHtml(File.ReadAllText(Path.Combine(webRoot, "index.html")))), "text/html; charset=utf-8", "no-store"); return; }
+            if (path.StartsWith("vendor/", StringComparison.OrdinalIgnoreCase) || path.StartsWith("assets/", StringComparison.OrdinalIgnoreCase) || path is "mobile.css" or "notebook.css" or "notebook.js") { ServeWebAsset(context, path); return; }
             if (path == "api/v1/events") { events.Subscribe(context, stop.Token).GetAwaiter().GetResult(); return; }
             if (path == "api/v1/auth/login" && context.Request.HttpMethod == "POST") { Login(context); return; }
             if (path == "api/v1/auth/logout" && context.Request.HttpMethod == "POST") { auth.Logout(context.Request.Cookies["servermap_auth"]?.Value); context.Response.Headers["Set-Cookie"] = "servermap_auth=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict"; Json(context, new { authenticated = false }, true); return; }
@@ -74,10 +87,10 @@ public sealed class ServerMapWebServer : IDisposable
             if (path == "api/v1/search") { Json(context, Search(context.Request.QueryString["q"], Principal(context.Request)), true); return; }
             if (path == "api/v1/pois") { HandlePois(context); return; }
             if (path == "api/v1/height") { Height(context); return; }
-            if (path == "api/v1/map/metadata") { Json(context, Metadata()); return; }
-            if (path == "api/v1/settings") { Json(context, Settings()); return; }
+            if (path == "api/v1/map/metadata") { Json(context, Metadata(), true); return; }
+            if (path == "api/v1/settings") { Json(context, Settings(), true); return; }
             if (path == "api/v1/layers/manifest") { Json(context, Manifest()); return; }
-            if (path.StartsWith("api/v1/layers/", StringComparison.OrdinalIgnoreCase)) { var name = path[14..]; if (!Layers.Contains(name, StringComparer.OrdinalIgnoreCase)) { NotFound(context); return; } Json(context, Layer(name, context.Request.QueryString["bbox"], Principal(context.Request)), name.Equals("players", StringComparison.OrdinalIgnoreCase)); return; }
+            if (path.StartsWith("api/v1/layers/", StringComparison.OrdinalIgnoreCase)) { var name = path[14..]; if (!Layers.Contains(name, StringComparer.OrdinalIgnoreCase)) { NotFound(context); return; } Json(context, Layer(name, context.Request.QueryString["bbox"], Principal(context.Request)), true); return; }
             if (path.StartsWith("api/v1/tiles/", StringComparison.OrdinalIgnoreCase)) { ServePyramidTile(context, path[13..]); return; }
             if (path.StartsWith("api/v1/2d/", StringComparison.OrdinalIgnoreCase)) { ServeLegacyTile(context, path[10..]); return; }
             if (path == "api/v1/players") { Json(context, Players(Principal(context.Request)), true); return; }
@@ -102,7 +115,11 @@ public sealed class ServerMapWebServer : IDisposable
     {
         if (Math.Abs((long)x) > 1_048_576 || Math.Abs((long)z) > 1_048_576) { NotFound(context); return; }
         var path = Path.Combine(root, "2d", rendererName.ToLowerInvariant(), zoom.ToString(CultureInfo.InvariantCulture), $"{x}_{z}.png");
-        if (File.Exists(path)) ServeFile(context, path, "image/png", cacheControl: "public, max-age=0, must-revalidate"); else ServeBytes(context, TransparentTile, "image/png", "public, max-age=5");
+        var bytes = File.Exists(path) ? File.ReadAllBytes(path) : TransparentTile;
+        if (MapVisibility.ShouldMaskTiles(Principal(context.Request)?.IsAdmin == true, context.Request.QueryString["hideRegions"]))
+            bytes = MapVisibility.MaskTile(bytes, zoom, x, z, notebook.Regions);
+        context.Response.Headers["Vary"] = "Cookie";
+        ServeBytes(context, bytes, "image/png", "no-store");
     }
     private static bool TryTileName(string value, out int x, out int z)
     {
@@ -113,7 +130,19 @@ public sealed class ServerMapWebServer : IDisposable
 
     private MapAuthStore.Principal? Principal(HttpListenerRequest request)
     {
-        return auth.AuthenticateSession(request.Cookies["servermap_auth"]?.Value);
+        var principal = auth.AuthenticateSession(request.Cookies["servermap_auth"]?.Value);
+        return principal == null ? null : CurrentPrincipal(principal);
+    }
+
+    private MapAuthStore.Principal CurrentPrincipal(MapAuthStore.Principal principal)
+    {
+        // Never retain map admin access merely because root was present when
+        // the password/session was created. Use the game's current authority.
+        var player = api.World.AllOnlinePlayers.FirstOrDefault(p => p.PlayerUID == principal.PlayerUid);
+        var admin = player?.HasPrivilege("root") ?? (api.World is Vintagestory.Server.ServerMain server
+            && api.PlayerData.GetPlayerDataByUid(principal.PlayerUid) is Vintagestory.Server.ServerPlayerData data
+            && data.HasPrivilege("root", server.Config.RolesByCode));
+        return principal with { IsAdmin = admin };
     }
 
     private void Login(HttpListenerContext context)
@@ -126,14 +155,15 @@ public sealed class ServerMapWebServer : IDisposable
             var login = auth.Login(playerName, password);
             if (login == null) { Error(context, 401, "Invalid player name or password"); return; }
             context.Response.Headers["Set-Cookie"] = $"servermap_auth={login.Value.SessionId}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Strict";
-            Json(context, new { authenticated = true, name = login.Value.Principal.PlayerName, admin = login.Value.Principal.IsAdmin }, true);
+            var principal = CurrentPrincipal(login.Value.Principal);
+            Json(context, new { authenticated = true, name = principal.PlayerName, admin = principal.IsAdmin }, true);
         }
         catch { Error(context, 400, "Invalid login request"); }
     }
 
     private void HandleAnnouncement(HttpListenerContext context)
     {
-        object Response(AnnouncementStore.Announcement value) => new { html = value.Html, serverWebsite = value.ServerWebsite, updatedBy = value.UpdatedBy, updatedAt = value.UpdatedAt };
+        object Response(AnnouncementStore.Announcement value) => new { html = value.Html, serverWebsite = value.ServerWebsite, site = value.Site ?? new(), updatedBy = value.UpdatedBy, updatedAt = value.UpdatedAt };
         if (context.Request.HttpMethod == "GET") { Json(context, Response(announcements.Current), true); return; }
         var principal = Principal(context.Request);
         if (context.Request.HttpMethod != "POST") { Error(context, 405, "Method not allowed"); return; }
@@ -144,7 +174,8 @@ public sealed class ServerMapWebServer : IDisposable
             using var document = ReadJson(context.Request);
             var html = document.RootElement.GetProperty("html").GetString() ?? "";
             var website = document.RootElement.TryGetProperty("serverWebsite", out var websiteValue) ? websiteValue.GetString() ?? "" : announcements.Current.ServerWebsite;
-            Json(context, Response(announcements.Save(html, website, principal.PlayerName)), true);
+            var site = document.RootElement.TryGetProperty("site", out var siteValue) ? siteValue.Deserialize<WebPageMetadata>() : null;
+            Json(context, Response(announcements.Save(html, website, principal.PlayerName, site)), true);
         }
         catch { Error(context, 400, "Invalid announcement"); }
     }
@@ -152,7 +183,7 @@ public sealed class ServerMapWebServer : IDisposable
     private void HandlePois(HttpListenerContext context)
     {
         var principal = Principal(context.Request);
-        if (context.Request.HttpMethod == "GET") { Json(context, pois.All, true); return; }
+        if (context.Request.HttpMethod == "GET") { Json(context, pois.All.Where(p => PoiVisible(principal, p)), true); return; }
         if (principal == null) { Error(context, 403, "Login required"); return; }
         if (!string.Equals(context.Request.Headers["X-ServerMap-Request"], "1", StringComparison.Ordinal)) { Error(context, 403, "Missing request header"); return; }
         if (context.Request.HttpMethod == "DELETE")
@@ -169,8 +200,12 @@ public sealed class ServerMapWebServer : IDisposable
             double D(string name, double fallback = 0) => rootElement.TryGetProperty(name, out var value) && value.TryGetDouble(out var number) && double.IsFinite(number) ? number : fallback;
             double? DN(string name) => rootElement.TryGetProperty(name, out var value) && value.TryGetDouble(out var number) ? number : null;
             var id = S("id"); var x = D("x"); var z = D("z");
+            if (!CanView(principal, x, z)) { Error(context, 403, "Hidden region"); return; }
             if (string.IsNullOrWhiteSpace(id) && !CanCreatePoiAt(principal, x, z)) { Error(context, 403, "Cannot create a POI inside another player's claim"); return; }
-            var result = pois.TrySave(new PoiStore.Poi(id, S("type", "text"), S("name", "POI"), S("text"), S("color", "#e66c75"), D("rotation"), x, z, DN("x2"), DN("z2"), principal.PlayerUid, DateTimeOffset.UtcNow), principal.PlayerUid, config.MaxPoisPerPlayer, principal.IsAdmin, out var saved);
+            var input = new PoiStore.Poi(id, S("type", "text"), S("name", "POI"), S("text"), S("color", "#e66c75"), D("rotation"), x, z, DN("x2"), DN("z2"), principal.PlayerUid, DateTimeOffset.UtcNow);
+            if (!MapNotebookStore.ValidCoordinate(x) || !MapNotebookStore.ValidCoordinate(z) || input.X2 is { } x2 && !MapNotebookStore.ValidCoordinate(x2) || input.Z2 is { } z2 && !MapNotebookStore.ValidCoordinate(z2)) { Error(context, 400, "Invalid coordinates"); return; }
+            if (!PoiVisible(principal, input)) { Error(context, 403, "Hidden region"); return; }
+            var result = pois.TrySave(input, principal.PlayerUid, config.MaxPoisPerPlayer, principal.IsAdmin, out var saved);
             if (result == PoiStore.SaveResult.QuotaExceeded) { Error(context, 409, $"POI limit reached ({Math.Max(0, config.MaxPoisPerPlayer)})"); return; }
             if (result == PoiStore.SaveResult.Forbidden) { Error(context, 403, "Cannot edit another player's POI"); return; }
             events.Publish("layer", new { layer = "pois", version = layerVersions.AddOrUpdate("pois", 2, (_, old) => old + 1) }); Json(context, saved!, true);
@@ -205,6 +240,7 @@ public sealed class ServerMapWebServer : IDisposable
         if (!double.TryParse(context.Request.QueryString["x"], NumberStyles.Float, CultureInfo.InvariantCulture, out var x) ||
             !double.TryParse(context.Request.QueryString["z"], NumberStyles.Float, CultureInfo.InvariantCulture, out var z) ||
             !double.IsFinite(x) || !double.IsFinite(z)) { Error(context, 400, "Invalid coordinates"); return; }
+        if (!CanView(Principal(context.Request), x, z)) { NotFound(context); return; }
         var y = reader.SurfaceHeightAt(x, z);
         if (y == null) { NotFound(context); return; }
         Json(context, new { x, y, z }, true);
@@ -214,21 +250,28 @@ public sealed class ServerMapWebServer : IDisposable
     {
         query = query?.Trim(); if (string.IsNullOrWhiteSpace(query)) return Array.Empty<object>();
         var results = new List<object>(); bool Match(string? value) => value?.Contains(query, StringComparison.OrdinalIgnoreCase) == true;
+        results.AddRange(NotebookSearch.Find(query, principal?.PlayerUid, principal?.IsAdmin == true, waypoints, notebook));
+        var spawn = api.World.DefaultSpawnPosition;
+        if (spawn != null && (Match("出生点") || Match("Spawn")) && CanView(principal, spawn.X, spawn.Z))
+            results.Add(new { kind = "spawn", name = "Spawn", hasLocation = true, x = spawn.X, z = spawn.Z });
         foreach (var player in api.World.AllOnlinePlayers) if (Match(player.PlayerName))
         {
-            var visible = principal != null && (principal.IsAdmin || principal.PlayerUid == player.PlayerUID); var pos = player.Entity?.Pos;
+            var pos = player.Entity?.Pos; var visible = principal != null && (principal.IsAdmin || principal.PlayerUid == player.PlayerUID) && pos != null && CanView(principal, pos.X, pos.Z);
             results.Add(new { kind = "player", name = player.PlayerName, hasLocation = visible && pos != null, x = visible ? pos?.X : null, z = visible ? pos?.Z : null });
         }
-        foreach (var claim in api.WorldManager.LandClaims) if (Match(claim.Description) || Match(claim.LastKnownOwnerName)) { var center = claim.Center; results.Add(new { kind = "claim", name = string.IsNullOrWhiteSpace(claim.Description) ? claim.LastKnownOwnerName : claim.Description, hasLocation = true, x = (double?)center.X, z = (double?)center.Z }); }
-        foreach (var point in translocators.Values) if (Match(point.Name)) results.Add(new { kind = point.Kind, name = point.Name, hasLocation = true, x = (double?)point.X, z = (double?)point.Z });
-        foreach (var poi in pois.All) if (Match(poi.Name) || Match(poi.Text)) results.Add(new { kind = "poi", name = poi.Name, hasLocation = true, x = (double?)poi.X, z = (double?)poi.Z });
+        foreach (var claim in api.WorldManager.LandClaims) if ((Match(claim.Description) || Match(claim.LastKnownOwnerName)) && CanView(principal, claim.Center.X, claim.Center.Z) && (principal?.IsAdmin == true || !claim.Areas.Any(a => notebook.Regions.Any(r => MapVisibility.Intersects(r, a.MinX, a.MinZ, a.MaxX + 1, a.MaxZ + 1))))) { var center = claim.Center; results.Add(new { kind = "claim", name = string.IsNullOrWhiteSpace(claim.Description) ? claim.LastKnownOwnerName : claim.Description, hasLocation = true, x = (double?)center.X, z = (double?)center.Z }); }
+        foreach (var point in translocators.Values) if (Match(point.Name) && CanView(principal, point.X, point.Z) && (principal?.IsAdmin == true || !notebook.Regions.Any(r => MapVisibility.Intersects(r, Math.Min(point.X, point.TargetX ?? point.X), Math.Min(point.Z, point.TargetZ ?? point.Z), Math.Max(point.X, point.TargetX ?? point.X), Math.Max(point.Z, point.TargetZ ?? point.Z))))) results.Add(new { kind = point.Kind, name = point.Name, hasLocation = true, x = (double?)point.X, z = (double?)point.Z });
+        foreach (var poi in pois.All) if ((Match(poi.Name) || Match(poi.Text)) && PoiVisible(principal, poi)) results.Add(new { kind = "poi", name = poi.Name, hasLocation = true, x = (double?)poi.X, z = (double?)poi.Z });
         return results.Take(50).ToArray();
     }
 
     private static JsonDocument ReadJson(HttpListenerRequest request)
     {
-        if (request.ContentLength64 > 1024 * 1024) throw new InvalidDataException();
-        return JsonDocument.Parse(request.InputStream, new JsonDocumentOptions { MaxDepth = 16 });
+        const int limit = 1024 * 1024;
+        if (request.ContentLength64 > limit) throw new InvalidDataException();
+        using var buffer = new MemoryStream(); var chunk = new byte[8192]; int count;
+        while ((count = request.InputStream.Read(chunk)) > 0) { if (buffer.Length + count > limit) throw new InvalidDataException(); buffer.Write(chunk, 0, count); }
+        return JsonDocument.Parse(buffer.ToArray(), new JsonDocumentOptions { MaxDepth = 16 });
     }
     private static void Error(HttpListenerContext context, int status, string message) { context.Response.StatusCode = status; Json(context, new { error = message }, true); }
 
@@ -250,7 +293,7 @@ public sealed class ServerMapWebServer : IDisposable
     private static void ServeBytes(HttpListenerContext context, byte[] bytes, string type, string cacheControl)
     {
         var etag = "\"" + Convert.ToHexString(SHA256.HashData(bytes)) + "\""; context.Response.Headers["ETag"] = etag; context.Response.Headers["Cache-Control"] = cacheControl;
-        if (string.Equals(context.Request.Headers["If-None-Match"], etag, StringComparison.Ordinal)) { context.Response.StatusCode = 304; context.Response.Close(); return; }
+        if (cacheControl != "no-store" && string.Equals(context.Request.Headers["If-None-Match"], etag, StringComparison.Ordinal)) { context.Response.StatusCode = 304; context.Response.Close(); return; }
         context.Response.ContentType = type; context.Response.KeepAlive = false; context.Response.SendChunked = true; context.Response.OutputStream.Write(bytes); context.Response.Close();
     }
     private static void Json(HttpListenerContext context, object value, bool noStore = false) => ServeBytes(context, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value)), "application/json; charset=utf-8", noStore ? "no-store" : "public, max-age=15");
@@ -261,7 +304,7 @@ public sealed class ServerMapWebServer : IDisposable
 
     private object Metadata()
     {
-        var all = baseTiles.Values.SelectMany(set => set.Keys).ToArray(); var position = api.World.AllOnlinePlayers.FirstOrDefault()?.Entity?.Pos;
+        var all = baseTiles.Values.SelectMany(set => set.Keys).ToArray(); var position = api.World.DefaultSpawnPosition;
         var defaultX = position?.X ?? (all.Length == 0 ? 0 : all.Average(tile => tile.X * 512 + 256d)); var defaultZ = position?.Z ?? (all.Length == 0 ? 0 : all.Average(tile => tile.Z * 512 + 256d));
         var minX = all.Length == 0 ? 0 : all.Min(tile => tile.X) * 512; var minZ = all.Length == 0 ? 0 : all.Min(tile => tile.Z) * 512;
         var maxX = all.Length == 0 ? 512 : (all.Max(tile => tile.X) + 1) * 512; var maxZ = all.Length == 0 ? 512 : (all.Max(tile => tile.Z) + 1) * 512;
@@ -280,7 +323,7 @@ public sealed class ServerMapWebServer : IDisposable
         if (!config.PublicPlayers) return Array.Empty<object>();
         return api.World.AllOnlinePlayers.Select(player => principal == null
             ? (object)new { id = player.PlayerUID, name = player.PlayerName, online = true }
-            : principal.IsAdmin || principal.PlayerUid == player.PlayerUID
+            : (principal.IsAdmin || principal.PlayerUid == player.PlayerUID) && player.Entity?.Pos is { } pos && CanView(principal, pos.X, pos.Z)
                 ? new { id = player.PlayerUID, name = player.PlayerName, online = true, x = player.Entity?.Pos.X, y = player.Entity?.Pos.Y, z = player.Entity?.Pos.Z }
                 : new { id = player.PlayerUID, name = player.PlayerName, online = true, x = (double?)null, y = (double?)null, z = (double?)null }).ToArray();
     }
@@ -293,7 +336,7 @@ public sealed class ServerMapWebServer : IDisposable
             {
                 var health = player.Entity.GetBehavior<EntityBehaviorHealth>();
                 var hunger = player.Entity.GetBehavior<EntityBehaviorHunger>();
-                features.Add(PointFeature("player-" + player.PlayerUID, pos.X, pos.Z, new { name = player.PlayerName, avatar = PlayerAvatar(player), y = pos.Y, yaw = pos.Yaw, mode = player.WorldData.CurrentGameMode.ToString(), health = new { current = health?.Health ?? 15, maximum = health?.MaxHealth ?? 15 }, satiety = new { current = hunger?.Saturation ?? 1500, maximum = hunger?.MaxSaturation ?? 1500 }, kind = "player" }));
+                features.Add(PointFeature("player-" + player.PlayerUID, pos.X, pos.Z, new { name = player.PlayerName, avatar = PlayerAvatar(player), avatarState = ClientAvatars?.GetStatus(player.PlayerUID, PlayerMapSyncSystem.Appearance(player)), y = pos.Y, yaw = pos.Yaw, mode = player.WorldData.CurrentGameMode.ToString(), health = new { current = health?.Health ?? 15, maximum = health?.MaxHealth ?? 15 }, satiety = new { current = hunger?.Saturation ?? 1500, maximum = hunger?.MaxSaturation ?? 1500 }, kind = "player" }));
             }
         }
         else if (name.Equals("spawn", StringComparison.OrdinalIgnoreCase) && api.World.DefaultSpawnPosition is { } spawn && InBounds(spawn.X, spawn.Z, bounds)) features.Add(PointFeature("spawn", spawn.X, spawn.Z, new { name = "出生点", kind = "spawn" }));
@@ -325,8 +368,8 @@ public sealed class ServerMapWebServer : IDisposable
         else if (name.Equals("translocators", StringComparison.OrdinalIgnoreCase)) AddTranslocators(features, bounds);
         else if (name.Equals("pois", StringComparison.OrdinalIgnoreCase))
             foreach (var poi in pois.All)
-                if (InBounds(poi.X, poi.Z, bounds)) features.Add(PointFeature(poi.Id, poi.X, poi.Z, new { name = poi.Name, text = poi.Text, color = poi.Color, rotation = poi.Rotation, poiType = poi.Type, kind = "poi", editable = principal != null && (principal.IsAdmin || principal.PlayerUid == poi.OwnerUid) }));
-        return new { type = "FeatureCollection", version = layerVersions[name], features };
+                if (InBounds(poi.X, poi.Z, bounds) && PoiVisible(principal, poi)) features.Add(PointFeature(poi.Id, poi.X, poi.Z, new { name = poi.Name, text = poi.Text, color = poi.Color, rotation = poi.Rotation, poiType = poi.Type, kind = "poi", editable = principal != null && (principal.IsAdmin || principal.PlayerUid == poi.OwnerUid) }));
+        return new { type = "FeatureCollection", version = layerVersions[name], features = VisibleFeatures(features, principal) };
     }
     private static void AddIndexed(List<object> features, IEnumerable<IndexedPoint> points, (double MinX, double MinZ, double MaxX, double MaxZ)? bounds)
     {
@@ -413,14 +456,20 @@ public sealed class ServerMapWebServer : IDisposable
     private static bool InBounds(double x, double z, (double MinX, double MinZ, double MaxX, double MaxZ)? b) => b == null || x >= b.Value.MinX && x <= b.Value.MaxX && z >= b.Value.MinZ && z <= b.Value.MaxZ;
     private static bool Intersects(double minX, double minZ, double maxX, double maxZ, (double MinX, double MinZ, double MaxX, double MaxZ)? b) => b == null || minX <= b.Value.MaxX && maxX >= b.Value.MinX && minZ <= b.Value.MaxZ && maxZ >= b.Value.MinZ;
     private static object PointFeature(string id, double x, double z, object properties) => new { type = "Feature", id, geometry = new { type = "Point", coordinates = new[] { x, z } }, properties };
-    private static string? PlayerAvatar(IPlayer player)
+    private string? PlayerAvatar(IPlayer player)
     {
         try
         {
+            var fingerprint = PlayerMapSyncSystem.Appearance(player);
+            var clientKey = fingerprint == null ? null : ClientAvatars?.GetKey(player.PlayerUID, fingerprint);
+            if (clientKey != null) return "api/v1/avatars/" + clientKey + ".png";
+            if (avatars == null) return null;
             var parts = player.Entity.WatchedAttributes.GetTreeAttribute("skinConfig")?.GetTreeAttribute("appliedParts");
             if (parts == null) return null;
-            var names = new[] { "baseskin", "eyecolor", "hairbase", "hairextra", "mustache", "beard", "haircolor" };
-            return "https://vs.pl3x.net/v1/" + string.Join('/', names.Select(name => Uri.EscapeDataString(parts.GetString(name, "none")))) + ".png";
+            var appearance = new LocalAvatarRenderer.Appearance(parts.GetString("baseskin", "skin20"), parts.GetString("eyecolor", "acid-green"),
+                parts.GetString("hairbase", "bald"), parts.GetString("hairextra", "none"), parts.GetString("mustache", "none"), parts.GetString("beard", "none"), parts.GetString("haircolor", "cordovan"));
+            var key = avatars.Request(appearance);
+            return key == null ? null : "api/v1/avatars/" + key + ".png";
         }
         catch { return null; }
     }
@@ -465,7 +514,8 @@ public sealed class ServerMapWebServer : IDisposable
         {
             if (!stop.IsCancellationRequested)
             {
-                stop.Cancel(); events.Dispose();
+                if (waypointListener != 0) { api.Event.UnregisterGameTickListener(waypointListener); waypointListener = 0; }
+                stop.Cancel(); events.Dispose(); avatars?.Dispose(); ClientAvatars?.Dispose();
                 try { listener?.Stop(); listener?.Close(); } catch { }
             }
             return maintenance;

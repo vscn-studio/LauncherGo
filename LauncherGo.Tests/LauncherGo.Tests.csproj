@@ -20,14 +20,31 @@
   <ItemGroup>
     <ProjectReference Include="..\LauncherGo.Services\LauncherGo.Services.csproj" />
     <ProjectReference Include="..\LauncherGo.Ui\LauncherGo.Ui.csproj" />
+    <ProjectReference Include="..\LauncherGo.ServerMapHost\LauncherGo.ServerMapHost.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- Test the actual map scheduling/query helpers without redistributing game assemblies. -->
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\WebPageMetadata.cs" Link="ServerMap\WebPageMetadata.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\AnnouncementStore.cs" Link="ServerMap\AnnouncementStore.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Util\LruCache.cs" Link="ServerMap\LruCache.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Util\ResettableCache.cs" Link="ServerMap\ResettableCache.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Util\BackgroundMapWork.cs" Link="ServerMap\BackgroundMapWork.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\World\SavedWorldQueries.cs" Link="ServerMap\SavedWorldQueries.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Util\AtomicFile.cs" Link="ServerMap\AtomicFile.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\MapNotebookStore.cs" Link="ServerMap\MapNotebookStore.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\MapVisibility.cs" Link="ServerMap\MapVisibility.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\GameWaypointSnapshot.cs" Link="ServerMap\GameWaypointSnapshot.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\NotebookSearch.cs" Link="ServerMap\NotebookSearch.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\WaypointShareStore.cs" Link="ServerMap\WaypointShareStore.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\GameThreadCall.cs" Link="ServerMap\GameThreadCall.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\LocalAvatarRenderer.cs" Link="ServerMap\LocalAvatarRenderer.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\LocalAvatarCache.cs" Link="ServerMap\LocalAvatarCache.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\ClientAvatarStore.cs" Link="ServerMap\ClientAvatarStore.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Render\AvatarScene.cs" Link="ServerMap\AvatarScene.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Render\AvatarTexturePacking.cs" Link="ServerMap\AvatarTexturePacking.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\WaypointIconStore.cs" Link="ServerMap\WaypointIconStore.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Render\PngEncoder.cs" Link="ServerMap\PngEncoder.cs" />
   </ItemGroup>
 
   <ItemGroup>

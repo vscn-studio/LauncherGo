@@ -32,6 +32,7 @@ public sealed class AutomationLifecycleService : IAutomationLifecycleService
             throw new ArgumentNullException(nameof(profile));
 
         var settings = await _settingsService.LoadAsync(profile, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
         if (trigger == AutomationScriptTrigger.BeforeStart && settings.ClearCacheBeforeStart)
         {
             ClearProfileCache(profile);
@@ -43,6 +44,7 @@ public sealed class AutomationLifecycleService : IAutomationLifecycleService
         foreach (var script in (settings.AutomationScripts ?? [])
                      .Where(item => item is not null && item.Enabled && item.Trigger == trigger))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             await RunScriptAsync(profile, script, cancellationToken).ConfigureAwait(false);
         }
     }
@@ -123,14 +125,31 @@ public sealed class AutomationLifecycleService : IAutomationLifecycleService
             script.Trigger,
             path);
 
-        if (!process.Start())
-            throw new InvalidOperationException($"启动自动化脚本失败：{path}");
-
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken).WaitAsync(ScriptTimeout, cancellationToken).ConfigureAwait(false);
-        var stdout = await stdoutTask.ConfigureAwait(false);
-        var stderr = await stderrTask.ConfigureAwait(false);
+        Task<string>? stdoutTask = null, stderrTask = null;
+        string stdout, stderr;
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!process.Start())
+                throw new InvalidOperationException($"启动自动化脚本失败：{path}");
+            _logger.LogInformation("Automation script process started. ProfileId={ProfileId}, ProcessId={ProcessId}, Trigger={Trigger}.",
+                profile.Id, process.Id, script.Trigger);
+            cancellationToken.ThrowIfCancellationRequested();
+            stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken).WaitAsync(ScriptTimeout, cancellationToken).ConfigureAwait(false);
+            stdout = await stdoutTask.ConfigureAwait(false);
+            stderr = await stderrTask.ConfigureAwait(false);
+        }
+        catch
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (Exception error) { _logger.LogDebug(error, "Automation process cleanup failed. ProfileId={ProfileId}.", profile.Id); }
+            // Read tasks may fault independently when a cancelled process closes its pipes.
+            if (stdoutTask is not null) _ = ObserveReadAsync(stdoutTask);
+            if (stderrTask is not null) _ = ObserveReadAsync(stderrTask);
+            throw;
+        }
         if (!string.IsNullOrWhiteSpace(stdout))
             _logger.LogInformation("自动化脚本输出：{Output}", stdout.Trim());
         if (!string.IsNullOrWhiteSpace(stderr))
@@ -139,5 +158,10 @@ public sealed class AutomationLifecycleService : IAutomationLifecycleService
         {
             _logger.LogWarning("自动化脚本退出码为 {ExitCode}：{ScriptPath}", process.ExitCode, path);
         }
+    }
+
+    private static async Task ObserveReadAsync(Task task)
+    {
+        try { await task.ConfigureAwait(false); } catch { }
     }
 }

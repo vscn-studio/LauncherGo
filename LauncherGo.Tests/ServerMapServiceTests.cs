@@ -108,6 +108,58 @@ public sealed class ServerMapServiceTests : IDisposable
         ServerMapService.ValidateMapModPackage(CreateModPackage());
     }
 
+    [Fact]
+    public async Task DeployMapMod_UnchangedPackageIsNotReadOrOverwritten()
+    {
+        var source = CreateModPackage();
+        var target = Path.Combine(Target, "servermap.zip");
+        var receipt = Path.Combine(root, "deployment", "receipt.json");
+        Assert.True(await ServerMapService.DeployMapModAsync(source, target, receipt));
+        using (File.Open(source, FileMode.Open, FileAccess.Read, FileShare.None))
+        using (File.Open(target, FileMode.Open, FileAccess.Read, FileShare.None))
+            Assert.False(await ServerMapService.DeployMapModAsync(source, target, receipt));
+
+        File.WriteAllText(target, "damaged target");
+        Assert.True(await ServerMapService.DeployMapModAsync(source, target, receipt));
+        Assert.Equal(File.ReadAllBytes(source), File.ReadAllBytes(target));
+        File.Delete(target);
+        Assert.True(await ServerMapService.DeployMapModAsync(source, target, receipt));
+
+        File.WriteAllText(receipt, "invalid json");
+        Assert.True(await ServerMapService.DeployMapModAsync(source, target, receipt));
+    }
+
+    [Fact]
+    public async Task DeployMapMod_ChangedPackageIsValidated_AndCancelledOrFailedCopyKeepsOldTarget()
+    {
+        var source = CreateModPackage();
+        var target = Path.Combine(Target, "servermap.zip");
+        var receipt = Path.Combine(root, "deployment", "receipt.json");
+        Assert.True(await ServerMapService.DeployMapModAsync(source, target, receipt));
+        var oldContents = File.ReadAllBytes(target);
+        using (var zip = ZipFile.Open(source, ZipArchiveMode.Update))
+        using (var writer = new StreamWriter(zip.CreateEntry("mod.json").Open())) writer.Write("new mod");
+        using (var cancel = new CancellationTokenSource())
+        {
+            cancel.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ServerMapService.DeployMapModAsync(source, target, receipt, cancel.Token));
+        }
+        Assert.Equal(oldContents, File.ReadAllBytes(target));
+        using (File.Open(target, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            var error = await Record.ExceptionAsync(() => ServerMapService.DeployMapModAsync(source, target, receipt));
+            Assert.True(error is IOException or UnauthorizedAccessException);
+        }
+        Assert.Equal(oldContents, File.ReadAllBytes(target));
+        Assert.Empty(Directory.EnumerateFiles(Target, "*.tmp"));
+        Assert.True(await ServerMapService.DeployMapModAsync(source, target, receipt));
+        var updated = File.ReadAllBytes(target);
+        Assert.Equal(File.ReadAllBytes(source), updated);
+        File.WriteAllText(source, "invalid package");
+        await Assert.ThrowsAsync<InvalidDataException>(() => ServerMapService.DeployMapModAsync(source, target, receipt));
+        Assert.Equal(updated, File.ReadAllBytes(target));
+    }
+
     [Theory]
     [InlineData("LICENSE.txt", false)]
     [InlineData("THIRD_PARTY_NOTICES.txt", false)]

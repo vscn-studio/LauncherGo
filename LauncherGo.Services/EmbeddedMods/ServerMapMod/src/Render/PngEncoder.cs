@@ -5,6 +5,31 @@ namespace ServerMap.Render;
 
 internal static class PngEncoder
 {
+    public static byte[] Decode(byte[] png)
+    {
+        if (png.Length < 33 || !png.AsSpan(0, 8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 })) throw new InvalidDataException();
+        var offset = 8; var width = 0; var height = 0;
+        using var compressed = new MemoryStream();
+        while (offset + 12 <= png.Length)
+        {
+            var length = BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(offset, 4));
+            if (length < 0 || (long)offset + 12 + length > png.Length) throw new InvalidDataException();
+            var type = System.Text.Encoding.ASCII.GetString(png, offset + 4, 4); var data = png.AsSpan(offset + 8, length);
+            if (type == "IHDR") { if (length != 13 || data[8] != 8 || data[9] != 6) throw new InvalidDataException(); width = BinaryPrimitives.ReadInt32BigEndian(data); height = BinaryPrimitives.ReadInt32BigEndian(data[4..]); }
+            if (type == "IDAT") compressed.Write(data);
+            offset += length + 12; if (type == "IEND") break;
+        }
+        if (width != 512 || height != 512) throw new InvalidDataException();
+        compressed.Position = 0; var raw = new byte[height * (width * 4 + 1)];
+        using (var zlib = new ZLibStream(compressed, CompressionMode.Decompress)) zlib.ReadExactly(raw);
+        var output = new byte[width * height * 4];
+        for (var y = 0; y < height; y++)
+        {
+            var row = y * (width * 4 + 1); if (raw[row] != 0) throw new InvalidDataException("Unsupported PNG filter");
+            raw.AsSpan(row + 1, width * 4).CopyTo(output.AsSpan(y * width * 4));
+        }
+        return output;
+    }
     public static byte[] Encode(int width, int height, ReadOnlySpan<byte> rgba)
     {
         using var output = new MemoryStream(); output.Write(new byte[] { 137,80,78,71,13,10,26,10 });

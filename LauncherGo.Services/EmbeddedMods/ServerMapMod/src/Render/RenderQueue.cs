@@ -34,6 +34,8 @@ public sealed class RenderQueue : IDisposable
     private readonly Func<ChunkKey, RenderQueueOutcome> render;
     private bool disposed;
     private Task? shutdown;
+    private long completed, failed;
+    private DateTimeOffset? lastCompletedAt;
 
     public RenderQueue(int threadCount, Func<ChunkKey, RenderQueueOutcome> render)
     {
@@ -140,6 +142,7 @@ public sealed class RenderQueue : IDisposable
                     else
                     {
                         pending.Remove(key);
+                        if (outcome == RenderQueueOutcome.Completed) { completed++; lastCompletedAt = DateTimeOffset.UtcNow; }
                     }
                 }
             }
@@ -152,6 +155,7 @@ public sealed class RenderQueue : IDisposable
         if (state.RetryAttempts >= MaxRetryAttempts)
         {
             pending.Remove(key);
+            failed++;
             return;
         }
 
@@ -178,6 +182,11 @@ public sealed class RenderQueue : IDisposable
     }
 
     public int PendingCount { get { lock (pendingGate) return pending.Count; } }
+    public sealed record QueueProgress(int Queued, int Active, int Retrying, long Completed, long Failed, DateTimeOffset? LastCompletedAt);
+    public QueueProgress Progress
+    {
+        get { lock (pendingGate) return new(pending.Values.Count(v => !v.IsRunning && !v.RetryScheduled), pending.Values.Count(v => v.IsRunning), pending.Values.Count(v => v.RetryScheduled), completed, failed, lastCompletedAt); }
+    }
 
     public Task StopAsync()
     {

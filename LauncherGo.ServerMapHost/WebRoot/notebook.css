@@ -1,0 +1,65 @@
+/* Match the map's existing dark glass controls. */
+.notebook-section { padding:0 5px;flex-shrink:0; }
+.notebook-heading { display:flex;align-items:center;height:38px;margin:2px 0;padding:0 10px;border-radius:5px;cursor:pointer;font:inherit;color:inherit; }
+.notebook-heading:hover { background:var(--hover); }
+.notebook-button { display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:6px 10px;color:var(--text);background:transparent;border:var(--border);border-radius:4px;font:inherit;font-size:12px;line-height:1.4;cursor:pointer;touch-action:manipulation; }
+.notebook-button:hover,.notebook-info:hover { background:var(--hover); }
+.notebook-button:focus-visible,.notebook-info:focus-visible,.notebook-progress-segment:focus-visible,.notebook-progress-track[data-empty=true]:focus-visible { outline:2px solid #8abdc5;outline-offset:2px; }
+.notebook-button:disabled { opacity:.5;cursor:default; }
+.tools .notebook-button { display:block;text-align:left;font-size:inherit; }
+#contextMenu button { font:inherit; }
+.notebook-info { flex:0 0 28px;width:28px;height:28px;padding:0;display:grid;place-items:center;color:var(--muted);background:transparent;border:0;border-radius:4px;font-size:17px;cursor:pointer;touch-action:manipulation; }
+.notebook-icon { display:inline-block;flex:0 0 20px;width:20px;height:20px;mask-size:contain;mask-position:center;mask-repeat:no-repeat; }
+.notebook-waypoint { display:block;width:20px;height:20px;mask-size:contain;mask-position:center;mask-repeat:no-repeat; }
+.notebook-icon-fallback { border-radius:50%; }
+#notebookProgress { flex-shrink:0;padding:6px 15px; }
+.notebook-progress-track { display:flex;align-items:stretch;width:100%;height:28px;background:linear-gradient(#ffffff18,#ffffff18) center/100% 10px no-repeat; }
+.notebook-progress-track[data-empty=true] { cursor:pointer; }
+.notebook-progress-segment { position:relative;flex:0 1 0;min-width:12px;height:28px;padding:0;border:0;background:transparent;cursor:pointer;touch-action:manipulation; }
+.notebook-progress-segment::before { content:'';position:absolute;inset:9px 0;background:var(--segment-color); }
+.notebook-progress-segment.first-visible::before { border-top-left-radius:5px;border-bottom-left-radius:5px; }
+.notebook-progress-segment.last-visible::before { border-top-right-radius:5px;border-bottom-right-radius:5px; }
+.notebook-progress-segment[hidden] { display:none!important; }
+.notebook-progress-segment:hover::before,.notebook-progress-segment[aria-expanded=true]::before { filter:brightness(1.18); }
+.notebook-progress-segment.failed { --segment-color:#ce7777; }
+.notebook-progress-segment.pending { --segment-color:#d3ae60; }
+.notebook-progress-segment.completed { --segment-color:#7db38b; }
+#notebookProgress[data-phase=unavailable] .notebook-progress-track { opacity:.45; }
+#notebookToolbar { position:fixed;bottom:50px;left:62px;z-index:1001;display:flex;flex-direction:column;align-items:stretch;gap:6px;width:max-content;box-sizing:border-box;padding:10px 12px;color:var(--text);background:var(--glass);border:var(--border);box-shadow:var(--shadow);backdrop-filter:blur(6px);border-radius:6px;max-height:35dvh;max-width:min(620px,calc(100vw - 332px));overflow:auto; }
+#notebookToolbar .notebook-help { font-size:12px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere; }
+.notebook-toolbar-actions { display:flex;flex-wrap:wrap;gap:6px; }
+.notebook-popup { display:flex;flex-wrap:wrap;gap:6px;max-width:270px; }
+.notebook-popup>b,.notebook-popup>p { flex:1 0 100%;margin:0;overflow-wrap:anywhere; }
+.notebook-popup>p { color:var(--muted);font-size:12px; }
+.notebook-popup-actions { display:flex;flex-wrap:nowrap;gap:6px; }
+.notebook-icon-button { flex:0 0 34px;width:34px;height:34px;min-height:34px;padding:6px; }
+.notebook-icon-button svg { display:block;width:20px;height:20px;pointer-events:none; }
+#notebookNotice,#notebookTooltip { position:fixed;z-index:1300;max-width:min(320px,calc(100vw - 16px));padding:9px 12px;color:var(--text);background:#18181af5;border:var(--border);box-shadow:var(--shadow);border-radius:5px;font-size:12px;line-height:1.6;white-space:pre-line;overflow-wrap:anywhere; }
+#notebookNotice { top:70px;left:50%;transform:translateX(-50%); }
+#notebookTooltip { pointer-events:auto; }
+.notebook-region-label { overflow:hidden!important;clip-path:inset(0);pointer-events:none!important;background:none; }
+.notebook-region-label text { font-family:var(--map-label-font);font-weight:600;letter-spacing:0;fill:#e0e0e0;stroke:#20252b;paint-order:stroke fill;stroke-linejoin:round;text-rendering:geometricPrecision; }
+.notebook-fog { filter:none; }
+.notebook-route { cursor:context-menu; }
+#notebookModal input[type=color] { height:40px; }
+#notebookToolbar[hidden],#notebookNotice[hidden],#notebookTooltip[hidden],.notebook-section[hidden],.notebook-button[hidden],.notebook-info[hidden] { display:none!important; }
+@media(max-width:700px),(pointer:coarse) {
+  #notebookToolbar { max-width:calc(100vw - 70px);bottom:calc(50px + env(safe-area-inset-bottom));padding:8px;backdrop-filter:none;box-shadow:none; }
+  .notebook-button { min-height:44px; }
+  .notebook-info { min-width:44px;min-height:44px; }
+  .notebook-heading { height:auto;min-height:44px; }
+  .notebook-icon-button { flex-basis:44px;width:44px;height:44px;min-height:44px; }
+  .notebook-progress-track,.notebook-progress-segment { height:44px; }
+  .notebook-progress-segment { min-width:28px; }
+  .notebook-progress-segment::before { top:17px;bottom:17px; }
+}
+/* Game waypoint pickers share the notebook control sizes. */
+.notebook-icon-picker,.notebook-color-picker{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;max-height:190px;overflow:auto;}
+.notebook-icon-picker .notebook-button{width:36px;height:36px;display:flex;align-items:center;justify-content:center;padding:6px;flex:0 0 auto;}
+.notebook-icon-picker [aria-pressed="true"]{outline:2px solid var(--text);outline-offset:-2px;background:var(--hover);}
+.notebook-icon-picker .notebook-waypoint{position:static;display:block;width:22px;height:22px;}
+.notebook-color-picker .notebook-button{width:26px;height:26px;min-height:0;padding:0;border:1px solid #888;flex:0 0 auto;}
+#notebookModal input[type="checkbox"]{width:auto;min-height:0;margin-left:10px;accent-color:#c9af76;}
+#notebookModal .modal{max-height:calc(100dvh - 32px);overflow:auto;}
+.notebook-coordinate-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}
+@media(pointer:coarse){.notebook-icon-picker .notebook-button{width:44px;height:44px;}.notebook-color-picker .notebook-button{width:36px;height:36px;}}

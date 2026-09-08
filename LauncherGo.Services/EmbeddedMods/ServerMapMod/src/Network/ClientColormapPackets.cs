@@ -2,6 +2,14 @@ using ProtoBuf;
 
 namespace ServerMap.Network;
 
+/// <summary>One original game waypoint SVG, accepted only from a root player.</summary>
+[ProtoContract]
+public sealed class ClientWaypointIconPacket
+{
+    [ProtoMember(1)] public string Name { get; set; } = "";
+    [ProtoMember(2)] public byte[] Data { get; set; } = [];
+}
+
 /// <summary>Server-to-client request for the current seasonal color table.</summary>
 [ProtoContract]
 public sealed class ServerColormapRequestPacket

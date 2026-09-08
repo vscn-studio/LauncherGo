@@ -1,0 +1,270 @@
+[
+  {
+    "packages": [
+      "Avalonia.BuildServices/11.3.2"
+    ],
+    "url": "https://raw.githubusercontent.com/AvaloniaUI/Avalonia.BuildServices/777f975b0a0cecf0311273711d56697212c558c0/LICENSE",
+    "file": "THIRD-PARTY-LICENSES/upstream/Avalonia.BuildServices-11.3.2.txt"
+  },
+  {
+    "packages": [
+      "Discord.Net/3.15.3",
+      "Discord.Net.Commands/3.15.3",
+      "Discord.Net.Core/3.15.3",
+      "Discord.Net.Interactions/3.15.3",
+      "Discord.Net.Rest/3.15.3",
+      "Discord.Net.Webhook/3.15.3",
+      "Discord.Net.WebSocket/3.15.3"
+    ],
+    "url": "https://raw.githubusercontent.com/discord-net/Discord.Net/13ec6a0e82505d57c5b129de0b9f2878ae54edba/LICENSE",
+    "file": "THIRD-PARTY-LICENSES/upstream/Discord.Net-3.15.3.txt"
+  },
+  {
+    "packages": [
+      "Irihi.Avalonia.Shared/0.4.0"
+    ],
+    "url": "https://raw.githubusercontent.com/irihitech/Irihi.Avalonia.Shared/8c16a0e790c99c96ade7194ffbefd1a99207bd67/LICENSE",
+    "file": "THIRD-PARTY-LICENSES/upstream/Irihi.Avalonia.Shared-0.4.0.txt"
+  },
+  {
+    "packages": [
+      "Avalonia/12.0.1",
+      "Avalonia.Desktop/12.0.1",
+      "Avalonia.FreeDesktop/12.0.1",
+      "Avalonia.FreeDesktop.AtSpi/12.0.1",
+      "Avalonia.HarfBuzz/12.0.1",
+      "Avalonia.Native/12.0.1",
+      "Avalonia.Remote.Protocol/12.0.1",
+      "Avalonia.Skia/12.0.1",
+      "Avalonia.Win32/12.0.1",
+      "Avalonia.X11/12.0.1"
+    ],
+    "url": "https://raw.githubusercontent.com/AvaloniaUI/Avalonia/fe2741d62a467c3efa4f0c5f68f7861bc338c99f/licence.md",
+    "file": "THIRD-PARTY-LICENSES/upstream/Avalonia-12.0.1.txt"
+  },
+  {
+    "packages": [
+      "AsyncIO/0.1.69"
+    ],
+    "url": "https://raw.githubusercontent.com/somdoron/AsyncIO/master/LICENSE.md",
+    "file": "THIRD-PARTY-LICENSES/upstream/AsyncIO-0.1.69.txt"
+  },
+  {
+    "packages": [
+      "Avalonia.AvaloniaEdit/12.0.0"
+    ],
+    "url": "https://raw.githubusercontent.com/AvaloniaUI/AvaloniaEdit/86fdebec4cff7affb0e14c7885df71d28edce777/LICENSE",
+    "file": "THIRD-PARTY-LICENSES/upstream/Avalonia.AvaloniaEdit-12.0.0.txt"
+  },
+  {
+    "packages": [
+      "MicroCom.Runtime/0.11.4"
+    ],
+    "url": "https://raw.githubusercontent.com/kekekeks/MicroCom/28850f85fb586488828ab7267ed4a87e8c970b51/LICENSE",
+    "file": "THIRD-PARTY-LICENSES/upstream/MicroCom.Runtime-0.11.4.txt"
+  },
+  {
+    "packages": [
+      "Microsoft.IO.RecyclableMemoryStream/3.0.1"
+    ],
+    "url": "https://raw.githubusercontent.com/Microsoft/Microsoft.IO.RecyclableMemoryStream/e29a28387da9018fa9605a1dcb3f7a0435aa9974/LICENSE",
+    "file": "THIRD-PARTY-LICENSES/upstream/Microsoft.IO.RecyclableMemoryStream-3.0.1.txt"
+  },
+  {
+    "packages": [
+      "Microsoft.Data.Sqlite/10.0.7",
+      "Microsoft.Data.Sqlite.Core/10.0.7"
+    ],
+    "url": "https://raw.githubusercontent.com/dotnet/dotnet/b16286c2284fecf303dbc12a0bb152476d662e44/LICENSE.TXT",
+    "file": "THIRD-PARTY-LICENSES/upstream/Microsoft.Data.Sqlite-10.0.7.txt"
+  },
+  {
+    "packages": [
+      "Microsoft.VisualStudio.Validation/17.13.22"
+    ],
+    "url": "https://raw.githubusercontent.com/microsoft/vs-validation/fd7027e236db97b472614237b1453022e24ef146/LICENSE",
+    "file": "THIRD-PARTY-LICENSES/upstream/Microsoft.VisualStudio.Validation-17.13.22.txt"
+  },
+  {
+    "packages": [
+      "NaCl.Net/0.1.13"
+    ],
+    "url": "https://raw.githubusercontent.com/somdoron/NaCl.net/master/LICENSE.md",
+    "file": "THIRD-PARTY-LICENSES/upstream/NaCl.Net-0.1.13.txt"
+  },
+  {
+    "packages": [
+      "Microsoft.Extensions.Configuration/10.0.1",
+      "Microsoft.Extensions.Configuration.Abstractions/10.0.1",
+      "Microsoft.Extensions.Configuration.Binder/10.0.1",
+      "Microsoft.Extensions.Configuration.CommandLine/10.0.1",
+      "Microsoft.Extensions.Configuration.EnvironmentVariables/10.0.1",
+      "Microsoft.Extensions.Configuration.FileExtensions/10.0.1",
+      "Microsoft.Extensions.Configuration.Json/10.0.1",
+      "Microsoft.Extensions.Configuration.UserSecrets/10.0.1",
+      "Microsoft.Extensions.DependencyInjection/10.0.1",
+      "Microsoft.Extensions.DependencyInjection.Abstractions/10.0.1",
+      "Microsoft.Extensions.Diagnostics/10.0.1",
+      "Microsoft.Extensions.Diagnostics.Abstractions/10.0.1",
+      "Microsoft.Extensions.FileProviders.Abstractions/10.0.1",
+      "Microsoft.Extensions.FileProviders.Physical/10.0.1",
+      "Microsoft.Extensions.FileSystemGlobbing/10.0.1",
+      "Microsoft.Extensions.Hosting/10.0.1",
+      "Microsoft.Extensions.Hosting.Abstractions/10.0.1",
+      "Microsoft.Extensions.Logging/10.0.1",
+      "Microsoft.Extensions.Logging.Abstractions/10.0.1",
+      "Microsoft.Extensions.Logging.Configuration/10.0.1",
+      "Microsoft.Extensions.Logging.Console/10.0.1",
+      "Microsoft.Extensions.Logging.Debug/10.0.1",
+      "Microsoft.Extensions.Logging.EventLog/10.0.1",
+      "Microsoft.Extensions.Logging.EventSource/10.0.1",
+      "Microsoft.Extensions.Options/10.0.1",
+      "Microsoft.Extensions.Options.ConfigurationExtensions/10.0.1",
+      "Microsoft.Extensions.Primitives/10.0.1",
+      "System.Diagnostics.EventLog/10.0.1"
+    ],
+    "url": "https://raw.githubusercontent.com/dotnet/dotnet/fad253f51b461736dfd3cd9c15977bb7493becef/LICENSE.TXT",
+    "file": "THIRD-PARTY-LICENSES/upstream/Microsoft.Extensions.Configuration-10.0.1.txt"
+  },
+  {
+    "packages": [
+      "Nerdbank.MessagePack/1.3.29-beta"
+    ],
+    "url": "https://raw.githubusercontent.com/AArnott/Nerdbank.MessagePack/9d65963c1d2ad5eadc40336c7a03771703beb39b/LICENSE",
+    "file": "THIRD-PARTY-LICENSES/upstream/Nerdbank.MessagePack-1.3.29-beta.txt"
+  },
+  {
+    "packages": [
+      "NetMQ/4.0.4.2"
+    ],
+    "url": "https://raw.githubusercontent.com/zeromq/netmq/69fc0a3448d6e825413dda097efcb905a8e9e7a7/COPYING.LESSER",
+    "file": "THIRD-PARTY-LICENSES/upstream/NetMQ-4.0.4.2.txt"
+  },
+  {
+    "packages": [
+      "Microsoft.Extensions.ObjectPool/10.0.0"
+    ],
+    "url": "https://raw.githubusercontent.com/dotnet/dotnet/b0f34d51fccc69fd334253924abd8d6853fad7aa/LICENSE.TXT",
+    "file": "THIRD-PARTY-LICENSES/upstream/Microsoft.Extensions.ObjectPool-10.0.0.txt"
+  },
+  {
+    "packages": [
+      "PolyType/1.4.1"
+    ],
+    "url": "https://raw.githubusercontent.com/eiriktsarpalis/PolyType/d5aa19cbd1b18b2e98230b0055b736024c874773/LICENSE",
+    "file": "THIRD-PARTY-LICENSES/upstream/PolyType-1.4.1.txt"
+  },
+  {
+    "packages": [
+      "PDFsharp/6.2.4",
+      "PDFsharp-MigraDoc/6.2.4"
+    ],
+    "url": "https://raw.githubusercontent.com/empira/PDFsharp/v6.2.4/LICENSE",
+    "file": "THIRD-PARTY-LICENSES/upstream/PDFsharp-6.2.4.txt"
+  },
+  {
+    "packages": [
+      "Serilog/4.3.1"
+    ],
+    "url": "https://raw.githubusercontent.com/serilog/serilog/5625030e8f8fceca2e3180575aba174751ef7add/LICENSE",
+    "file": "THIRD-PARTY-LICENSES/upstream/Serilog-4.3.1.txt"
+  },
+  {
+    "packages": [
+      "Serilog.Enrichers.Thread/4.0.0"
+    ],
+    "url": "https://raw.githubusercontent.com/serilog/serilog-enrichers-thread/a6c1b7b56e9e11af8b1ce47273ed4beb38fcbf24/LICENSE",
+    "file": "THIRD-PARTY-LICENSES/upstream/Serilog.Enrichers.Thread-4.0.0.txt"
+  },
+  {
+    "packages": [
+      "Serilog.Extensions.Logging/10.0.0"
+    ],
+    "url": "https://raw.githubusercontent.com/serilog/serilog-extensions-logging/538cf2fd64baf760950e202a00dd426c6b76e18c/LICENSE",
+    "file": "THIRD-PARTY-LICENSES/upstream/Serilog.Extensions.Logging-10.0.0.txt"
+  },
+  {
+    "packages": [
+      "Serilog.Sinks.File/7.0.0"
+    ],
+    "url": "https://raw.githubusercontent.com/serilog/serilog-sinks-file/23c732a8658a0df2a5434fe69b0011800b14f0da/LICENSE",
+    "file": "THIRD-PARTY-LICENSES/upstream/Serilog.Sinks.File-7.0.0.txt"
+  },
+  {
+    "packages": [
+      "protobuf-net/3.2.56",
+      "protobuf-net.Core/3.2.56"
+    ],
+    "url": "https://raw.githubusercontent.com/protobuf-net/protobuf-net/dfdfce61a739cfd76f05fcdacf8a4b3b9e94e684/Licence.txt",
+    "file": "THIRD-PARTY-LICENSES/upstream/protobuf-net-3.2.56.txt"
+  },
+  {
+    "packages": [
+      "System.Interactive.Async/6.0.1",
+      "System.Linq.Async/6.0.1"
+    ],
+    "url": "https://raw.githubusercontent.com/dotnet/reactive/8d8c10ceb7cc0bdb1e49b362efe5826e577dfeff/LICENSE",
+    "file": "THIRD-PARTY-LICENSES/upstream/System.Interactive.Async-6.0.1.txt"
+  },
+  {
+    "packages": [
+      "System.Reactive/6.0.0"
+    ],
+    "url": "https://raw.githubusercontent.com/dotnet/reactive/e29c7a50db88513a87651c366088da8b7f40b1f0/LICENSE",
+    "file": "THIRD-PARTY-LICENSES/upstream/System.Reactive-6.0.0.txt"
+  },
+  {
+    "packages": [
+      "SQLitePCLRaw.bundle_e_sqlite3/2.1.11",
+      "SQLitePCLRaw.core/2.1.11",
+      "SQLitePCLRaw.lib.e_sqlite3/2.1.11",
+      "SQLitePCLRaw.provider.e_sqlite3/2.1.11"
+    ],
+    "url": "https://raw.githubusercontent.com/ericsink/SQLitePCL.raw/v2.1.11/LICENSE.TXT",
+    "file": "THIRD-PARTY-LICENSES/upstream/SQLitePCLRaw.bundle_e_sqlite3-2.1.11.txt"
+  },
+  {
+    "packages": [
+      "System.CodeDom/10.0.8",
+      "System.Management/10.0.8"
+    ],
+    "url": "https://raw.githubusercontent.com/dotnet/dotnet/94ea82652cdd4e0f8046b5bd5becbd11461482ca/LICENSE.TXT",
+    "file": "THIRD-PARTY-LICENSES/upstream/System.CodeDom-10.0.8.txt"
+  },
+  {
+    "packages": [
+      "ZstdSharp.Port/0.8.6"
+    ],
+    "url": "https://raw.githubusercontent.com/oleg-st/ZstdSharp/f475a7d4746d305094fbb09563cb0fcb167bec18/LICENSE",
+    "file": "THIRD-PARTY-LICENSES/upstream/ZstdSharp.Port-0.8.6.txt"
+  },
+  {
+    "packages": [
+      "Feather"
+    ],
+    "url": "https://raw.githubusercontent.com/feathericons/feather/v4.29.2/LICENSE",
+    "file": "LauncherGo.ServerMapHost/WebRoot/vendor/Feather-LICENSE.txt"
+  },
+  {
+    "packages": [
+      "System.Security.Cryptography.Pkcs/10.0.6",
+      "System.Security.Cryptography.Xml/10.0.6"
+    ],
+    "url": "https://raw.githubusercontent.com/dotnet/dotnet/47fb725acf5d7094af51aebbb5b7e5c44a3b2a77/LICENSE.TXT",
+    "file": "THIRD-PARTY-LICENSES/upstream/System.Security.Cryptography.Pkcs-10.0.6.txt"
+  },
+  {
+    "packages": [
+      "Tmds.DBus.Protocol/0.92.0"
+    ],
+    "url": "https://raw.githubusercontent.com/tmds/Tmds.DBus/282acebca8d4e4e3ba211646ac650911ee94edfd/COPYING",
+    "file": "THIRD-PARTY-LICENSES/upstream/Tmds.DBus.Protocol-0.92.0.txt"
+  },
+  {
+    "packages": [
+      "GPL-3.0"
+    ],
+    "url": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/GPL-3.0-only.txt",
+    "file": "THIRD-PARTY-LICENSES/GPL-3.0.txt"
+  }
+]

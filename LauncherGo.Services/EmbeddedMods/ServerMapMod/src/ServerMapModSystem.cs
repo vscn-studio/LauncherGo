@@ -14,6 +14,7 @@ namespace ServerMap;
 
 public sealed class ServerMapModSystem : ModSystem
 {
+    public ServerMapWebServer? WebServer => web;
     private const string CacheFormatVersion = "2d-live-flat-5";
     private ICoreServerAPI? sapi; private WorldDatabaseReader? db; private ServerMapWebServer? web; private ServerMapConfig? config; private Render.RenderQueue? queue; private Render.MapPalette? materials; private ClientColormapReceiver? colormapReceiver; private IServerNetworkChannel? colormapChannel; private string dataRoot="", configPath="";
     private readonly ConcurrentDictionary<ChunkKey, byte> regionsAwaitingSave = new();
@@ -27,6 +28,7 @@ public sealed class ServerMapModSystem : ModSystem
     private volatile bool disposed;
     private MapAuthStore? authStore;
     private PoiStore? poiStore;
+    private int scanActive, scannedColumns, discoveredRegions;
     private readonly DoorStateCache doorStates = new();
     public override void AssetsFinalize(ICoreAPI api) { }
     public override void StartServerSide(ICoreServerAPI api)
@@ -44,11 +46,20 @@ public sealed class ServerMapModSystem : ModSystem
             var announcementStore = new AnnouncementStore(Path.Combine(dataRoot, "announcement.json"));
             web = new ServerMapWebServer(api, config, dataRoot, db, materials, authStore, poiStore, announcementStore);
             queue = new Render.RenderQueue(config.RenderThreads, RenderRegion);
+            web.RenderProgress = () =>
+            {
+                var progress = queue.Progress;
+                return new { phase = !running ? "waiting" : Volatile.Read(ref scanActive) != 0 ? "scanning" : progress.Active + progress.Queued > 0 ? "rendering" : progress.Retrying > 0 ? "retrying" : "idle",
+                    queued = progress.Queued, active = progress.Active, retrying = progress.Retrying, completed = progress.Completed, failed = progress.Failed,
+                    columnsScanned = Volatile.Read(ref scannedColumns), regionsDiscovered = Volatile.Read(ref discoveredRegions), awaitingSave = regionsAwaitingSave.Count, lastCompletedAt = progress.LastCompletedAt };
+            };
             background = new BackgroundMapWork((job, ex) => api.Logger.Warning("ServerMap background {0} failed: {1}", job, ex));
             colormapReceiver = new ClientColormapReceiver(api, materials, OnClientColormapApplied, Path.Combine(dataRoot, "colormap"));
             colormapChannel = api.Network.RegisterChannel("servermap-colormap")
                 .RegisterMessageType<ServerColormapRequestPacket>().RegisterMessageType<ClientColormapChunkPacket>()
-                .SetMessageHandler<ClientColormapChunkPacket>(colormapReceiver.Receive);
+                .SetMessageHandler<ClientColormapChunkPacket>(colormapReceiver.Receive)
+                .RegisterMessageType<ClientWaypointIconPacket>()
+                .SetMessageHandler<ClientWaypointIconPacket>(web.ReceiveWaypointIcon);
             web.Start();
             api.Event.ChunkDirty += OnChunkDirty;
             api.Event.ChunkColumnLoaded += OnChunkColumnLoaded;
@@ -93,6 +104,9 @@ public sealed class ServerMapModSystem : ModSystem
     private async Task ScanRegionsAsync(bool basicOnly, bool force, CancellationToken token)
     {
         if (db == null) return;
+        Interlocked.Exchange(ref scanActive, 1); Interlocked.Exchange(ref scannedColumns, 0); Interlocked.Exchange(ref discoveredRegions, 0);
+        try
+        {
         sapi?.Logger.Notification("ServerMap region scan started (background, paged).");
         var regions = new HashSet<ChunkKey>();
         var columns = 0;
@@ -100,8 +114,10 @@ public sealed class ServerMapModSystem : ModSystem
         {
             token.ThrowIfCancellationRequested();
             if (++columns % 256 == 0) await Task.Delay(25, token).ConfigureAwait(false);
+            Volatile.Write(ref scannedColumns, columns);
             var region = new ChunkKey(column.X >> 4, 0, column.Z >> 4);
             if (!regions.Add(region)) continue;
+            Volatile.Write(ref discoveredRegions, regions.Count);
             // A new world still needs its sepia base tile. Only narrow the
             // redraw when the non-colour tile already exists.
             if (basicOnly && web?.HasBaseTile("sepia", region) == true) basicOnlyRegions[region] = 0;
@@ -110,6 +126,8 @@ public sealed class ServerMapModSystem : ModSystem
             if (regions.Count % 128 == 0) sapi?.Logger.Notification("ServerMap region scan: {0} regions discovered.", regions.Count);
         }
         sapi?.Logger.Notification("ServerMap region scan complete: {0} columns, {1} regions.", columns, regions.Count);
+        }
+        finally { Interlocked.Exchange(ref scanActive, 0); }
     }
     private void OnClientColormapApplied()
     {

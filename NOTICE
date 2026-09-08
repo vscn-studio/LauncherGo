@@ -15,6 +15,12 @@ This repository and its release packages include third-party components.
 Those components remain under their own copyright notices and license terms.
 See THIRD-PARTY-NOTICES.md for the dependency notice inventory and release
 audit notes.
+Package-specific copyright metadata and original license/notice documents are
+preserved in THIRD-PARTY-LICENSES/nuget-packages.json, packages/ and upstream/.
+
+ServerMap's client-supplied game icons, head meshes and textures are runtime
+data under their original asset terms, not first-party MIT-licensed artwork.
+See the separate mod and WebRoot THIRD_PARTY_NOTICES.txt files.
 
 Project-owned materials
 

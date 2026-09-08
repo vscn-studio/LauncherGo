@@ -5,7 +5,15 @@ license texts are shipped in `THIRD-PARTY-LICENSES/`; this file provides the
 package mapping and release checks. When making a release, keep this file,
 `NOTICE`, `LICENSE`, and `THIRD-PARTY-LICENSES/` in the distributed package.
 
-Runtime dependency audit: 2026-09-05. Embedded mod and map web notices updated: 2026-09-08.
+Runtime dependency and map resource notice audit: 2026-09-09.
+
+`THIRD-PARTY-LICENSES/nuget-packages.json` inventories 95 restored NuGet
+packages (including transitive/build dependencies) with their published
+copyright, license metadata and repository references. Package-supplied
+licenses/notices are retained byte-for-byte in `packages/`, deduplicated by
+SHA-256. `upstream-sources.json` maps additional full upstream licenses to the
+packages they cover, preferring the repository commits recorded in NuGet.
+The generic MIT template is not a replacement for these component notices.
 
 ## LauncherGo License
 
@@ -19,6 +27,11 @@ LauncherGo.slnx package --include-transitive` and local `.nuspec` metadata.
 
 | Component | Version | License metadata found | Source / license |
 | --- | --- | --- | --- |
+| Discord.Net and its Commands/Core/Interactions/Rest/Webhook/WebSocket packages | 3.15.3 | MIT | https://github.com/discord-net/Discord.Net |
+| Newtonsoft.Json | 13.0.3 | MIT | https://github.com/JamesNK/Newtonsoft.Json |
+| System.Reactive | 6.0.0 | MIT | https://github.com/dotnet/reactive |
+| System.Interactive.Async, System.Linq.Async | 6.0.1 | MIT | https://github.com/dotnet/reactive |
+| Microsoft.Bcl.AsyncInterfaces | 6.0.0 | MIT | https://github.com/dotnet/runtime |
 | Avalonia | 12.0.1 | MIT | https://github.com/AvaloniaUI/Avalonia |
 | Avalonia.Desktop | 12.0.1 | MIT | https://github.com/AvaloniaUI/Avalonia |
 | Avalonia.FreeDesktop | 12.0.1 | MIT | https://github.com/AvaloniaUI/Avalonia |
@@ -130,6 +143,10 @@ copyright and complete license text beside the files they cover:
 | WebCartographer route planner, sky image and spawn icon | `924537d6eff099404caa26d36a07a6d1cf08ba67` | Copyright (c) 2023 Th3Dilli | `WebRoot/vendor/WebCartographer-LICENSE.txt` (MIT) |
 | VS-LiveMap-Revival icons and UI reference | `36cfe158f17b925305162f65fd97142c87c41962` | Copyright (c) 2024 William Blake Galbreath | `WebRoot/vendor/VS-LiveMap-Revival-LICENSE.txt` (MIT) |
 
+The notebook sharing buttons also adapt Feather 4.29.2 chain-link geometry
+(Copyright (c) 2013-2023 Cole Bemis, MIT). Its complete license is in
+`WebRoot/vendor/Feather-LICENSE.txt`.
+
 The web package contains ten SVG icons copied from VS-LiveMap-Revival and a
 sky image and spawn icon copied from WebCartographer. `WebRoot/THIRD_PARTY_NOTICES.txt` lists
 the exact files, upstream URLs and referenced snapshots. Its `LICENSE.txt`
@@ -142,6 +159,17 @@ image has been removed from the web distribution.
 
 ## Release Audit Notes
 
+Client-supplied head models, texture fragments and waypoint SVGs, generated
+avatars and optional avatar layers remain subject to the original game or
+resource-pack asset terms. They are runtime data, not bundled game resources
+and not relicensed as MIT by the capture/rendering code. Operators must check
+asset terms before serving or redistributing their caches.
+
+`scripts/verify-dependency-licenses.ps1` checks source license coverage and
+package notice hashes. Release verification also checks published copies.
+Refresh the NuGet snapshot with `scripts/update-dependency-license-snapshot.ps1`
+after dependency changes and review upstream mappings before release.
+
 PDF export reads DengXian or SimHei from the Windows fonts directory at runtime;
 these font files are not copied into LauncherGo release packages. Their OpenType
 `fsType` value was checked as `0x0008`, which permits editable document
@@ -152,6 +180,10 @@ the font license supplied with the user's Windows installation.
 URL. For single-file releases, verify that the packaging model does not remove
 rights normally expected for LGPL-covered libraries, such as notice retention
 and a practical way to relink or replace the library where required.
+`THIRD-PARTY-LICENSES/GPL-3.0.txt` accompanies LGPL-3.0, which incorporates
+GPLv3. License-file checks alone do not establish compliance with source or
+relinking obligations; retain source references and review actual packaging
+when distributing LGPL/MPL dependencies.
 
 Self-contained .NET releases include Microsoft .NET runtime components in
 addition to NuGet assemblies. Release workflows copy the SDK-provided

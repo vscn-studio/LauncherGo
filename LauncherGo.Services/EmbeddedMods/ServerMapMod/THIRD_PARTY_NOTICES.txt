@@ -31,5 +31,15 @@ Vintage Story API assemblies, Microsoft.Data.Sqlite, protobuf-net, Harmony
 from the user's game installation. Their binaries and source are not included
 in this mod ZIP. Their original licenses continue to apply to those components.
 
+Client-supplied game resources
+Head-mesh capture, local avatar rasterization and waypoint synchronization are
+LauncherGo code under LICENSE.txt. The game models, texture fragments and SVG
+icons they process remain the property of Anego Studios or the respective
+mod/resource-pack authors. They are read from the user's game at runtime, not
+distributed in this mod ZIP. Generated portraits, icon caches and optional
+user-supplied avatar layers retain the applicable asset terms, not the MIT
+license of the processing code. Respect those terms when serving or exporting
+cached assets.
+
 Keep LICENSE.txt, THIRD_PARTY_NOTICES.txt and VS-LiveMap-Revival-LICENSE.txt
 together with the mod when redistributing it.

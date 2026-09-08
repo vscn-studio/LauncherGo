@@ -7,6 +7,104 @@ namespace LauncherGo.Tests;
 public sealed class ServerHostRuntimeStagerTests
 {
     [Fact]
+    public void Prepare_WarmCacheDoesNotReadUnchangedFileContents_AndOnlyHashesChanges()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"launchergo-stage-reuse-{Guid.NewGuid():N}");
+        var source = Path.Combine(root, "source");
+        var runtime = Path.Combine(root, "runtime");
+        Directory.CreateDirectory(source);
+        var exe = Path.Combine(source, "host.exe");
+        var web = Path.Combine(source, "index.html");
+        File.WriteAllText(exe, "host");
+        File.WriteAllText(web, "web-v1");
+        try
+        {
+            string firstPath;
+            using (var first = ServerHostRuntimeStager.Prepare(exe, runtime, additionalFiles: [web])) firstPath = first.ExecutablePath;
+            var checkpoints = new List<string>();
+            // Deny content reads entirely: a successful warm preparation proves it uses metadata.
+            using (File.Open(exe, FileMode.Open, FileAccess.Read, FileShare.None))
+            using (File.Open(web, FileMode.Open, FileAccess.Read, FileShare.None))
+            using (var warm = ServerHostRuntimeStager.Prepare(exe, runtime, additionalFiles: [web], progress: (step, _) => checkpoints.Add(step)))
+            {
+                Assert.Equal(firstPath, warm.ExecutablePath);
+                Assert.Contains("hash-files-result:read=0,reused=2", checkpoints);
+                Assert.DoesNotContain("copy-files", checkpoints);
+            }
+            // Same length edit must also invalidate the cache.
+            File.WriteAllText(web, "web-v2");
+            File.SetLastWriteTimeUtc(web, DateTime.UtcNow.AddSeconds(2));
+            checkpoints.Clear();
+            using var changed = ServerHostRuntimeStager.Prepare(exe, runtime, additionalFiles: [web], progress: (step, _) => checkpoints.Add(step));
+            Assert.NotEqual(firstPath, changed.ExecutablePath);
+            Assert.Contains("hash-files-result:read=1,reused=1", checkpoints);
+            Assert.Equal("web-v2", File.ReadAllText(Path.Combine(Path.GetDirectoryName(changed.ExecutablePath)!, "index.html")));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public void Prepare_FileRenameAndCorruptHashCacheAreHandled()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"launchergo-stage-manifest-{Guid.NewGuid():N}");
+        var source = Path.Combine(root, "source");
+        var runtime = Path.Combine(root, "runtime");
+        Directory.CreateDirectory(source);
+        var exe = Path.Combine(source, "host.exe");
+        var oldFile = Path.Combine(source, "old.html");
+        var newFile = Path.Combine(source, "new.html");
+        File.WriteAllText(exe, "host");
+        File.WriteAllText(oldFile, "same contents");
+        try
+        {
+            string firstPath;
+            using (var first = ServerHostRuntimeStager.Prepare(exe, runtime, additionalFiles: [oldFile])) firstPath = first.ExecutablePath;
+            File.Move(oldFile, newFile);
+            string renamedPath;
+            using (var renamed = ServerHostRuntimeStager.Prepare(exe, runtime, additionalFiles: [newFile]))
+            {
+                renamedPath = renamed.ExecutablePath;
+                Assert.NotEqual(firstPath, renamedPath);
+            }
+            File.WriteAllText(Path.Combine(runtime, ".source-hashes-v1.json"), "{broken");
+            var checkpoints = new List<string>();
+            using var rebuilt = ServerHostRuntimeStager.Prepare(exe, runtime, additionalFiles: [newFile], progress: (step, _) => checkpoints.Add(step));
+            Assert.Equal(renamedPath, rebuilt.ExecutablePath);
+            Assert.Contains("hash-files-result:read=2,reused=0", checkpoints);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Theory]
+    [InlineData("write-completion-marker")]
+    [InlineData("move-cache-directory")]
+    [InlineData("acquire-cache-lease")]
+    [InlineData("ready")]
+    public void Prepare_CancellationAtCheckpointDoesNotReturnHostOrLeakLease(string stopAt)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"launchergo-stage-cancel-{Guid.NewGuid():N}");
+        var source = Path.Combine(root, "source", "LauncherGo.ServerHost.exe");
+        var runtime = Path.Combine(root, "runtime");
+        using var cts = new CancellationTokenSource();
+        var checkpoints = new List<string>();
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(source)!);
+            File.WriteAllText(source, "test-host");
+            Assert.ThrowsAny<OperationCanceledException>(() => ServerHostRuntimeStager.Prepare(source, runtime, cts.Token,
+                progress: (step, _) => { checkpoints.Add(step); if (step == stopAt) cts.Cancel(); }));
+            Assert.Equal(stopAt, checkpoints[^1]);
+            Assert.Empty(Directory.GetDirectories(runtime, "*.tmp"));
+            foreach (var directory in Directory.GetDirectories(runtime))
+            {
+                using var cleanup = CacheDirectoryLease.TryAcquireForCleanup(directory);
+                Assert.NotNull(cleanup);
+            }
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public void Prepare_StagesSingleFileHostOutsideBuildOutput()
     {
         var sourceDirectory = Path.Combine(Path.GetTempPath(), $"launchergo-host-source-{Guid.NewGuid():N}");

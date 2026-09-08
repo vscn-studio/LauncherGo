@@ -35,5 +35,21 @@ WebCartographer/html/assets/icons/temporal_gear.png.
 The map uses its translocator route-planning approach with ServerMap-specific
 coordinate, elevation, display and interaction changes.
 
+Feather action icon geometry
+Source: https://github.com/feathericons/feather/tree/v4.29.2
+Copyright (c) 2013-2023 Cole Bemis.
+MIT License; full text: vendor/Feather-LICENSE.txt.
+The chain-link paths in notebook.js follow Feather's link icon geometry,
+with simplified coordinates and adjusted stroke width. These paths are reused
+for route, game marker, place and translocator sharing buttons.
+
+Runtime game resources
+Game waypoint SVGs and player head models/textures are supplied by connected
+game clients and cached per world, not bundled as assets in this web directory.
+Vintage Story assets remain the property of Anego Studios; mod/resource-pack
+assets remain under their authors' terms. Generated avatars and cached icons
+are not relicensed under LauncherGo's MIT license. Operators must respect the
+applicable asset terms when serving, exporting or redistributing those caches.
+
 Keep this notice, LICENSE.txt and all vendor license files when copying,
 customizing or redistributing this web directory.

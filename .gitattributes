@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+# Package-provided licenses are checksum-verified and must retain their bytes.
+THIRD-PARTY-LICENSES/packages/*.txt -text -whitespace
+# Keep upstream legal text formatting, including original trailing spaces.
+THIRD-PARTY-LICENSES/upstream/*.txt -whitespace

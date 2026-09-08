@@ -6,6 +6,8 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using LauncherGo.Abstractions.Services;
 using LauncherGo.Domains.Models;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace LauncherGo.Services;
 
@@ -16,9 +18,14 @@ public sealed class ServerMapService : IServerMapService
     private readonly Dictionary<string, Process> processes = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim webUpdateGate = new(1, 1);
     private readonly string builtInWebRoot;
+    private readonly ILogger<ServerMapService> logger;
 
-    public ServerMapService() : this(Path.Combine(AppContext.BaseDirectory, "WebRoot")) { }
-    internal ServerMapService(string builtInWebRoot) => this.builtInWebRoot = builtInWebRoot;
+    public ServerMapService(ILogger<ServerMapService>? logger = null) : this(Path.Combine(AppContext.BaseDirectory, "WebRoot"), logger) { }
+    internal ServerMapService(string builtInWebRoot, ILogger<ServerMapService>? logger = null)
+    {
+        this.builtInWebRoot = builtInWebRoot;
+        this.logger = logger ?? NullLogger<ServerMapService>.Instance;
+    }
 
     public string GetProfileDirectory(InstanceProfile profile) =>
         Path.Combine(WorkspacePathHelper.ResolveProfileDataPath(profile.DirectoryPath), "ServerMap");
@@ -61,16 +68,41 @@ public sealed class ServerMapService : IServerMapService
 
     public async Task EnsureMapModDeployedAsync(InstanceProfile profile, CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
         var source = Path.Combine(AppContext.BaseDirectory, "EmbeddedMods", "servermap", "servermap.zip");
+        var target = Path.Combine(WorkspacePathHelper.GetProfileModsPath(profile.DirectoryPath), "servermap.zip");
+        var receipt = Path.Combine(GetProfileDirectory(profile), ".deployment", "receipt.json");
+        var copied = await Task.Run(() => DeployMapModAsync(source, target, receipt, cancellationToken), cancellationToken).ConfigureAwait(false);
+        logger.LogInformation("Map mod deployment checked. ProfileId={ProfileId}, Copied={Copied}.", profile.Id, copied);
+    }
+
+    private sealed record DeploymentReceipt(string SourcePath, string TargetPath, FileStamp Source, FileStamp Target);
+
+    internal static async Task<bool> DeployMapModAsync(string source, string target, string receiptPath, CancellationToken cancellationToken = default)
+    {
+        using var deploymentLock = await BackgroundHostFiles.AcquireControlAsync(Path.GetDirectoryName(receiptPath)!, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
         if (!File.Exists(source)) throw new FileNotFoundException("内置 ServerMap 模组包不存在。", source);
+        var sourceStamp = FileStamp.Read(source);
+        var previous = BackgroundHostFiles.Read<DeploymentReceipt>(receiptPath);
+        if (previous is not null && previous.SourcePath == Path.GetFullPath(source) && previous.TargetPath == Path.GetFullPath(target) &&
+            previous.Source == sourceStamp && File.Exists(target) && previous.Target == FileStamp.Read(target))
+            return false;
         ValidateMapModPackage(source);
-        var mods = WorkspacePathHelper.GetProfileModsPath(profile.DirectoryPath);
-        Directory.CreateDirectory(mods);
-        var target = Path.Combine(mods, "servermap.zip");
-        await using var input = File.OpenRead(source);
-        await using var output = File.Create(target);
-        await input.CopyToAsync(output, cancellationToken);
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        var temporary = target + $".{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await using (var input = File.OpenRead(source))
+            await using (var output = File.Create(temporary))
+                await input.CopyToAsync(output, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (sourceStamp != FileStamp.Read(source)) throw new IOException("地图模组包在部署期间发生变化，请更新完成后重试。");
+            File.Move(temporary, target, overwrite: true);
+            await BackgroundHostFiles.WriteAsync(receiptPath,
+                new DeploymentReceipt(Path.GetFullPath(source), Path.GetFullPath(target), sourceStamp, FileStamp.Read(target)));
+            return true;
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
 
     internal static void ValidateMapModPackage(string path)
@@ -146,15 +178,31 @@ public sealed class ServerMapService : IServerMapService
     private static string RuntimeDirectory(string profileId) =>
         Path.Combine(WorkspacePathHelper.RuntimeRoot, "server-map", WorkspacePathHelper.SanitizeFileName(profileId));
 
-    public async Task<ServerMapRuntimeStatus> StartAsync(InstanceProfile profile, CancellationToken cancellationToken = default)
+    public Task<ServerMapRuntimeStatus> StartAsync(InstanceProfile profile, CancellationToken cancellationToken = default) =>
+        Task.Run(async () =>
+        {
+            var stages = new MapLifecycleLog(logger, profile.Id, "start");
+            try
+            {
+                var result = await StartCoreAsync(profile, stages, cancellationToken).ConfigureAwait(false);
+                stages.Complete();
+                return result;
+            }
+            catch (Exception error) { stages.Fail(error); throw; }
+        }, cancellationToken);
+
+    private async Task<ServerMapRuntimeStatus> StartCoreAsync(InstanceProfile profile, MapLifecycleLog stages, CancellationToken cancellationToken)
     {
+        stages.Stage("wait-control-lock");
         var runtime = RuntimeDirectory(profile.Id);
         using var control = await BackgroundHostFiles.AcquireControlAsync(runtime, cancellationToken);
+        stages.Stage("check-existing-host");
         var existing = GetStatus(profile);
         if (existing.IsRunning) return existing;
 
         // Refuse to replace config/state if a Host is starting or its state is temporarily unavailable.
         using (BackgroundHostFiles.AcquireHost(runtime)) { }
+        stages.Stage("load-settings-and-certificate");
         var settings = await LoadSettingsAsync(profile, cancellationToken);
         if (!settings.Enabled) throw new InvalidOperationException("请先启用服务器地图。");
         if (!string.IsNullOrWhiteSpace(settings.WebRoot) && !File.Exists(Path.Combine(settings.WebRoot, "index.html")))
@@ -162,8 +210,11 @@ public sealed class ServerMapService : IServerMapService
         if (settings.UseHttps && !await ValidateCertificateAsync(profile, settings, cancellationToken))
             throw new InvalidOperationException("HTTPS 证书或私钥无效、已过期，或两者不匹配。");
         var sourceHost = ResolveServerMapHostPath();
+        stages.Stage("check-dotnet-runtime");
         DotNetRuntimeRequirement.EnsureForHost(sourceHost);
+        stages.Stage("deploy-map-mod");
         await EnsureMapModDeployedAsync(profile, cancellationToken);
+        stages.Stage("write-host-config");
         var runtimeConfig = Path.Combine(runtime, "host.json");
         var stop = Path.Combine(runtime, "host.stop");
         var statePath = Path.Combine(runtime, "host.state.json");
@@ -177,10 +228,14 @@ public sealed class ServerMapService : IServerMapService
             snapshot["PrivateKeyPath"] = ResolveProfilePath(profile, settings.PrivateKeyPath);
         }
         await File.WriteAllTextAsync(runtimeConfig, snapshot.ToJsonString(), cancellationToken);
+        stages.Stage("enumerate-web-files");
         var webFiles = Directory.Exists(builtInWebRoot)
             ? Directory.GetFiles(builtInWebRoot, "*", SearchOption.AllDirectories) : [];
         using var prepared = await Task.Run(() => ServerHostRuntimeStager.Prepare(
-            sourceHost, Path.Combine(WorkspacePathHelper.RuntimeRoot, "server-map-host"), cancellationToken, webFiles), cancellationToken);
+            sourceHost, Path.Combine(WorkspacePathHelper.RuntimeRoot, "server-map-host"), cancellationToken, webFiles,
+            (step, _) => stages.Stage("prepare-host/" + step)), cancellationToken);
+        stages.Stage("launch-host");
+        cancellationToken.ThrowIfCancellationRequested();
         var hostPath = prepared.ExecutablePath;
         if (!File.Exists(hostPath)) throw new FileNotFoundException("LauncherGo.ServerMapHost 未部署。", hostPath);
         var start = new ProcessStartInfo(hostPath)
@@ -194,6 +249,7 @@ public sealed class ServerMapService : IServerMapService
         var process = Process.Start(start) ?? throw new InvalidOperationException("无法启动 ServerMap Host。");
         try
         {
+            stages.Stage("wait-listening");
             var deadline = DateTime.UtcNow.AddSeconds(15);
             while (DateTime.UtcNow < deadline)
             {
@@ -226,18 +282,36 @@ public sealed class ServerMapService : IServerMapService
     public Task StopAsync(InstanceProfile profile, CancellationToken cancellationToken = default) =>
         StopProfileAsync(profile.Id, cancellationToken);
 
-    private async Task StopProfileAsync(string profileId, CancellationToken cancellationToken)
+    private Task StopProfileAsync(string profileId, CancellationToken cancellationToken) =>
+        Task.Run(async () =>
+        {
+            var stages = new MapLifecycleLog(logger, profileId, "stop");
+            try
+            {
+                await StopCoreAsync(profileId, stages, cancellationToken).ConfigureAwait(false);
+                stages.Complete();
+            }
+            catch (Exception error) { stages.Fail(error); throw; }
+        }, cancellationToken);
+
+    private async Task StopCoreAsync(string profileId, MapLifecycleLog stages, CancellationToken cancellationToken)
     {
+        stages.Stage("wait-control-lock");
         var runtime = RuntimeDirectory(profileId);
         using var control = await BackgroundHostFiles.AcquireControlAsync(runtime, cancellationToken);
+        stages.Stage("resolve-host-process");
         var state = BackgroundHostFiles.Read<BackgroundHostState>(Path.Combine(runtime, "host.state.json"));
         using var process = state is null ? null : BackgroundHostFiles.ResolveProcess(
             state.ProcessId, state.ProcessStartTimeUtcTicks, state.ExecutablePath);
         if (process is null) return;
+        stages.Stage("send-stop-signal");
         await File.WriteAllTextAsync(Path.Combine(runtime, "host.stop"), "stop", cancellationToken);
+        stages.Stage("wait-graceful-exit");
         try { await process.WaitForExitAsync(cancellationToken).WaitAsync(TimeSpan.FromSeconds(5), cancellationToken); }
         catch (TimeoutException)
         {
+            logger.LogWarning("Map Host graceful stop exceeded 5 seconds; forcing exit. ProfileId={ProfileId}.", profileId);
+            stages.Stage("force-exit");
             if (!process.HasExited) process.Kill(true);
             await process.WaitForExitAsync(cancellationToken);
         }
