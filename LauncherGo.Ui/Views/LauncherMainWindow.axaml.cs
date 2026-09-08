@@ -8899,6 +8899,7 @@ public partial class LauncherMainWindow : Window
         ServerMapSaveButton.IsVisible = true;
         ServerMapDeployButton.IsVisible = true;
         ServerMapToggleButton.IsVisible = true;
+        ServerMapResetWebButton.IsVisible = true;
         ServerMapOpenButton.IsVisible = true;
         Grid.SetColumn(ServerMapRefreshButton, 3);
         ServerMapProfileComboBox.SelectedItem = _serverMapProfileItems.FirstOrDefault(p => p.Id.Equals(profile.Id, StringComparison.OrdinalIgnoreCase)) ?? profile;
@@ -9039,6 +9040,12 @@ public partial class LauncherMainWindow : Window
         if (ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile) { SetServerMapStatus("请先选择档案。"); return; }
         try { await _serverMapService.EnsureMapModDeployedAsync(profile); SetServerMapStatus("服务器地图模组已部署。"); }
         catch (Exception ex) { SetServerMapStatus($"部署失败：{ex.Message}"); }
+    }
+
+    private async void OnServerMapResetWebClick(object? sender, RoutedEventArgs e)
+    {
+        // Re-deploy only the bundled WebRoot; map data and tile caches remain untouched.
+        OnServerMapWebRootUpdateClick(sender, e);
     }
 
     private async void OnServerMapToggleClick(object? sender, RoutedEventArgs e)

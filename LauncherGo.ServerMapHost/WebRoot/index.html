@@ -239,7 +239,10 @@ function avatarImage(p){const labels=language==='zh'?{'waiting-client':'等待�
       const controller=requests[name]=new AbortController(),view=bbox(),locale=language,auth=authState;
       const timeout=setTimeout(()=>{if(state.visible)pendingLayers.add(name);controller.abort();},15000);
       try{
-        const query=name==='players'?'':`?bbox=${encodeURIComponent(view)}`,response=await fetch(`${api}/layers/${name}${query}`,{signal:controller.signal});
+        // Translocator links are sparse and each endpoint may lie outside
+        // the current viewport; fetch the complete indexed network so a
+        // restart cannot make previously discovered links disappear.
+        const query=name==='players'||name==='translocators'?'':`?bbox=${encodeURIComponent(view)}`,response=await fetch(`${api}/layers/${name}${query}`,{signal:controller.signal});
         if(!response.ok)return;const data=await response.json();
         if(controller.signal.aborted||!state.visible)return;
         if(refreshBlocked()||locale!==language||auth!==authState||(name!=='players'&&view!==bbox())){pendingLayers.add(name);return;}
@@ -310,7 +313,7 @@ function avatarImage(p){const labels=language==='zh'?{'waiting-client':'等待�
       // spawn and can otherwise place a fresh visit at the map's far edge.
       const centerX=Number.isFinite(qx)?qx+metadata.spawn.x:(Number.isFinite(metadata.spawn?.x)?metadata.spawn.x:(metadata.center?.x||0));
       const centerZ=Number.isFinite(qz)?qz+metadata.spawn.z:(Number.isFinite(metadata.spawn?.z)?metadata.spawn.z:(metadata.center?.z||0));
-      map.setView(gameLatLng(centerX,centerZ),Number.isFinite(qzoom)?Math.max(minimumZoom,nativeZoom-qzoom):nativeZoom);updateOverlayScale();setRenderer(rendererName);updateUrl();
+      map.invalidateSize();map.setView(gameLatLng(centerX,centerZ),Number.isFinite(qzoom)?Math.max(minimumZoom,nativeZoom-qzoom):nativeZoom);requestAnimationFrame(()=>{map.setView(gameLatLng(centerX,centerZ),Number.isFinite(qzoom)?Math.max(minimumZoom,nativeZoom-qzoom):nativeZoom);updateUrl();});updateOverlayScale();setRenderer(rendererName);updateUrl();
       const manifest=await fetch(`${api}/layers/manifest`).then(r=>r.json());manifest.layers.forEach(def=>{const group=L.layerGroup();layers[def.id]={group,visible:def.visible};if(def.visible)group.addTo(map);const row=document.createElement('li');row.className='layer-row';row.dataset.layer=def.id;row.innerHTML=`<input type="checkbox" ${def.visible?'checked':''}><label>${escapeHtml(t(`layer.${def.id}`))}</label>`;const [toggle,label]=row.children;label.onclick=()=>{toggle.checked=!toggle.checked;toggle.dispatchEvent(new Event('change'));};toggle.onchange=()=>{layers[def.id].visible=toggle.checked;toggle.checked?group.addTo(map):map.removeLayer(group);if(toggle.checked)refreshLayer(def.id);};document.querySelector('#layers').append(row);});
       document.querySelector('#serverWebsite').textContent=metadata.serverName||'Vintage Story Server';document.querySelector('#lastUpdated').textContent=`${t('updated')}: ${new Date(metadata.updatedAt).toLocaleString(language==='zh'?'zh-CN':'en-US')}`;document.querySelector('#webmapVersion').textContent=`ServerMap v${metadata.serverMapVersion} · ${String(metadata.tileVersion).slice(0,8)}`;
       applyLanguage();refreshLayers();updateZoomText();setInterval(()=>{if(!document.hidden)refreshLayer('players');},isMobile()?5000:2000);
