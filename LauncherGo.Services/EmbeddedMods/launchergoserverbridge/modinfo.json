@@ -4,7 +4,7 @@
   "name": "LauncherGo Server Bridge",
   "description": "Authenticated local server bridge for LauncherGo. Queries state and executes commands on the Vintage Story server thread.",
   "authors": ["VSCN-Studio"],
-  "version": "2.0.0",
+  "version": "2.1.0",
   "side": "server",
   "requiredOnClient": false,
   "requiredOnServer": true,

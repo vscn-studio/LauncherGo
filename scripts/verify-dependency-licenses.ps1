@@ -1,6 +1,7 @@
-param([string]$OutputRoot)
+param([string]$OutputRoot, [string]$AssetsFile)
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'dependency-license-assets.ps1')
 $licenseRoot = Join-Path $repository 'THIRD-PARTY-LICENSES'
 $packages = @(Get-Content -LiteralPath (Join-Path $licenseRoot 'nuget-packages.json') -Raw | ConvertFrom-Json)
 $upstream = @(Get-Content -LiteralPath (Join-Path $licenseRoot 'upstream-sources.json') -Raw | ConvertFrom-Json)
@@ -17,11 +18,12 @@ foreach ($package in $packages) {
         if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ine $document.sha256) { throw "Changed original package notice: $path" }
     }
 }
-$assetsPath = Join-Path $repository 'LauncherGo.App/obj/project.assets.json'
+$assetsPath = if ($AssetsFile) { $AssetsFile } else { Join-Path $repository 'LauncherGo.App/obj/project.assets.json' }
+if ($AssetsFile) { Require-File $assetsPath }
 if (Test-Path -LiteralPath $assetsPath) {
     $assets = Get-Content -LiteralPath $assetsPath -Raw | ConvertFrom-Json -AsHashtable
-    foreach ($item in $assets.libraries.GetEnumerator()) {
-        if ($item.Value.type -eq 'package' -and $item.Key -notlike 'AvaloniaUI.DiagnosticsSupport/*' -and $packages.package -notcontains $item.Key) { throw "License inventory needs updating: $($item.Key)" }
+    foreach ($packageName in @(Get-ReleaseLicensePackages $assets)) {
+        if ($packages.package -notcontains $packageName) { throw "License inventory needs updating: $packageName" }
     }
 }
 if ($OutputRoot) {

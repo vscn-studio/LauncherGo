@@ -12,7 +12,7 @@ public sealed class ServerAuthService : IServerAuthService
 {
     private const string AuthModId = "launchergoauth";
     private const string LegacyAuthModId = "serverauth";
-    private const string AuthModVersion = "1.0.0";
+    private const string AuthModVersion = "1.1.0";
     private const string AuthModFolderName = "launchergoauth";
     private const string LegacyAuthModFolderName = "serverauth";
     private const string AuthModZipName = "launchergoauth.zip";

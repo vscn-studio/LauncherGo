@@ -1,11 +1,13 @@
 param([string]$AssetsFile = 'LauncherGo.App/obj/project.assets.json')
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'dependency-license-assets.ps1')
 $assets = Get-Content -LiteralPath (Join-Path $repository $AssetsFile) -Raw | ConvertFrom-Json -AsHashtable
+$releasePackages = @(Get-ReleaseLicensePackages $assets)
 $output = Join-Path $repository 'THIRD-PARTY-LICENSES/packages'
 New-Item -ItemType Directory -Path $output -Force | Out-Null
 $packages = foreach ($entry in ($assets.libraries.GetEnumerator() | Sort-Object Key)) {
-    if ($entry.Value.type -ne 'package' -or $entry.Key -like 'AvaloniaUI.DiagnosticsSupport/*') { continue }
+    if ($entry.Value.type -ne 'package' -or $releasePackages -notcontains $entry.Key) { continue }
     $packageDirectory = $null
     foreach ($root in $assets.packageFolders.Keys) {
         $candidate = Join-Path $root $entry.Value.path

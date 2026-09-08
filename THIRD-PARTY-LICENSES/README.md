@@ -39,3 +39,10 @@ packages.
 The .NET runtime may emit additional runtime-specific license and notice files
 when self-contained packages are published. Those files must remain in the
 published package and are checked by the release workflows.
+
+The snapshot update and verification scripts select package runtime/native,
+resource and content assets from project.assets.json. Build-only tools such
+as ILLink do not require new inventory entries when the SDK patch changes.
+Older snapshots may retain additional build-package notices; keeping those
+notices is harmless. Run `scripts/test-release-metadata.ps1` to check this
+selection and embedded mod version consistency.

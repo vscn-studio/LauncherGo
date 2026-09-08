@@ -22,7 +22,7 @@ namespace LauncherGoServerBridge;
 public sealed class LauncherGoServerBridgeModSystem : ModSystem
 {
     private const string ConfigurationFileName = "launchergoserverbridge.json";
-    private const string BridgeVersion = "2.0.0";
+    private const string BridgeVersion = "2.1.0";
     private const int MaximumRequestBytes = 32768;
     private const int MaximumEventHistory = 500;
     private const int MaximumSubscriptions = 16;

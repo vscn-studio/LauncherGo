@@ -11,7 +11,7 @@ namespace LauncherGo.Services;
 public sealed class GatewayRedirectModService(IInstanceServerConfigService serverConfigService) : IGatewayRedirectModService
 {
     private const string ModId = "launchergoredirect";
-    private const string ModVersion = "1.1.3";
+    private const string ModVersion = "1.2.0";
     private const string ModFolderName = "launchergoredirect";
     private const string ModDllName = "launchergoredirect.dll";
     private const string ConfigFileName = "launchergoredirect.json";

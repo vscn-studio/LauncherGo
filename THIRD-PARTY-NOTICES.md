@@ -175,6 +175,11 @@ asset terms before serving or redistributing their caches.
 package notice hashes. Release verification also checks published copies.
 Refresh the NuGet snapshot with `scripts/update-dependency-license-snapshot.ps1`
 after dependency changes and review upstream mappings before release.
+Release inventory matching inspects runtime, native, resource and content
+assets across restored targets. Compile-only/build-only SDK packages such as
+Microsoft.NET.ILLink.Tasks are not distributed application dependencies and
+do not require entries for each SDK patch. Any package supplying runtime
+assets still requires coverage; package names alone do not exempt SDK tools.
 
 PDF export reads DengXian or SimHei from the Windows fonts directory at runtime;
 these font files are not copied into LauncherGo release packages. Their OpenType

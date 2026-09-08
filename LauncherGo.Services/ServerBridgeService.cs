@@ -15,7 +15,7 @@ namespace LauncherGo.Services;
 public sealed class ServerBridgeService : IServerBridgeService
 {
     private const string ModId = "launchergoserverbridge";
-    private const string ModVersion = "2.0.0";
+    private const string ModVersion = "2.1.0";
     private const string ModFolderName = "launchergoserverbridge";
     private const string ModDllName = "serverbridge.dll";
     private const string SettingsRelativePath = "ModConfig/launchergoserverbridge.json";

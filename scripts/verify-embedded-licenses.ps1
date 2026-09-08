@@ -25,6 +25,12 @@ function Assert-MapPackage([string]$Path) {
         foreach ($name in @('ServerMap.dll', 'modinfo.json', 'LICENSE.txt', 'THIRD_PARTY_NOTICES.txt', 'VS-LiveMap-Revival-LICENSE.txt')) {
             $entry = $archive.GetEntry($name)
             if ($null -eq $entry -or $entry.Length -eq 0) { throw "Missing $name in $Path" }
+            if ($name -eq 'modinfo.json') {
+                $reader = [IO.StreamReader]::new($entry.Open())
+                try { $info = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
+                $expected = Get-Content -LiteralPath (Join-Path $mapSource 'modinfo.json') -Raw | ConvertFrom-Json
+                if ($info.modid -ne $expected.modid -or $info.version -ne $expected.version) { throw "Stale mod metadata in $Path" }
+            }
             if ($name.EndsWith('.txt')) {
                 $reader = [IO.StreamReader]::new($entry.Open())
                 try {
@@ -48,6 +54,7 @@ if ($OutputRoot) {
     & (Join-Path $PSScriptRoot 'verify-dependency-licenses.ps1') -OutputRoot $OutputRoot
     foreach ($mod in @('launchergoauth', 'launchergoredirect', 'launchergoserverbridge')) {
         Assert-License (Join-Path $OutputRoot "EmbeddedMods/$mod/LICENSE.txt") (Join-Path $repository 'LICENSE')
+        Assert-License (Join-Path $OutputRoot "EmbeddedMods/$mod/modinfo.json") (Join-Path $repository "LauncherGo.Services/EmbeddedMods/$mod/modinfo.json")
     }
     $mapOutput = Join-Path $OutputRoot 'EmbeddedMods/servermap'
     Assert-MapPackage (Join-Path $mapOutput 'servermap.zip')

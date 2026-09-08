@@ -297,6 +297,7 @@ jobs:
       - name: Verify embedded licenses and map ZIP contents
         shell: pwsh
         run: |
+          ./scripts/test-release-metadata.ps1
           ./scripts/verify-embedded-licenses.ps1 -OutputRoot artifacts/publish/win-x64
           ./scripts/verify-embedded-licenses.ps1 -OutputRoot artifacts/publish/portable
 
