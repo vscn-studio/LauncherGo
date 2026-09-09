@@ -353,7 +353,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             version = 12,
             serverName = api.Server.Config.ServerName,
             updatedAt = startedAt,
-            serverMapVersion = "0.3.1",
+            serverMapVersion = "0.3.2",
             tileVersion = typeof(ServerMapWebServer).Assembly.ManifestModule.ModuleVersionId.ToString("N"),
             colorVersion = materials.ClientColormapVersion,
             tileSize = 512,
@@ -376,7 +376,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             // Flat aliases keep the metadata easy to consume for lightweight
             // custom web roots that do not understand the nested objects.
             serverVersion = GameVersion.LongGameVersion,
-            mapVersion = "0.3.1",
+            mapVersion = "0.3.2",
             mapSize = $"{mapSizeX} × {mapSizeZ} × {mapSizeY}",
             cacheSizeBytes = cacheBytes,
             renderTimeMs = RenderMilliseconds,
