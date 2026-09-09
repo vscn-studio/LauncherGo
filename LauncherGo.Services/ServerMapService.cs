@@ -19,12 +19,25 @@ public sealed class ServerMapService : IServerMapService
     private readonly SemaphoreSlim webUpdateGate = new(1, 1);
     private readonly string builtInWebRoot;
     private readonly ILogger<ServerMapService> logger;
+    private readonly HttpClient progressClient;
 
     public ServerMapService(ILogger<ServerMapService>? logger = null) : this(Path.Combine(AppContext.BaseDirectory, "WebRoot"), logger) { }
-    internal ServerMapService(string builtInWebRoot, ILogger<ServerMapService>? logger = null)
+    internal ServerMapService(string builtInWebRoot, ILogger<ServerMapService>? logger = null, HttpClient? progressClient = null)
     {
         this.builtInWebRoot = builtInWebRoot;
+        this.progressClient = progressClient ?? ProgressClient;
         this.logger = logger ?? NullLogger<ServerMapService>.Instance;
+    }
+
+    private static readonly HttpClient ProgressClient = new() { Timeout = TimeSpan.FromSeconds(3) };
+    public async Task<ServerMapRenderProgress?> GetRenderProgressAsync(InstanceProfile profile, CancellationToken cancellationToken = default)
+    {
+        var settings = await LoadSettingsAsync(profile, cancellationToken).ConfigureAwait(false);
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{settings.BackendPort}/api/v1/render-progress");
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", settings.BackendToken);
+        using var response = await progressClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        return JsonSerializer.Deserialize<ServerMapRenderProgress>(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false), JsonOptions);
     }
 
     public string GetProfileDirectory(InstanceProfile profile) =>

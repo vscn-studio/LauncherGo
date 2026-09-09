@@ -18,29 +18,44 @@ public sealed class MapRenderer
     private readonly int mapSizeY;
     private readonly MapPalette materials;
     public MapRenderer(WorldDatabaseReader reader, string root, int mapSizeY, MapPalette materials) { this.reader = reader; this.root = root; this.mapSizeY = mapSizeY; this.materials = materials; }
-    public bool Render2D(ChunkKey key, string renderer = "basic")
+    public sealed class ColumnAwaitingSaveException : IOException { }
+    public long ExtractedColumns, ReusedColumns;
+    public SurfaceRegion Extract(ChunkKey key, SurfaceRegion? previous = null, ISet<int>? columns = null, bool verify = false, bool singleColumn = false)
     {
-        var colored = renderer.Equals("basic", StringComparison.OrdinalIgnoreCase);
-        var colors = materials.CaptureColors();
-        if (colored && colors == null) return false;
-        const int size = 512; var pixels = new byte[size * size * 4]; var heights = new ushort[size * size]; var ids = new int[size * size]; var hasData = new bool[size * size];
-        var entityKeys = colored ? new string?[size * size] : null;
-        var topBlocks = new Dictionary<int, int>();
-        var emptyPixels = 0;
+        var size = singleColumn ? 32 : 512;
+        var surface = previous ?? new SurfaceRegion(size);
+        var heights = surface.Heights; var hasData = surface.Valid;
+        var ids = surface.Codes.Select(materials.ResolveCode).ToArray();
+        var entityKeys = surface.EntityKeys;
+
+
         var stableColumns = 0;
         for (var chunkOffsetX = 0; chunkOffsetX < 16; chunkOffsetX++) for (var chunkOffsetZ = 0; chunkOffsetZ < 16; chunkOffsetZ++)
         {
             var cx = key.X * 16 + chunkOffsetX;
             var cz = key.Z * 16 + chunkOffsetZ;
-            var map = reader.GetMapChunk(new ChunkKey(cx, 0, cz));
+            var columnIndex = chunkOffsetX * 16 + chunkOffsetZ;
+            if (columns != null && !columns.Contains(columnIndex)) continue;
+            using var snapshot = reader.BeginSnapshot();
+            var fingerprint = reader.ColumnFingerprint(cx, cz);
+            if (verify && surface.Fingerprints[columnIndex] == fingerprint) { Interlocked.Increment(ref ReusedColumns); continue; }
+            for (var px = 0; px < 32; px++) for (var pz = 0; pz < 32; pz++)
+            {
+                var pi = ((singleColumn ? 0 : chunkOffsetZ) * 32 + pz) * size + (singleColumn ? 0 : chunkOffsetX) * 32 + px;
+                hasData[pi] = false; ids[pi] = 0; heights[pi] = 0; entityKeys[pi] = "";
+            }
+            surface.Columns[columnIndex] = false;
+            surface.Fingerprints[columnIndex] = fingerprint;
+            var map = reader.ReadSavedMapChunk(new ChunkKey(cx, 0, cz));
             if (map == null) continue;
             // Match LiveMap's rule: an unfinished mapchunk is skipped, while
             // other completed columns in the same region remain renderable.
             // Aborting the whole 512x512 tile here meant one actively
             // generating column prevented every 2D tile from ever being
             // written in partially explored worlds.
-            if (map.CurrentIncompletePass < EnumWorldGenPass.Done) continue;
-            stableColumns++;
+            if (map.CurrentIncompletePass < EnumWorldGenPass.Done) throw new ColumnAwaitingSaveException();
+            surface.Columns[columnIndex] = true;
+            stableColumns++; Interlocked.Increment(ref ExtractedColumns);
             // LiveMap samples the rain height map, then reads the engine's
             // default block layer (solid, falling back to fluid).  Loading a
             // broad terrain/scan-above range selected different blocks and
@@ -95,46 +110,57 @@ public sealed class MapRenderer
                             id = candidate; y = sampleY; break;
                         }
                     }
-                    var pixelX = chunkOffsetX * 32 + x;
-                    var pixelZ = chunkOffsetZ * 32 + z;
+                    var pixelX = (singleColumn ? 0 : chunkOffsetX) * 32 + x;
+                    var pixelZ = (singleColumn ? 0 : chunkOffsetZ) * 32 + z;
                     var pixel = pixelZ * size + pixelX;
                     if (materials.Get(id).IsRoof && chunks.TryGetValue(y >> 5, out var roofChunk) && roofChunk != null
                         && roofChunk.BlockEntities.TryGetValue(new BlockPos(cx * 32 + x, y, cz * 32 + z), out var roofEntity)
                         && materials.Roofing is { } roofing)
                     {
                         var roofKey = roofing.Resolve(roofEntity, out var infillId);
-                        if (entityKeys != null) entityKeys[pixel] = roofKey;
+                        if (entityKeys != null) entityKeys[pixel] = roofKey ?? "";
                         if (infillId > 0) id = reader.ResolveMetaBlockLayer(cx * 32 + x, y, cz * 32 + z, infillId) ?? MapPalette.MissingBlockId;
                     }
-                    if (colored && materials.Get(id).IsGroundStorage && materials.GroundStorage is { } storage
+                    if (materials.Get(id).IsGroundStorage && materials.GroundStorage is { } storage
                         && chunks.TryGetValue(y >> 5, out var storageChunk) && storageChunk != null
                         && storageChunk.BlockEntities.TryGetValue(new BlockPos(cx * 32 + x, y, cz * 32 + z), out var storageEntity))
-                        entityKeys![pixel] = storage.Resolve(storageEntity, cx * 32 + x, y, cz * 32 + z);
+                        entityKeys![pixel] = storage.Resolve(storageEntity, cx * 32 + x, y, cz * 32 + z) ?? "";
                     hasData[pixel] = true;
                     heights[pixel] = (ushort)y;
                     if (id == MapPalette.MissingBlockId)
                     {
                         ids[pixel] = id;
-                        topBlocks[id] = topBlocks.TryGetValue(id, out var missingCount) ? missingCount + 1 : 1;
                         continue;
                     }
                     if (id == 0 || materials.IsEmpty(id))
                     {
-                        emptyPixels++;
+
                         continue;
                     }
                     ids[pixel] = id;
-                    topBlocks[id] = topBlocks.TryGetValue(id, out var count) ? count + 1 : 1;
                 }
             }
             finally { foreach (var chunk in chunks.Values) chunk?.Dispose(); }
         }
 
-        // Do not replace an existing tile with an all-empty snapshot while a
-        // region is still generating.  The queue will retry once a stable
-        // mapchunk is persisted.
-        if (stableColumns == 0) return false;
 
+        for (var i = 0; i < ids.Length; i++)
+        {
+            surface.Codes[i] = materials.Get(ids[i]).Code;
+            surface.SepiaKeys[i] = materials.Get(ids[i]).MapColorCode;
+            surface.Water[i] = materials.IsMapWaterBlock(ids[i]);
+        }
+        return surface;
+    }
+    public bool Render2D(ChunkKey key, string renderer = "basic") => RenderSurface(key, Extract(key), renderer);
+    public bool RenderSurface(ChunkKey key, SurfaceRegion surface, string renderer = "basic")
+    {
+        var colored = renderer.Equals("basic", StringComparison.OrdinalIgnoreCase);
+        var colors = materials.CaptureColors();
+        if (colored && colors == null) return false;
+        const int size = 512;
+        var pixels = new byte[size * size * 4]; var heights = surface.Heights; var hasData = surface.Valid;
+        var ids = surface.Codes.Select(materials.ResolveCode).ToArray(); var entityKeys = surface.EntityKeys;
         var roofPixels = 0;
         var missingRoofColors = 0;
         var storagePixels = 0;
@@ -171,28 +197,28 @@ public sealed class MapRenderer
                 if (!entityColored) missingStorageColors++;
             }
             if (colored && !entityColored && (materials.Get(id).IsRoof || materials.Get(id).IsGroundStorage || !colors!.HasColor(id))) continue;
-            var mapColor = !colored && materials.IsMapWaterBlock(id) && IsWaterEdge(ids, hasData, pixelX, pixelZ, size)
+            var mapColor = !colored && surface.Water[pixel] && IsWaterEdge(surface.Water, hasData, pixelX, pixelZ, size)
                 ? (R: (byte)72, G: (byte)48, B: (byte)24)
                 : colored
                     // LiveMap hashes colour variants in region-local coordinates.
                     // Using absolute world coordinates changes the selected one
                     // of the 30 client colours and makes the same block look wrong.
                     ? entityColored ? entityColor : colors!.Color(id, pixelX, heights[pixel], pixelZ)
-                    : materials.SepiaColor(id);
+                    : MapPalette.ColorFor(surface.SepiaKeys[pixel]);
             var offset = pixel * 4;
             pixels[offset] = mapColor.R; pixels[offset + 1] = mapColor.G; pixels[offset + 2] = mapColor.B; pixels[offset + 3] = 255;
         }
         ApplyLiveMapShading(pixels, heights, hasData, size);
-        reader.LogNotification("ServerMap 2D {0},{1}: stable-columns={2}; missing={3}; empty={4}; water={5}; colors={6}; roofing={7}; roofing-missing-color={8}; groundstorage={9}; groundstorage-missing-color={10}", key.X, key.Z, stableColumns, topBlocks.GetValueOrDefault(MapPalette.MissingBlockId), emptyPixels, ids.Count(materials.IsMapWaterBlock), colored && materials.HasClientColormap ? "client" : "stable", roofPixels, missingRoofColors, storagePixels, missingStorageColors);
+
         var path = Path.Combine(root, "2d", colored ? "basic" : "sepia", "0", $"{key.X}_{key.Z}.png");
         var png = PngEncoder.Encode(size, size, pixels);
         if (colored) TileColorStamp.Invalidate(path);
-        AtomicFile.Replace(path, temp => File.WriteAllBytes(temp, png));
+        TileIntegrity.Write(path, png);
         if (colored) TileColorStamp.Complete(path, colors!.Version);
         return true;
     }
 
-    private bool IsWaterEdge(int[] ids, bool[] hasData, int x, int z, int size)
+    private bool IsWaterEdge(bool[] water, bool[] hasData, int x, int z, int size)
     {
         foreach (var (dx, dz) in new[] { (-1, 0), (1, 0), (0, -1), (0, 1) })
         {
@@ -202,7 +228,7 @@ public sealed class MapRenderer
             // SepiaRenderer treats a null BlockData entry as water. A present
             // entry whose top block is air is still a non-water column.
             if (!hasData[index]) continue;
-            if (!materials.IsMapWaterBlock(ids[index])) return true;
+            if (!water[index]) return true;
         }
         return false;
     }

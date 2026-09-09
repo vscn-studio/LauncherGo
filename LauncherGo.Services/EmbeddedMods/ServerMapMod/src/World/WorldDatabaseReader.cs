@@ -16,6 +16,10 @@ public sealed class WorldDatabaseReader : IDisposable
     private readonly ICoreServerAPI api;
     private readonly ServerMain server;
     private readonly SqliteConnection connection;
+    private SqliteTransaction? currentSnapshot;
+    private readonly Dictionary<long, ServerMapChunk?> snapshotMaps = new();
+    private readonly Dictionary<(int X, int Z), int[]> snapshotYs = new();
+    private readonly Dictionary<(string Table, long Index), byte[]?> snapshotBytes = new();
     private readonly ChunkDataPool pool;
     private readonly ResettableCache<long, ServerMapChunk?> mapChunks;
     private readonly ResettableCache<(int X, int Z), int[]> chunkYs;
@@ -32,6 +36,7 @@ public sealed class WorldDatabaseReader : IDisposable
     private MethodInfo? getBlockLayerBlock;
     private bool blockLayerResolverLogged;
     private readonly ConcurrentDictionary<(int X, int Y, int Z), int> resolvedBlockLayers = new();
+    public long MapColumnReads, ChunkDataReads, ChunkDeserializations;
     public WorldMap WorldMap => server.WorldMap;
     public void LogNotification(string message, params object[] args) => api.Logger.Notification(message, args);
     public WorldDatabaseReader(ICoreServerAPI api, int cacheSize)
@@ -181,9 +186,8 @@ public sealed class WorldDatabaseReader : IDisposable
     }
 
     private static int FloorDiv(int value, int divisor) => value >= 0 ? value / divisor : (value - divisor + 1) / divisor;
-    public IEnumerable<ChunkKey> MapColumns(CancellationToken cancellationToken = default)
+    public IEnumerable<ChunkKey> MapColumns(CancellationToken cancellationToken = default, long? after = null)
     {
-        long? after = null;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -212,23 +216,37 @@ public sealed class WorldDatabaseReader : IDisposable
     /// </summary>
     public IReadOnlyList<int> ChunkYs(int x, int z)
     {
-        return chunkYs.GetOrAdd((x, z), column =>
+        int[] ReadColumn((int X, int Z) column)
         {
-            // Probe only this column's possible saved slices by primary key.
-            // Never rebuild a world-wide index for each newly loaded chunk.
             var count = Math.Max(1, (api.World.BlockAccessor.MapSizeY + 31) / 32);
-            var positions = Enumerable.Range(0, count)
-                .Select(y => new ChunkKey(column.X, y, column.Z).ToIndex()).ToArray();
+            var positions = Enumerable.Range(0, count).Select(y => new ChunkKey(column.X, y, column.Z).ToIndex()).ToArray();
             lock (queryGate)
             {
                 stopping.Token.ThrowIfCancellationRequested();
-                return SavedWorldQueries.ColumnPositions(connection, positions)
-                    .Select(position => ChunkKey.From(position).Y).OrderBy(y => y).ToArray();
+                return SavedWorldQueries.ColumnPositions(connection, positions, currentSnapshot).Select(position => ChunkKey.From(position).Y).OrderBy(y => y).ToArray();
             }
-        });
+        }
+        lock (queryGate) if (currentSnapshot != null)
+        {
+            if (!snapshotYs.TryGetValue((x, z), out var ys)) snapshotYs[(x, z)] = ys = ReadColumn((x, z));
+            return ys;
+        }
+        return chunkYs.GetOrAdd((x, z), ReadColumn);
+    }
+    public ServerMapChunk? ReadSavedMapChunk(ChunkKey key)
+    {
+        lock (queryGate)
+        {
+            var index = key.ToIndex();
+            if (currentSnapshot != null && snapshotMaps.TryGetValue(index, out var cached)) return cached;
+            var bytes = Read(index, "mapchunk"); var map = bytes == null ? null : ServerMapChunk.FromBytes(bytes);
+            if (currentSnapshot != null) snapshotMaps[index] = map;
+            return map;
+        }
     }
     public ServerMapChunk? GetMapChunk(ChunkKey key)
     {
+        lock (queryGate) if (currentSnapshot != null) return ReadSavedMapChunk(key);
         return mapChunks.GetOrAdd(key.ToIndex(), index =>
         {
             var bytes = Read(index, "mapchunk");
@@ -390,15 +408,21 @@ public sealed class WorldDatabaseReader : IDisposable
         lock (queryGate)
         {
             stopping.Token.ThrowIfCancellationRequested();
-            using var cmd = connection.CreateCommand(); cmd.CommandText = $"SELECT data FROM {table} WHERE position=@position";
+            if (currentSnapshot != null && snapshotBytes.TryGetValue((table, index), out var cached)) return cached;
+            using var cmd = connection.CreateCommand(); cmd.Transaction = currentSnapshot; cmd.CommandText = $"SELECT data FROM {table} WHERE position=@position";
             cmd.CommandTimeout = 1;
-            cmd.Parameters.AddWithValue("@position", index); return cmd.ExecuteScalar() as byte[];
+            cmd.Parameters.AddWithValue("@position", index);
+            var bytes = cmd.ExecuteScalar() as byte[];
+            if (table == "mapchunk") Interlocked.Increment(ref MapColumnReads); else Interlocked.Increment(ref ChunkDataReads);
+            if (currentSnapshot != null) snapshotBytes[(table, index)] = bytes;
+            return bytes;
         }
     }
     private ServerChunk? DeserializeChunk(byte[] bytes, ChunkKey key)
     {
         try
         {
+            Interlocked.Increment(ref ChunkDeserializations);
             var value = ServerChunk.FromBytes(bytes, pool, server);
             value.Unpack_ReadOnly();
             return value;
@@ -410,13 +434,33 @@ public sealed class WorldDatabaseReader : IDisposable
                 if (warnedChunkErrors.Add(key.ToIndex()))
                     api.Logger.Warning("ServerMap skipped unreadable chunk {0},{1},{2}: {3}", key.X, key.Y, key.Z, ex.Message);
             }
-            return null;
+            throw new InvalidDataException($"Unreadable saved chunk {key}", ex);
         }
+    }
+    public IDisposable BeginSnapshot()
+    {
+        Monitor.Enter(queryGate);
+        if (currentSnapshot != null) return new NestedSnapshot(queryGate);
+        try { snapshotBytes.Clear(); snapshotMaps.Clear(); snapshotYs.Clear(); resolvedBlockLayers.Clear(); currentSnapshot = connection.BeginTransaction(deferred: true); return new Snapshot(this, currentSnapshot, queryGate); }
+        catch { Monitor.Exit(queryGate); throw; }
+    }
+    private sealed class NestedSnapshot(object gate) : IDisposable { public void Dispose() => Monitor.Exit(gate); }
+    private sealed class Snapshot(WorldDatabaseReader owner, SqliteTransaction transaction, object gate) : IDisposable
+    {
+        public void Dispose() { try { transaction.Dispose(); } finally { owner.currentSnapshot = null; owner.snapshotBytes.Clear(); owner.snapshotMaps.Clear(); owner.snapshotYs.Clear(); Monitor.Exit(gate); } }
+    }
+    public string ColumnFingerprint(int x, int z)
+    {
+        using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
+        hash.AppendData(Read(new ChunkKey(x, 0, z).ToIndex(), "mapchunk") ?? []);
+        foreach (var y in ChunkYs(x, z)) { hash.AppendData(BitConverter.GetBytes(y)); hash.AppendData(Read(new ChunkKey(x, y, z).ToIndex(), "chunk") ?? []); }
+        return Convert.ToHexString(hash.GetHashAndReset());
     }
     public void Clear()
     {
         mapChunks.Reset();
         chunkYs.Reset();
+        resolvedBlockLayers.Clear();
     }
 
     public void InvalidateChunkIndex()

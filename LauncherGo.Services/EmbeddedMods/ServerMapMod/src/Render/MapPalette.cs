@@ -56,7 +56,9 @@ public sealed class MapPalette
     }
     private ColorSnapshot? clientColors;
 
-    private MapPalette(Entry?[] entries) => this.entries = entries;
+    private readonly Dictionary<string, int> idsByCode;
+    private MapPalette(Entry?[] entries) { this.entries = entries; idsByCode = entries.Where(e => e != null).ToDictionary(e => e!.Code, e => e!.Id, StringComparer.Ordinal); }
+    public int ResolveCode(string code) => idsByCode.GetValueOrDefault(code, MissingBlockId);
 
     public int BlockCount => entries.Length;
     public bool HasClientColormap => Volatile.Read(ref clientColors) != null;
@@ -158,7 +160,10 @@ public sealed class MapPalette
             resolvedCount++;
         }
         if (resolvedCount == 0) return false;
-        var version = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json))).Substring(0, 16);
+        var effective = new SortedDictionary<string, uint[]>(StringComparer.Ordinal);
+        foreach (var entry in entries) if (entry != null && next[entry.Id] != null) effective[entry.Code] = next[entry.Id];
+        foreach (var pair in roofColors.Concat(groundColors)) effective[pair.Key] = pair.Value;
+        var version = month + ":" + Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(effective)));
         Volatile.Write(ref clientColors, new ColorSnapshot(month, version, next) { RoofColors = roofColors, GroundColors = groundColors });
         return true;
     }
@@ -207,7 +212,7 @@ public sealed class MapPalette
         var value when value.Contains("wood") => "forest",
         _ => "land"
     };
-    private static (byte R, byte G, byte B) ColorFor(string value) => value.ToLowerInvariant() switch
+    public static (byte R, byte G, byte B) ColorFor(string value) => value.ToLowerInvariant() switch
     {
         "ink" or "wateredge" => (72, 48, 24), "settlement" => (133, 104, 68), "land" => (172, 136, 88),
         "desert" => (196, 164, 104), "forest" => (152, 132, 76), "road" => (128, 80, 48),

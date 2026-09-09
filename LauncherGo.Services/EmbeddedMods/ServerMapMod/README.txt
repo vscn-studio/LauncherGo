@@ -40,3 +40,5 @@ VS Roofing 彩色地图：
 - 隐藏瓦片的 RGBA 像素全部清除，不以纯白填充；前端使用无背景的对角区域文字，随地图缩放并限制在隐藏边界内。
 - 轨迹、分享与隐藏规则保存在 ServerMap/<世界ID>/web-notebook.json；建议随世界备份。该文件损坏时地图服务拒绝启动，避免意外暴露隐藏区域。
 - 渲染进度为本次进程的队列统计，已完成不等于整个世界已生成；实时区块需等待游戏保存后渲染。
+
+Incremental cache: first build extracts shared Brotli surface data. Normal restarts restore the persistent index/tasks; saved changes update columns and seasonal colors reuse the surface. Use /servermap cache rebuild (console/root only) after offline edits or backup restores. Existing maps and user data remain available. See docs/server-map-incremental-cache.md in the LauncherGo source.

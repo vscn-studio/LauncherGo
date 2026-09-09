@@ -23,6 +23,31 @@ public sealed class ServerMapServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RenderProgressUsesTheSelectedProfilesLoopbackPortAndToken()
+    {
+        var requests = new List<(Uri Uri, string? Token)>();
+        using var client = new HttpClient(new ProgressHandler(request => requests.Add((request.RequestUri!, request.Headers.Authorization?.Parameter))));
+        var service = new ServerMapService(Source, progressClient: client);
+        var other = new InstanceProfile { Id = "other-map", DirectoryPath = Path.Combine(root, "other-profile") };
+        await service.SaveSettingsAsync(Profile, new ServerMapSettings { BackendPort = 17801, BackendToken = "profile-one" });
+        await service.SaveSettingsAsync(other, new ServerMapSettings { BackendPort = 17802, BackendToken = "profile-two" });
+        var first = await service.GetRenderProgressAsync(Profile);
+        var second = await service.GetRenderProgressAsync(other);
+        Assert.True(first!.Rebuilding); Assert.Equal("request-id", second!.RebuildId);
+        Assert.Equal(new[] { 17801, 17802 }, requests.Select(r => r.Uri.Port));
+        Assert.Equal(new[] { "profile-one", "profile-two" }, requests.Select(r => r.Token));
+        Assert.All(requests, request => { Assert.Equal("127.0.0.1", request.Uri.Host); Assert.Equal("/api/v1/render-progress", request.Uri.AbsolutePath); });
+    }
+    private sealed class ProgressHandler(Action<HttpRequestMessage> capture) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Assert.Equal(HttpMethod.Get, request.Method); capture(request);
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent("""{"cacheProtocol":1,"rebuilding":true,"rebuildId":"request-id","pending":12}""") });
+        }
+    }
+
+    [Fact]
     public async Task CopyWebRoot_ReplacesBundledFilesAndKeepsCustomFiles()
     {
         File.WriteAllText(Path.Combine(Target, "index.html"), "old homepage");

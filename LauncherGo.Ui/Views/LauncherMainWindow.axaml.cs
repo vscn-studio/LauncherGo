@@ -524,6 +524,7 @@ public partial class LauncherMainWindow : Window
 
         _dataTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _dataTimer.Tick += OnDataTimerTick;
+        _dataTimer.Tick += async (_, _) => await RefreshMapCacheProgressAsync();
 
         _tickerTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.3) };
         _tickerTimer.Tick += OnTickerTimerTick;
@@ -8885,6 +8886,9 @@ public partial class LauncherMainWindow : Window
         ServerMapDeployButton.IsVisible = false;
         ServerMapToggleButton.IsVisible = false;
         ServerMapOpenButton.IsVisible = false;
+        ServerMapResetWebButton.IsVisible = false;
+        ServerMapRebuildCacheButton.IsVisible = false;
+        ServerMapCacheStatusTextBlock.IsVisible = false;
         Grid.SetColumn(ServerMapRefreshButton, 1);
         RefreshServerMapConfigItems();
     }
@@ -8901,6 +8905,8 @@ public partial class LauncherMainWindow : Window
         ServerMapToggleButton.IsVisible = true;
         ServerMapResetWebButton.IsVisible = true;
         ServerMapOpenButton.IsVisible = true;
+        ServerMapRebuildCacheButton.IsVisible = true;
+        ServerMapCacheStatusTextBlock.IsVisible = true;
         Grid.SetColumn(ServerMapRefreshButton, 3);
         ServerMapProfileComboBox.SelectedItem = _serverMapProfileItems.FirstOrDefault(p => p.Id.Equals(profile.Id, StringComparison.OrdinalIgnoreCase)) ?? profile;
         await LoadServerMapForProfileAsync(profile);
@@ -8942,6 +8948,7 @@ public partial class LauncherMainWindow : Window
             ServerMapStatusTextBlock.Text = status.IsRunning ? $"运行中：{status.Url}" : "未启动";
             ServerMapToggleButton.Content = status.IsRunning ? "停止地图" : "启动地图";
         }
+        await RefreshMapCacheProgressAsync();
     }
 
     private async void OnServerMapSaveClick(object? sender, RoutedEventArgs e)
@@ -9056,6 +9063,74 @@ public partial class LauncherMainWindow : Window
         if (ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile) { SetServerMapStatus("请先选择档案。"); return; }
         try { await _serverMapService.EnsureMapModDeployedAsync(profile); SetServerMapStatus("服务器地图模组已部署。"); }
         catch (Exception ex) { SetServerMapStatus($"部署失败：{ex.Message}"); }
+    }
+
+    private void SetMapCacheStatus(string message) => ServerMapCacheStatusTextBlock.Text = message;
+    private bool _refreshingMapCache;
+    private readonly Dictionary<string, (DateTimeOffset At, string PreviousId)> _mapRebuildRequests = new();
+    private readonly Dictionary<string, string> _mapRebuildFailures = new();
+    private readonly Dictionary<string, ServerMapRenderProgress> _mapCacheProgress = new();
+    private async Task RefreshMapCacheProgressAsync()
+    {
+        if (_refreshingMapCache || !ServerMapEditorPanel.IsVisible || ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile) return;
+        _refreshingMapCache = true;
+        try
+        {
+            var status = _serverProcessService.GetCurrentStatus(profile.Id);
+            if (!status.IsRunning || !status.CanSendCommands)
+            {
+                ServerMapRebuildCacheButton.IsEnabled = false;
+                ServerMapRebuildCacheButton.Content = T("重建缓存", "Rebuild cache");
+                ToolTip.SetTip(ServerMapRebuildCacheButton, T("服务器未运行或命令通道不可用。", "The server is stopped or its command channel is unavailable."));
+                SetMapCacheStatus(T("服务器未运行或命令通道不可用。", "The server is stopped or its command channel is unavailable."));
+                return;
+            }
+            var progress = await _serverMapService.GetRenderProgressAsync(profile);
+            if (_editingServerMapProfileId != profile.Id) return;
+            if (progress?.CacheProtocol != 1) throw new InvalidOperationException(T("地图模组不可用或需要更新。", "The map mod is unavailable or needs updating."));
+            if (_mapCacheProgress.TryGetValue(profile.Id, out var previous) && previous.RebuildId != progress.RebuildId) _mapRebuildFailures.Remove(profile.Id);
+            _mapCacheProgress[profile.Id] = progress;
+            var awaiting = _mapRebuildRequests.TryGetValue(profile.Id, out var request);
+            if (awaiting && progress.RebuildId != request.PreviousId) { _mapRebuildRequests.Remove(profile.Id); awaiting = false; }
+            if (awaiting && DateTimeOffset.UtcNow - request.At > TimeSpan.FromSeconds(15))
+            {
+                _mapRebuildRequests.Remove(profile.Id); awaiting = false;
+                _mapRebuildFailures[profile.Id] = T("未收到重建确认，请检查服务器日志。", "Rebuild was not acknowledged; check the server log.");
+            }
+            var busy = progress.Rebuilding || awaiting;
+            ServerMapRebuildCacheButton.Content = busy ? T("重建中…", "Rebuilding…") : T("重建缓存", "Rebuild cache");
+            ServerMapRebuildCacheButton.IsEnabled = !busy;
+            ToolTip.SetTip(ServerMapRebuildCacheButton, busy ? T("重建任务已提交，现有地图仍可访问。", "Rebuild submitted; existing maps remain available.") : T("后台核对存档并重建地图缓存。", "Check the save and rebuild map caches in the background."));
+            if (progress.Error is { Length: > 0 }) SetMapCacheStatus(T($"地图任务：{progress.Error}", $"Map task: {progress.Error}"));
+            else if (_mapRebuildFailures.TryGetValue(profile.Id, out var failure)) SetMapCacheStatus(failure);
+            else if (busy || progress.Pending > 0 || progress.AwaitingSave > 0)
+            {
+                var reason = progress.Phase == "waiting-save" ? T("等待游戏保存完成", "Waiting for world save completion") : progress.Phase == "waiting-colormap" ? T("等待管理员客户端色表", "Waiting for an administrator client colormap") : progress.Reason switch { "changes" => T("更新变化区域", "Updating changed regions"), "season" => T("更新季节颜色", "Updating seasonal colors"), "rebuild" => T("重建缓存", "Rebuilding cache"), "recovery" => T("恢复核对", "Checking recovery"), _ => T("建立缓存", "Building cache") };
+                SetMapCacheStatus(T($"{reason}：剩余 {progress.Pending}；地表 {progress.SurfaceExtraction}；着色 {progress.Coloring}；缩放 {progress.Parents}；索引 {progress.Indexing}；等待保存 {progress.AwaitingSave}", $"{reason}: pending {progress.Pending}; surface {progress.SurfaceExtraction}; coloring {progress.Coloring}; parents {progress.Parents}; index {progress.Indexing}; awaiting save {progress.AwaitingSave}"));
+            }
+            else SetMapCacheStatus(T("地图缓存已就绪。", "Map cache is ready."));
+        }
+        catch (Exception ex)
+        {
+            if (_editingServerMapProfileId == profile.Id) { ServerMapRebuildCacheButton.IsEnabled = false; ToolTip.SetTip(ServerMapRebuildCacheButton, ex.Message); SetMapCacheStatus(T($"地图模组不可用：{ex.Message}", $"Map mod unavailable: {ex.Message}")); }
+        }
+        finally { _refreshingMapCache = false; }
+    }
+    private async void OnServerMapRebuildCacheClick(object? sender, RoutedEventArgs e)
+    {
+        if (ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile || _mapRebuildRequests.ContainsKey(profile.Id)
+            || !_mapCacheProgress.TryGetValue(profile.Id, out var progress) || progress.Rebuilding) return;
+        _mapRebuildFailures.Remove(profile.Id);
+        _mapRebuildRequests[profile.Id] = (DateTimeOffset.UtcNow, progress.RebuildId);
+        ServerMapRebuildCacheButton.IsEnabled = false; ServerMapRebuildCacheButton.Content = T("重建中…", "Rebuilding…");
+        try
+        {
+            var status = await _serverProcessService.RefreshStatusAsync(profile.Id);
+            if (!status.IsRunning || !status.CanSendCommands) throw new InvalidOperationException(T("服务器未运行或命令通道不可用。", "The server is stopped or its command channel is unavailable."));
+            await _serverProcessService.SendCommandAsync(profile.Id, "/servermap cache rebuild");
+        }
+        catch (Exception ex) { _mapRebuildRequests.Remove(profile.Id); _mapRebuildFailures[profile.Id] = ex.Message; if (_editingServerMapProfileId == profile.Id) SetMapCacheStatus(ex.Message); }
+        await RefreshMapCacheProgressAsync();
     }
 
     private async void OnServerMapResetWebClick(object? sender, RoutedEventArgs e)

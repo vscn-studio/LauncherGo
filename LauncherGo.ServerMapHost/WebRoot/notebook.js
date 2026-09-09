@@ -10,6 +10,8 @@
   Object.assign(words.en,{addGameMarker:'Add game marker',editMarker:'Edit game marker',deleteMarker:'Delete game marker',shareMarker:'Copy marker link',saveMarkerShare:'Save to Game markers',sharedMarker:'Shared marker',markerName:'Name',markerText:'Description',pinned:'Pinned',suggestNames:'Suggest saved names',icon:'Icon',markerSaved:'Game marker saved',deleteMarkerConfirm:'Delete this game marker? Its share links will stop working.',markerShareWarning:'Anyone with the link can view this marker.',mapDisabled:'Game map is disabled on this server'});
   Object.assign(words.zh,{editPoi:'编辑地点标记',sharePoi:'复制地点链接',shareTranslocator:'复制传送器链接'});
   Object.assign(words.en,{editPoi:'Edit place marker',sharePoi:'Copy place link',shareTranslocator:'Copy translocator link'});
+  Object.assign(words.zh,{'waiting-save':'等待游戏保存完成','waiting-colormap':'等待管理员客户端色表',build:'建立缓存',changes:'更新变化区域',season:'更新季节颜色',rebuild:'重建缓存',recovery:'恢复核对',repair:'修复缓存',render:'全图重绘',surface:'地表提取',coloring:'着色',parents:'缩放瓦片',indexing:'传送器索引'});
+  Object.assign(words.en,{'waiting-save':'Waiting for world save completion','waiting-colormap':'Waiting for an administrator client colormap',build:'Building cache',changes:'Updating changed regions',season:'Updating seasonal colors',rebuild:'Rebuilding cache',recovery:'Checking recovery',repair:'Repairing cache',render:'Redrawing map',surface:'Surface extraction',coloring:'Coloring',parents:'Parent tiles',indexing:'Translocator index'});
   function create(options) {
     const { map, api, gameLatLng, gamePoint, getAuth, getMetadata, getLanguage, cancelMeasurement, closePanels, invalidatePrivacy } = options;
     const text = key => words[getLanguage() === 'zh' ? 'zh' : 'en'][key] || key;
@@ -301,13 +303,13 @@
     }
     function progressDetail(key){
       const value=lastProgress;if(!value)return text('noProgress');
-      if(key==='failed')return `${text('failed')}: ${value.failed||0}`;
+      if(key==='failed')return `${text('failed')}: ${value.failed||0}${value.error?'\n'+value.error:''}`;
       if(key==='completed')return `${text('completed')}: ${value.completed||0}${value.lastCompletedAt?'\n'+text('latest')+': '+new Date(value.lastCompletedAt).toLocaleTimeString():''}`;
-      return `${text(value.phase)}\n${text('queued')}: ${value.queued||0} · ${text('active')}: ${value.active||0}\n${text('retrying')}: ${value.retrying||0} · ${text('pendingSave')}: ${value.awaitingSave||0}\n${text('regions')}: ${value.regionsDiscovered||0}`;
+      return `${text(['waiting-colormap','waiting-save'].includes(value.phase)?value.phase:(value.reason||value.phase))}${value.error?' · '+value.error:''}\n${text('surface')}: ${value.surfaceExtraction||0} · ${text('coloring')}: ${value.coloring||0} · ${text('parents')}: ${value.parents||0} · ${text('indexing')}: ${value.indexing||0}\n${text('queued')}: ${value.queued||0} · ${text('active')}: ${value.active||0}\n${text('retrying')}: ${value.retrying||0} · ${text('pendingSave')}: ${value.awaitingSave||0}\n${text('regions')}: ${value.regionsDiscovered||0}`;
     }
     function renderProgress(value) {
       lastProgress=value;progressTrack.setAttribute('aria-label',text('progress'));progressBox.dataset.phase=value?.phase||'unavailable';
-      const count=key=>Math.max(0,Number(value?.[key])||0),pending=count('queued')+count('active')+count('retrying')+count('awaitingSave');
+      const count=key=>Math.max(0,Number(value?.[key])||0),pending=Math.max(count('pending'),count('queued')+count('active')+count('retrying'))+count('awaitingSave');
       const weights={failed:count('failed'),pending,completed:count('completed')};
       const visible=Object.keys(weights).filter(key=>weights[key]>0),isEmpty=visible.length===0;
       progressTrack.dataset.empty=String(isEmpty);progressTrack.tabIndex=isEmpty?0:-1;progressTrack.setAttribute('role',isEmpty?'button':'group');

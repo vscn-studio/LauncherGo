@@ -24,8 +24,7 @@ public sealed class TilePyramidBuilder
         {
             x = FloorDiv(x, 2);
             z = FloorDiv(z, 2);
-            BuildParent(renderer, zoom, x, z);
-            yield return (zoom, x, z);
+            if (BuildParent(renderer, zoom, x, z)) yield return (zoom, x, z);
         }
     }
 
@@ -38,8 +37,7 @@ public sealed class TilePyramidBuilder
             foreach (var parent in parents)
             {
                 token.ThrowIfCancellationRequested();
-                BuildParent(renderer, zoom, parent.X, parent.Z);
-                yield return (zoom, parent.X, parent.Z);
+                if (BuildParent(renderer, zoom, parent.X, parent.Z)) yield return (zoom, parent.X, parent.Z);
             }
             current = parents;
         }
@@ -66,14 +64,31 @@ public sealed class TilePyramidBuilder
         }
     }
 
-    private void BuildParent(string renderer, int zoom, int x, int z)
+    public string Dependencies(string renderer, int zoom, int x, int z)
     {
+        return string.Join("|", Enumerable.Range(0, 4).Select(i =>
+        {
+            var child = new FileInfo(Path.Combine(root, "2d", renderer, (zoom - 1).ToString(), $"{x * 2 + i % 2}_{z * 2 + i / 2}.png"));
+            return child.Exists ? child.Length + ":" + child.LastWriteTimeUtc.Ticks : "missing";
+        }));
+    }
+    public bool IsCurrent(string renderer, int zoom, int x, int z)
+    {
+        var path = Path.Combine(root, "2d", renderer, zoom.ToString(), $"{x}_{z}.png");
+        try { return TileIntegrity.IsValid(path) && File.ReadAllText(path + ".children") == Dependencies(renderer, zoom, x, z); }
+        catch (IOException) { return false; }
+    }
+    public bool BuildParent(string renderer, int zoom, int x, int z)
+    {
+        var path = Path.Combine(root, "2d", renderer, zoom.ToString(), $"{x}_{z}.png");
+        var dependencies = Dependencies(renderer, zoom, x, z);
+        if (IsCurrent(renderer, zoom, x, z)) return false;
         var children = new byte[]?[]
         {
             Read(renderer, zoom - 1, x * 2, z * 2), Read(renderer, zoom - 1, x * 2 + 1, z * 2),
             Read(renderer, zoom - 1, x * 2, z * 2 + 1), Read(renderer, zoom - 1, x * 2 + 1, z * 2 + 1)
         };
-        if (children.All(child => child == null)) return;
+        if (children.All(child => child == null)) return false;
 
         var output = new byte[TileSize * TileSize * 4];
         for (var py = 0; py < TileSize; py++) for (var px = 0; px < TileSize; px++)
@@ -96,8 +111,10 @@ public sealed class TilePyramidBuilder
             output[target] = (byte)(red / count); output[target + 1] = (byte)(green / count);
             output[target + 2] = (byte)(blue / count); output[target + 3] = (byte)(alpha / count);
         }
-        var path = Path.Combine(root, "2d", renderer, zoom.ToString(), $"{x}_{z}.png");
-        AtomicFile.Replace(path, temp => File.WriteAllBytes(temp, PngEncoder.Encode(TileSize, TileSize, output)));
+
+        TileIntegrity.Write(path, PngEncoder.Encode(TileSize, TileSize, output));
+        AtomicFile.Replace(path + ".children", temp => File.WriteAllText(temp, dependencies));
+        return true;
     }
 
     private byte[]? Read(string renderer, int zoom, int x, int z)
@@ -105,7 +122,7 @@ public sealed class TilePyramidBuilder
         var path = Path.Combine(root, "2d", renderer, zoom.ToString(), $"{x}_{z}.png");
         if (!File.Exists(path)) return null;
         try { return Decode(File.ReadAllBytes(path)); }
-        catch { return null; }
+        catch (Exception ex) { throw new InvalidDataException("Unreadable child tile: " + path, ex); }
     }
 
     // ServerMap writes filter type 0 PNGs. Keeping this reader narrow avoids a

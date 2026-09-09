@@ -59,6 +59,27 @@ static class Checks
         {
             MapPalette.SaveClientColormap(root, json, 5);
             Require(palette.LoadClientColormap(root, 5, _ => { }) && palette.ClientColormapVersion == old.Version, "Cached palette did not restore its stable version");
+            var canonical = JsonSerializer.Serialize(new Dictionary<string, uint[]> { ["ignored:block"] = new uint[30], ["game:test"] = Enumerable.Repeat(0xff125634u, 30).ToArray() }, new JsonSerializerOptions { WriteIndented = true });
+            palette.ApplyClientColormap(canonical, 5, out _);
+            Require(palette.ClientColormapVersion == old.Version, "Equivalent effective palette contents invalidated tiles");
+            palette.ApplyClientColormap(canonical, 6, out _);
+            Require(palette.ClientColormapVersion != old.Version, "A new month did not invalidate colored tiles");
+            palette.ApplyClientColormap(json, 5, out _);
+            // Recolor a serialized surface with reassigned runtime block IDs.
+            // A null world reader makes accidental world IO fail this fixture.
+            var surface = new SurfaceRegion { Generation = 1 };
+            for (var i = 0; i < surface.Heights.Length; i++) { surface.Codes[i] = "game:test"; surface.Valid[i] = true; surface.Heights[i] = (ushort)(50 + i % 13); surface.SepiaKeys[i] = "land"; }
+            var regionKey = new ChunkKey(12, 0, 34);
+            var renderer = new MapRenderer(null!, root, 256, palette);
+            Require(renderer.RenderSurface(regionKey, surface), "Direct surface coloring failed");
+            var expectedPng = File.ReadAllBytes(Path.Combine(root, "2d", "basic", "0", "12_34.png"));
+            var surfacePath = SurfaceRegion.PathFor(root, 12, 34); surface.Save(surfacePath);
+            var reassignedEntries = new MapPalette.Entry?[] { entries[0], null, entries[1]! with { Id = 2 } };
+            var reassigned = (MapPalette)Activator.CreateInstance(typeof(MapPalette), BindingFlags.Instance | BindingFlags.NonPublic, null, [reassignedEntries], null)!;
+            reassigned.ApplyClientColormap(json, 5, out _);
+            var cachedRenderer = new MapRenderer(null!, root, 256, reassigned);
+            Require(cachedRenderer.RenderSurface(regionKey, SurfaceRegion.Load(surfacePath)!), "Cached coloring failed");
+            Require(expectedPng.SequenceEqual(File.ReadAllBytes(Path.Combine(root, "2d", "basic", "0", "12_34.png"))), "Cache coloring changed after block ID reassignment");
             // Four changed children must produce each ancestor once, and all
             // their colors must reach the zoom-one parent in the same batch.
             var rgba = new byte[512 * 512 * 4];
@@ -71,8 +92,13 @@ static class Checks
             var builder = new TilePyramidBuilder(root);
             var updates = builder.BuildParentsBatch("basic", [(0, 0), (1, 0), (0, 1), (1, 1)], CancellationToken.None).ToArray();
             Require(updates.Length == TilePyramidBuilder.MaxZoom && updates.Distinct().Count() == updates.Length, "Duplicate parent writes in batch");
+            Require(!builder.BuildParentsBatch("basic", [(0, 0), (1, 0), (0, 1), (1, 1)], CancellationToken.None).Any(), "Restart rebuilt unchanged parents");
             var parent = PngEncoder.Decode(File.ReadAllBytes(Path.Combine(root, "2d", "basic", "1", "0_0.png")));
             Require(parent[0] == 40 && parent[256 * 4] == 80 && parent[256 * 512 * 4] == 120 && parent[(256 * 512 + 256) * 4] == 160, "Parent retained stale quadrant colors");
+            var parentPath = Path.Combine(root, "2d", "basic", "1", "0_0.png");
+            var damaged = File.ReadAllBytes(parentPath); damaged[0] ^= 1; File.WriteAllBytes(parentPath, damaged);
+            Require(!builder.IsCurrent("basic", 1, 0, 0), "Corrupt parent accepted as current");
+            Require(builder.BuildParents("basic", new ChunkKey(0, 0, 0)).Any(), "Corrupt parent was not repaired");
         }
         finally { Directory.Delete(root, true); }
 
@@ -96,7 +122,33 @@ static class Checks
             Require(calls.SequenceEqual(new[] { 0, 2, 1 }), "Visible promotion duplicated/re-ran a job or failed to jump ahead");
         }
         finally { release.Set(); await queue.StopAsync(); }
-        Console.WriteLine("PASS saved translocator decoding, palette restore/snapshot, parent pixels and queue promotion");
+        // A running job accepts identical target versions without rerunning.
+        entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously); release.Reset();
+        var versionCalls = 0;
+        var versionQueue = new RenderQueue(1, key => { Interlocked.Increment(ref versionCalls); entered.TrySetResult(); Require(release.Wait(TimeSpan.FromSeconds(5)), "Version queue blocked"); return RenderQueueOutcome.Completed; });
+        try
+        {
+            versionQueue.Enqueue(new(1, 0, 0), version: 5); await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            for (var i = 0; i < 100; i++) versionQueue.Enqueue(new(1, 0, 0), version: 5);
+            release.Set();
+            while (versionQueue.PendingCount > 0) await Task.Delay(10);
+            Require(versionCalls == 1, "Identical in-flight versions reran");
+        }
+        finally { release.Set(); await versionQueue.StopAsync(); }
+        // Yielding extraction units admit one background unit after eight changes.
+        entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously); release.Reset();
+        var order = new ConcurrentQueue<int>(); var units = 0;
+        var fairQueue = new RenderQueue(1, key => { order.Enqueue(key.X); if (key.X == 0) { entered.TrySetResult(); Require(release.Wait(TimeSpan.FromSeconds(5)), "Fairness queue blocked"); return ++units < 10 ? RenderQueueOutcome.Yield : RenderQueueOutcome.Completed; } return RenderQueueOutcome.Completed; });
+        try
+        {
+            fairQueue.Enqueue(new(0, 0, 0), priority: true, version: 1); await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            fairQueue.Enqueue(new(1, 0, 0), version: 1, seasonal: true); release.Set();
+            while (fairQueue.PendingCount > 0) await Task.Delay(10);
+            Require(Array.IndexOf(order.ToArray(), 1) == 8, "Background coloring starved behind saved changes");
+        }
+        finally { release.Set(); await fairQueue.StopAsync(); }
+        await SaveAdapterChecks.Run();
+        Console.WriteLine("PASS saved translocator decoding, palette restore/snapshot, parent reuse, stable surface recoloring, version deduplication and scheduling fairness");
     }
 }
 
@@ -105,4 +157,46 @@ sealed class ChunkFixture
 {
     [ProtoMember(1)] public byte[] Unrelated { get; set; } = [];
     [ProtoMember(8)] public List<byte[]> Objects { get; set; } = [];
+}
+
+static class SaveAdapterChecks
+{
+    public static Task Run()
+    {
+        static void Check(bool value, string message) { if (!value) throw new Exception(message); }
+        static void Set(object value, string name, object field) => value.GetType().GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(value, field);
+        var serverType = typeof(Vintagestory.Server.ServerMain);
+        var server = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(serverType);
+        var threadType = serverType.Assembly.GetType("Vintagestory.Server.ChunkServerThread")!;
+        var thread = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(threadType);
+        var systemType = serverType.Assembly.GetType("Vintagestory.Server.ServerSystemLoadAndSaveGame")!;
+        var system = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(systemType);
+        Set(server, "chunkThread", thread); Set(thread, "loadsavegame", system); Set(system, "savingLock", new object()); Set(system, "chunkthread", thread);
+        var api = DispatchProxy.Create<Vintagestory.API.Server.ICoreServerAPI, SaveApiProxy>();
+        ((SaveApiProxy)(object)api).World = server;
+        var begun = 0; var confirmed = 0; var failures = new List<string>();
+        using var adapter = new SaveCompletionAdapter(api, () => { begun++; return () => confirmed++; }, failures.Add);
+        var type = typeof(SaveCompletionAdapter);
+        object? Invoke(string name, params object?[] arguments) => type.GetMethod(name, BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, arguments);
+        // Invoke the actually patched idle worker once: no completed save exists.
+        systemType.GetMethod("OnSeparateThreadTick")!.Invoke(system, null); adapter.Tick(); Check(confirmed == 0, "Idle worker acknowledged a save");
+        object?[] begin = [null]; Invoke("Begin", begin); Set(thread, "runOffThreadSaveNow", true);
+        adapter.Tick(); Check(begun == 1 && confirmed == 0, "Slow save acknowledged early");
+        try { SaveCompletionAdapter.CaptureReadFence(); throw new Exception("Surface extraction ran during save"); } catch (IOException) { }
+        object?[] worker = [null]; Invoke("BeginWorker", worker);
+        var error = new IOException("synthetic disk failure");
+        Check(ReferenceEquals(error, Invoke("FinishWorker", worker[0], error)), "Save exception was swallowed");
+        adapter.Tick(); Check(confirmed == 0 && failures.Count == 1, "Failed save was acknowledged");
+        Invoke("BeginWorker", worker); Set(thread, "runOffThreadSaveNow", false); Invoke("FinishWorker", worker[0], null);
+        Check(confirmed == 0, "Save completion was delivered off the game tick");
+        adapter.Tick(); Check(confirmed == 1, "Successful asynchronous save was not acknowledged");
+        var fence = SaveCompletionAdapter.CaptureReadFence(); Invoke("Begin", begin);
+        try { SaveCompletionAdapter.ValidateReadFence(fence); throw new Exception("Changed save did not invalidate the read fence"); } catch (IOException) { }
+        return Task.CompletedTask;
+    }
+}
+public class SaveApiProxy : DispatchProxy
+{
+    public object? World;
+    protected override object? Invoke(MethodInfo? method, object?[]? args) => method?.Name == "get_World" ? World : throw new NotSupportedException(method?.Name);
 }

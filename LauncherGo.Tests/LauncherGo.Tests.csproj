@@ -24,6 +24,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Render\MapCacheState.cs" Link="ServerMap\MapCacheState.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Render\SurfaceRegion.cs" Link="ServerMap\SurfaceRegion.cs" />
     <!-- Test the actual map scheduling/query helpers without redistributing game assemblies. -->
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\TranslocatorIndex.cs" Link="ServerMap\TranslocatorIndex.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Render\TileColorStamp.cs" Link="ServerMap\TileColorStamp.cs" />

@@ -21,10 +21,11 @@ internal static class SavedWorldQueries
         return result.ToArray();
     }
 
-    public static long[] ColumnPositions(SqliteConnection connection, IReadOnlyList<long> candidates)
+    public static long[] ColumnPositions(SqliteConnection connection, IReadOnlyList<long> candidates, SqliteTransaction? transaction = null)
     {
         if (candidates.Count == 0) return [];
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandTimeout = 1;
         var names = new string[candidates.Count];
         for (var i = 0; i < candidates.Count; i++)

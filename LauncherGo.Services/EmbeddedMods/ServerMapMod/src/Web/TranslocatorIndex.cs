@@ -17,16 +17,18 @@ public sealed class TranslocatorIndex
     private readonly object gate = new();
     private readonly Dictionary<(int X, int Y, int Z), TranslocatorPoint[]> chunks = [];
     private bool dirty;
+    public bool Restored { get; private set; }
     public TranslocatorIndex(string path, Action<string> warn)
     {
         this.path = path;
         try
         {
-            if (!File.Exists(path)) return;
+            if (!File.Exists(path)) { dirty = true; return; }
             foreach (var group in (JsonSerializer.Deserialize<TranslocatorPoint[]>(File.ReadAllText(path)) ?? [])
                 .GroupBy(p => (p.X >> 5, p.Y >> 5, p.Z >> 5))) chunks[group.Key] = group.ToArray();
+            Restored = true;
         }
-        catch (Exception ex) { warn($"ServerMap translocator cache could not be restored: {ex.Message}"); }
+        catch (Exception ex) { dirty = true; warn($"ServerMap translocator cache could not be restored: {ex.Message}"); }
     }
     public TranslocatorPoint[] Values { get { lock (gate) return chunks.Values.SelectMany(v => v).ToArray(); } }
     public int Count { get { lock (gate) return chunks.Values.Sum(v => v.Length); } }

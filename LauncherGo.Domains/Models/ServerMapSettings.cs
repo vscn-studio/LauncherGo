@@ -22,3 +22,21 @@ public sealed class ServerMapRuntimeStatus
     public string Error { get; init; } = string.Empty;
     public string Url { get; init; } = string.Empty;
 }
+
+public sealed class ServerMapRenderProgress
+{
+    public int CacheProtocol { get; init; }
+    public string Phase { get; init; } = "";
+    public string Reason { get; init; } = "";
+    public bool Rebuilding { get; init; }
+    public string RebuildId { get; init; } = "";
+    public long Pending { get; init; }
+    public long Completed { get; init; }
+    public long Failed { get; init; }
+    public long SurfaceExtraction { get; init; }
+    public long Coloring { get; init; }
+    public long Parents { get; init; }
+    public long Indexing { get; init; }
+    public long AwaitingSave { get; init; }
+    public string? Error { get; init; }
+}

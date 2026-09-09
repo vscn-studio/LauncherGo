@@ -4,6 +4,7 @@ namespace LauncherGo.Abstractions.Services;
 
 public interface IServerMapService
 {
+    Task<ServerMapRenderProgress?> GetRenderProgressAsync(InstanceProfile profile, CancellationToken cancellationToken = default) => Task.FromResult<ServerMapRenderProgress?>(null);
     Task<ServerMapSettings> LoadSettingsAsync(InstanceProfile profile, CancellationToken cancellationToken = default);
     Task SaveSettingsAsync(InstanceProfile profile, ServerMapSettings settings, CancellationToken cancellationToken = default);
     Task EnsureMapModDeployedAsync(InstanceProfile profile, CancellationToken cancellationToken = default);

@@ -7,6 +7,7 @@ using System.Text.Json;
 using ServerMap.Configuration;
 using ServerMap.Render;
 using ServerMap.World;
+using ServerMap.Util;
 using Vintagestory.API.Common;
 using Vintagestory.API.MathTools;
 using Vintagestory.API.Server;
@@ -27,15 +28,11 @@ public sealed partial class ServerMapWebServer : IDisposable
     private readonly ConcurrentDictionary<(int X, int Z), byte> knownRegions = new();
     private readonly ConcurrentDictionary<string, long> layerVersions = new(StringComparer.OrdinalIgnoreCase);
     private readonly TranslocatorIndex translocators;
-    private readonly ConcurrentDictionary<ChunkKey, byte> pendingObjectChunks = new();
-    private readonly ConcurrentDictionary<(string Renderer, int X, int Z), byte> pendingParentBuilds = new();
     private readonly object maintenanceGate = new();
     private Task maintenance = Task.CompletedTask;
     private bool maintenanceStarted;
     private readonly DateTimeOffset startedAt = DateTimeOffset.UtcNow;
     private HttpListener? listener;
-    /// <summary>Called when the browser requests a tile that is not cached.</summary>
-    public Action<ChunkKey, bool>? RequestRender { get; set; }
 
     public ServerMapWebServer(ICoreServerAPI api, ServerMapConfig config, string root, WorldDatabaseReader reader, MapPalette materials, MapAuthStore auth, PoiStore pois, AnnouncementStore announcements)
     {
@@ -125,19 +122,6 @@ public sealed partial class ServerMapWebServer : IDisposable
         var path = Path.Combine(root, "2d", rendererName.ToLowerInvariant(), zoom.ToString(CultureInfo.InvariantCulture), $"{x}_{z}.png");
         var exists = File.Exists(path);
         var bytes = exists ? File.ReadAllBytes(path) : TransparentTile;
-        if (RequestRender != null)
-        {
-            // Existing PNGs can still have old colors. Promote every known
-            // stale child covered by the requested parent, not its top-left
-            // (possibly unexplored) child only.
-            var span = 1L << zoom; var minX = x * span; var minZ = z * span;
-            foreach (var region in knownRegions.Keys)
-                if (region.X >= minX && region.X < minX + span && region.Z >= minZ && region.Z < minZ + span)
-                {
-                    var key = new ChunkKey(region.X, 0, region.Z);
-                    if (!HasBaseTile(rendererName, key) && (rendererName != "basic" || materials.HasClientColormap)) RequestRender(key, true);
-                }
-        }
         if (MapVisibility.ShouldMaskTiles(Principal(context.Request)?.IsAdmin == true, context.Request.QueryString["hideRegions"]))
             bytes = MapVisibility.MaskTile(bytes, zoom, x, z, notebook.Regions);
         context.Response.Headers["Vary"] = "Cookie";
@@ -463,92 +447,6 @@ public sealed partial class ServerMapWebServer : IDisposable
         return palette[(Math.Abs(protectionLevel) + index) % palette.Length];
     }
 
-    private async Task BuildObjectIndexAsync()
-    {
-        var changed = false;
-        var scannedChunks = 0;
-        var lastPublish = Environment.TickCount64;
-        var lastLog = lastPublish;
-        void Publish()
-        {
-            if (changed)
-            {
-                translocators.Save();
-                var version = layerVersions.AddOrUpdate("translocators", 2, (_, old) => old + 1);
-                events.Publish("layer", new { layer = "translocators", version });
-                changed = false;
-            }
-            lastPublish = Environment.TickCount64;
-        }
-        async Task ReadChunk(ChunkKey key)
-        {
-            stop.Token.ThrowIfCancellationRequested();
-            try
-            {
-                var points = reader.ReadTranslocators(key);
-                if (points != null) changed |= translocators.ReplaceChunk(key.X, key.Y, key.Z, points);
-                else pendingObjectChunks.TryAdd(key, 0);
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
-            {
-                pendingObjectChunks.TryAdd(key, 0);
-                if (Environment.TickCount64 - lastLog >= 10000)
-                {
-                    api.Logger.Warning("ServerMap translocator chunk {0} will retry: {1}", key, ex.Message);
-                    lastLog = Environment.TickCount64;
-                }
-            }
-            if (++scannedChunks % 32 == 0) await Task.Delay(25, stop.Token).ConfigureAwait(false);
-            if (Environment.TickCount64 - lastPublish >= 2000) Publish();
-        }
-        try
-        {
-            api.Logger.Notification("ServerMap object index restored: translocators={0}; validating saved chunks in background.", translocators.Count);
-            var scanned = false;
-            while (!scanned)
-            {
-                try
-                {
-                    foreach (var column in reader.MapColumns(stop.Token))
-                    {
-                        foreach (var y in reader.ChunkYs(column.X, column.Z))
-                            await ReadChunk(new ChunkKey(column.X, y, column.Z)).ConfigureAwait(false);
-                        if (Environment.TickCount64 - lastLog >= 10000)
-                        {
-                            api.Logger.Notification("ServerMap object index: chunks={0}, translocators={1}, retrying={2}.", scannedChunks, translocators.Count, pendingObjectChunks.Count);
-                            lastLog = Environment.TickCount64;
-                        }
-                    }
-                    scanned = true;
-                }
-                catch (OperationCanceledException) { throw; }
-                catch (Exception ex)
-                {
-                    Publish();
-                    api.Logger.Warning("ServerMap object scan interrupted; preserving index and retrying: {0}", ex.Message);
-                    await Task.Delay(5000, stop.Token).ConfigureAwait(false);
-                }
-            }
-            Publish();
-            api.Logger.Notification("ServerMap object index ready: translocators={0}, retrying={1}.", translocators.Count, pendingObjectChunks.Count);
-            while (!stop.IsCancellationRequested)
-            {
-                await Task.Delay(2000, stop.Token).ConfigureAwait(false);
-                foreach (var key in pendingObjectChunks.Keys.Take(128).ToArray())
-                    if (pendingObjectChunks.TryRemove(key, out _)) await ReadChunk(key).ConfigureAwait(false);
-                Publish();
-            }
-        }
-        catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
-        catch (Exception ex) { api.Logger.Warning("ServerMap object index failed: {0}", ex); }
-        finally
-        {
-            try { translocators.Save(); }
-            catch (Exception ex) { api.Logger.Warning("ServerMap could not persist translocator index: {0}", ex.Message); }
-        }
-    }
-    public void QueueObjectChunk(ChunkKey key) => pendingObjectChunks.TryAdd(key, 0);
     private static (double MinX, double MinZ, double MaxX, double MaxZ)? ParseBounds(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null; var values = value.Split(',');
@@ -580,58 +478,160 @@ public sealed partial class ServerMapWebServer : IDisposable
         var set = new ConcurrentDictionary<(int X, int Z), byte>(); var directory = Path.Combine(root, "2d", rendererName, "0"); if (!Directory.Exists(directory)) return set;
         foreach (var file in Directory.EnumerateFiles(directory, "*.png")) if (TryTileName(Path.GetFileName(file), out var x, out var z)) set.TryAdd((x, z), 0); return set;
     }
+    public Action<string, int, int, int, string, bool>? RequestParent { get; set; }
+    public string ParentDependencies(string name, int zoom, int x, int z) => pyramid.Dependencies(name, zoom, x, z);
+    public void RenderParent(string name, int zoom, int x, int z, string reason, bool rebuild)
+    {
+        if (pyramid.BuildParent(name, zoom, x, z)) { Interlocked.Increment(ref ParentTiles); events.Publish("tile", new { renderer = name, zoom, x, z }); }
+        if (zoom < TilePyramidBuilder.MaxZoom) RequestParent?.Invoke(name, zoom + 1, TilePyramidBuilder.FloorDiv(x, 2), TilePyramidBuilder.FloorDiv(z, 2), reason, rebuild);
+    }
+    private readonly object objectGate = new();
+    private bool indexRepairComplete;
+    public bool ObjectIndexRestored => translocators.Restored || indexRepairComplete;
+    public void MarkIndexReady() { translocators.Save(); indexRepairComplete = true; }
+    public long ExtractedColumns => renderer.ExtractedColumns;
+    public long ReusedColumns => renderer.ReusedColumns;
+    public long ColoredTiles, ParentTiles, IndexedColumns;
+    public bool SurfaceExists(ChunkKey key) => File.Exists(SurfaceRegion.PathFor(root, key.X, key.Z));
+    public bool SurfaceIsEmpty(ChunkKey key) => surfaceReads.TryGet(key, out var value) && value != null && !value.Columns.Any(c => c);
+    public void ForgetRegion(ChunkKey key) => knownRegions.TryRemove((key.X, key.Z), out _);
+    public bool SurfaceValid(ChunkKey key) => SurfaceRegion.Load(SurfaceRegion.PathFor(root, key.X, key.Z))?.Width == 512;
+    private const int BasicImageVersion = 1, SepiaImageVersion = 1;
+    private static string ImagePrefix(string name) => $"surface-{SurfaceRegion.Format}-{name}-image-{(name == "basic" ? BasicImageVersion : SepiaImageVersion)}:";
+    private readonly LruCache<ChunkKey, SurfaceRegion?> surfaceReads = new(4);
+    private string PatchPath(ChunkKey key, int index) => Path.Combine(root, "surface", $"{key.X}_{key.Z}", $"{index}.br");
+    public bool ExtractColumn(ChunkKey key, int index, long target, bool verify, bool repairIndex = false, int[]? objectYs = null, string stateEpoch = "")
+    {
+        var path = PatchPath(key, index);
+        var previous = SurfaceRegion.Load(path);
+        var objectVersion = stateEpoch + ":" + (repairIndex || objectYs == null ? "all" : string.Join(",", objectYs.Order()));
+        if (previous?.Generation == target && previous.ObjectVersion == objectVersion) return previous.AwaitingSave;
+        if (verify && previous == null)
+        {
+            if (!surfaceReads.TryGet(key, out var region)) { region = SurfaceRegion.Load(SurfaceRegion.PathFor(root, key.X, key.Z)); surfaceReads.Set(key, region); }
+            previous = region?.Column(index);
+        }
+        var fingerprint = previous?.Fingerprints[index];
+        var fence = SaveCompletionAdapter.CaptureReadFence();
+        using var snapshot = reader.BeginSnapshot();
+        SurfaceRegion column;
+        try { column = renderer.Extract(key, previous, new HashSet<int> { index }, verify, singleColumn: true); }
+        catch (MapRenderer.ColumnAwaitingSaveException)
+        {
+            // Preserve the previous column until world generation has actually
+            // saved a complete replacement; other columns can still finish.
+            var old = SurfaceRegion.Load(SurfaceRegion.PathFor(root, key.X, key.Z))?.Column(index) ?? new SurfaceRegion(32);
+            old.Generation = target; old.ObjectVersion = objectVersion; old.AwaitingSave = true; old.Save(path); return true;
+        }
+        if (repairIndex || !verify || fingerprint != column.Fingerprints[index])
+            RefreshObjectColumn(key.X * 16 + index / 16, key.Z * 16 + index % 16, repairIndex ? null : objectYs, () => SaveCompletionAdapter.ValidateReadFence(fence));
+        SaveCompletionAdapter.ValidateReadFence(fence);
+        column.Generation = target; column.ObjectVersion = objectVersion; column.AwaitingSave = false; column.Save(path); return false;
+    }
+    public sealed class DamagedColumnException(int index) : IOException("Surface column cache needs repair: " + index) { public int Index => index; }
     public void Render2D(ChunkKey key, bool basicOnly = false)
     {
-        var rendererNames = basicOnly ? new[] { "basic" } : Renderers;
-        foreach (var rendererName in rendererNames) if (renderer.Render2D(key, rendererName)) { baseTiles[rendererName].TryAdd((key.X, key.Z), 0); events.Publish("tile", new { renderer = rendererName, zoom = 0, x = key.X, z = key.Z }); ScheduleParentBuild(rendererName, key); }
-        var version = layerVersions.AddOrUpdate("chunks", 2, (_, old) => old + 1); events.Publish("layer", new { layer = "chunks", version, bbox = new[] { key.X * 512, key.Z * 512, (key.X + 1) * 512, (key.Z + 1) * 512 } });
+        var surface = renderer.Extract(key); surface.Generation = DateTime.UtcNow.Ticks;
+        surface.Save(SurfaceRegion.PathFor(root, key.X, key.Z));
+        RenderCached(key, new RegionWork(surface.Generation, "render", false, false, basicOnly, new(), materials.ClientColormapVersion));
     }
-    private void ScheduleParentBuild(string rendererName, ChunkKey key)
+    public bool RenderCached(ChunkKey key, RegionWork work)
     {
-        pendingParentBuilds.TryAdd((rendererName, key.X, key.Z), 0);
-    }
-    private async Task UpdateParentsAsync()
-    {
-        try
+        var path = SurfaceRegion.PathFor(root, key.X, key.Z);
+        var existing = SurfaceRegion.Load(path);
+        var surface = existing ?? new SurfaceRegion();
+        var changed = existing == null;
+        var patches = new List<string>();
+        for (var index = 0; index < 256; index++)
         {
-            while (!stop.IsCancellationRequested)
-            {
-                await Task.Delay(250, stop.Token).ConfigureAwait(false);
-                var batch = pendingParentBuilds.Keys.Take(64).Where(key => pendingParentBuilds.TryRemove(key, out _)).ToArray();
-                foreach (var group in batch.GroupBy(key => key.Renderer))
-                {
-                    try
-                    {
-                        foreach (var parent in pyramid.BuildParentsBatch(group.Key, group.Select(key => (key.X, key.Z)), stop.Token))
-                            events.Publish("tile", new { renderer = group.Key, zoom = parent.Zoom, x = parent.X, z = parent.Z });
-                    }
-                    catch (OperationCanceledException) { throw; }
-                    catch (Exception ex)
-                    {
-                        foreach (var key in group) pendingParentBuilds.TryAdd(key, 0);
-                        api.Logger.Warning("ServerMap parent tile update will retry: {0}", ex.Message);
-                    }
-                }
-            }
+            var patchPath = PatchPath(key, index);
+            if (!File.Exists(patchPath)) { if (existing == null) throw new DamagedColumnException(index); continue; }
+            var patch = SurfaceRegion.Load(patchPath);
+            if (patch?.Width != 32) throw new DamagedColumnException(index);
+            changed |= !surface.MatchesColumn(index, patch);
+            surface.MergeColumn(index, patch); patches.Add(patchPath);
         }
-        catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
+        if (changed)
+        {
+            surface.Generation = work.Revision; surface.ContentVersion = Guid.NewGuid().ToString("N"); surface.Save(path);
+        }
+        // Durable regional replacement precedes patch cleanup and task acknowledgement.
+        foreach (var patch in patches) File.Delete(patch);
+        surfaceReads.Set(key, surface);
+        foreach (var name in work.ColorOnly ? new[] { "basic" } : Renderers)
+        {
+            var tile = Path.Combine(root, "2d", name, "0", $"{key.X}_{key.Z}.png");
+            var stamp = ImagePrefix(name) + surface.ContentVersion + (name == "basic" ? ":" + materials.ClientColormapVersion : "");
+            if (work.ForceImages || work.Reason == "render" || !File.Exists(tile) || !File.Exists(tile + ".surface") || File.ReadAllText(tile + ".surface") != stamp || !HasBaseTile(name, key))
+            {
+                if (!renderer.RenderSurface(key, surface, name)) continue;
+                AtomicFile.Replace(tile + ".surface", temp => File.WriteAllText(temp, stamp));
+                Interlocked.Increment(ref ColoredTiles);
+                baseTiles[name].TryAdd((key.X, key.Z), 0);
+                events.Publish("tile", new { renderer = name, zoom = 0, x = key.X, z = key.Z });
+            }
+            RequestParent?.Invoke(name, 1, TilePyramidBuilder.FloorDiv(key.X, 2), TilePyramidBuilder.FloorDiv(key.Z, 2), work.Reason, work.Rebuild);
+        }
+        return materials.HasClientColormap;
+    }
+    public void RefreshObjectColumn(int x, int z, int[]? selectedYs = null, Action? validate = null)
+    {
+        lock (objectGate)
+        {
+            var ys = selectedYs ?? reader.ChunkYs(x, z).Concat(translocators.Values.Where(p => (p.X >> 5) == x && (p.Z >> 5) == z).Select(p => p.Y >> 5)).Distinct().ToArray();
+            var read = new Dictionary<int, TranslocatorPoint[]>();
+            foreach (var y in ys)
+            {
+                // Null means a successfully queried absent row, not an IO failure.
+                var points = reader.ReadTranslocators(new ChunkKey(x, y, z)) ?? [];
+                read[y] = points;
+            }
+            validate?.Invoke();
+            var changed = false;
+            foreach (var (y, points) in read) changed |= translocators.ReplaceChunk(x, y, z, points);
+            translocators.Save(); Interlocked.Increment(ref IndexedColumns);
+            if (changed) { var version = layerVersions.AddOrUpdate("translocators", 2, (_, old) => old + 1); events.Publish("layer", new { layer = "translocators", version }); }
+        }
     }
     public void NotifyColormapApplied() => events.Publish("colormap", new { month = materials.ClientColormapMonth, version = materials.ClientColormapVersion });
+    public IEnumerable<ChunkKey> ExistingRegions => knownRegions.Keys.Select(p => new ChunkKey(p.X, 0, p.Z)).ToArray();
+    public void RestoreRegions(IEnumerable<ChunkKey> regions) { knownRegions.Clear(); foreach (var key in regions) NoteRegion(key); }
     public void NoteRegion(ChunkKey key) => knownRegions.TryAdd((key.X, key.Z), 0);
     public IEnumerable<ChunkKey> StaleColorRegions() => knownRegions.Keys.Select(p => new ChunkKey(p.X, 0, p.Z)).Where(key => !HasBaseTile("basic", key));
-    public bool HasBaseTile(string rendererName, ChunkKey key) => baseTiles.TryGetValue(rendererName, out var tiles) && tiles.ContainsKey((key.X, key.Z))
-        && (rendererName != "basic" || TileColorStamp.IsCurrent(Path.Combine(root, "2d", "basic", "0", $"{key.X}_{key.Z}.png"), materials.ClientColormapVersion));
+    public bool HasBaseTile(string rendererName, ChunkKey key)
+    {
+        if (!baseTiles.TryGetValue(rendererName, out var tiles) || !tiles.ContainsKey((key.X, key.Z))) return false;
+        var path = Path.Combine(root, "2d", rendererName, "0", $"{key.X}_{key.Z}.png");
+        try
+        {
+            return TileIntegrity.IsValid(path) && File.ReadAllText(path + ".surface").StartsWith(ImagePrefix(rendererName), StringComparison.Ordinal)
+                && (rendererName != "basic" || TileColorStamp.IsCurrent(path, materials.ClientColormapVersion));
+        }
+        catch (IOException) { return false; }
+    }
+    public void CheckParents(IEnumerable<ChunkKey> regions, CancellationToken token)
+    {
+        var seen = new HashSet<(string, int, int, int)>();
+        foreach (var key in regions) foreach (var name in Renderers)
+        {
+            var x = key.X; var z = key.Z;
+            if (!File.Exists(Path.Combine(root, "2d", name, "0", $"{x}_{z}.png"))) continue;
+            for (var zoom = 1; zoom <= TilePyramidBuilder.MaxZoom; zoom++)
+            {
+                token.ThrowIfCancellationRequested(); x = TilePyramidBuilder.FloorDiv(x, 2); z = TilePyramidBuilder.FloorDiv(z, 2);
+                if (!seen.Add((name, zoom, x, z))) continue;
+                if (!pyramid.IsCurrent(name, zoom, x, z)) RequestParent?.Invoke(name, zoom, x, z, "repair", false);
+            }
+        }
+    }
     public void StartBackgroundMaintenance()
     {
         lock (maintenanceGate)
         {
             if (maintenanceStarted || stop.IsCancellationRequested) return;
             maintenanceStarted = true;
-            foreach (var rendererName in Renderers)
-                foreach (var key in baseTiles[rendererName].Keys) pendingParentBuilds.TryAdd((rendererName, key.X, key.Z), 0);
-            // One writer owns every zoom level. Concurrent per-region tasks
-            // could overwrite a freshly colored parent with an older snapshot.
-            maintenance = Task.WhenAll(Task.Run(BuildObjectIndexAsync), Task.Run(UpdateParentsAsync));
+            // Rendering, indexing and parents run under the shared RenderThreads budget.
+            maintenance = Task.CompletedTask;
         }
     }
     private static string ResolveWebRoot(ICoreServerAPI api)

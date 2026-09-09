@@ -139,6 +139,12 @@ async function main(){
   assert.equal(await alice.locator('#notebookTooltip').isVisible(),false,'Hidden segment must close its tooltip');
   assert.equal(await alice.locator('.notebook-progress-segment.completed').evaluate(el=>el.offsetWidth===el.parentElement.offsetWidth),true,'Only completed must fill the track');
   await alice.locator('.notebook-progress-segment.completed').click();assert.match(await alice.locator('#notebookTooltip').textContent(),/已完成: 11/);
+  progress={phase:'waiting-colormap',reason:'rebuild',pending:4,rebuilding:true,surfaceExtraction:17,coloring:3,parents:2,indexing:17};
+  await alice.waitForFunction(()=>document.querySelector('#notebookProgress').dataset.phase==='waiting-colormap');
+  await alice.locator('.notebook-progress-segment.pending').click();
+  assert.match(await alice.locator('#notebookTooltip').textContent(),/等待管理员客户端色表/);
+  assert.match(await alice.locator('#notebookTooltip').textContent(),/地表提取: 17/);
+  assert.equal(await alice.locator('.notebook-progress-segment.pending').evaluate(el=>el.style.flexGrow),'4','Persisted waiting jobs disappeared from progress');
   progress={phase:'waiting'};
   await alice.waitForFunction(()=>document.querySelector('.notebook-progress-track').dataset.empty==='true');
   assert.equal(await alice.locator('.notebook-progress-segment:visible').count(),0,'Empty progress must not fabricate a colored segment');
