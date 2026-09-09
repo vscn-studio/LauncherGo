@@ -128,7 +128,7 @@ async function main(){
   await alice.locator('.notebook-info').click();assert.match(await alice.locator('#notebookTooltip').textContent(),/管理员使用新版/);
   await alice.keyboard.press('Escape');assert.equal(await alice.locator('#notebookTooltip').isVisible(),false);
   assert.equal((await alice.locator('#notebookProgress').textContent()).trim(),'');
-  for(const [key,detail] of [['failed','失败: 2'],['pending','排队: 12'],['completed','已完成: 24']]){
+  for(const [key,detail] of [['failed','失败 2'],['pending','排队 12'],['completed','已完成 24']]){
    await alice.locator('.notebook-progress-segment.'+key).click();assert.ok((await alice.locator('#notebookTooltip').textContent()).includes(detail));
   }
   await alice.keyboard.press('Escape');
@@ -138,17 +138,17 @@ async function main(){
   for(const key of ['failed','pending'])assert.equal(await alice.locator('.notebook-progress-segment.'+key).evaluate(el=>el.getBoundingClientRect().width),0,'Zero segment must occupy no space');
   assert.equal(await alice.locator('#notebookTooltip').isVisible(),false,'Hidden segment must close its tooltip');
   assert.equal(await alice.locator('.notebook-progress-segment.completed').evaluate(el=>el.offsetWidth===el.parentElement.offsetWidth),true,'Only completed must fill the track');
-  await alice.locator('.notebook-progress-segment.completed').click();assert.match(await alice.locator('#notebookTooltip').textContent(),/已完成: 11/);
+  await alice.locator('.notebook-progress-segment.completed').click();assert.match(await alice.locator('#notebookTooltip').textContent(),/已完成 11/);
   progress={phase:'waiting-colormap',reason:'rebuild',pending:4,rebuilding:true,surfaceExtraction:17,coloring:3,parents:2,indexing:3994,translocatorCount:2,deferredGeneration:1168};
   await alice.waitForFunction(()=>document.querySelector('#notebookProgress').dataset.phase==='waiting-colormap');
   await alice.locator('.notebook-progress-segment.pending').click();
   assert.match(await alice.locator('#notebookTooltip').textContent(),/等待管理员客户端色表/);
   const progressDetail=await alice.locator('#notebookTooltip').textContent();
   assert.match(progressDetail,/本次运行累计完成/);
-  assert.match(progressDetail,/地表提取（柱）: 17/);
-  assert.match(progressDetail,/传送器检查（柱）: 3994/);
-  assert.match(progressDetail,/传送器端点（个）: 2/);
-  assert.match(progressDetail,/边缘地形未生成（柱，探索后更新）: 1168/);
+  assert.match(progressDetail,/地表提取 17/);
+  assert.match(progressDetail,/传送器检查 3994/);
+  assert.match(progressDetail,/传送器端点 2/);
+  assert.match(progressDetail,/边缘地形未生成 1168/);
   assert.equal(await alice.locator('.notebook-progress-segment.pending').evaluate(el=>el.style.flexGrow),'4','Generation deferral must not become outstanding save/render work');
   progress={phase:'waiting'};
   await alice.waitForFunction(()=>document.querySelector('.notebook-progress-track').dataset.empty==='true');

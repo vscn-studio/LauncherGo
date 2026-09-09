@@ -73,7 +73,7 @@
   color:var(--muted);background:transparent;
   font-size:26px;font-weight:400;line-height:1;
 }
-.notebook-screenshot-close:hover { color:var(--text);background:var(--hover); }
+.notebook-screenshot-close:hover { color:var(--text);background:transparent; }
 .notebook-screenshot-close:focus-visible { outline:2px solid #8abdc5;outline-offset:-2px; }
 .notebook-screenshot-preview { display:block;max-width:100%;max-height:60dvh;margin:auto;object-fit:contain;background:repeating-conic-gradient(#20252b 0% 25%,#303740 0% 50%) 0/16px 16px; }
 .notebook-screenshot .modal-actions { flex-wrap:wrap; }
