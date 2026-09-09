@@ -34,9 +34,19 @@
 .notebook-popup-actions { display:flex;flex-wrap:nowrap;gap:6px; }
 .notebook-icon-button { flex:0 0 34px;width:34px;height:34px;min-height:34px;padding:6px; }
 .notebook-icon-button svg { display:block;width:20px;height:20px;pointer-events:none; }
-#notebookNotice,#notebookTooltip { position:fixed;z-index:1300;max-width:min(320px,calc(100vw - 16px));padding:9px 12px;color:var(--text);background:#18181af5;border:var(--border);box-shadow:var(--shadow);border-radius:5px;font-size:12px;line-height:1.6;white-space:pre-line;overflow-wrap:anywhere; }
+#notebookNotice,#notebookTooltip { position:fixed;z-index:1300;max-width:min(360px,calc(100vw - 16px));padding:9px 12px;color:var(--text);background:#18181af5;border:var(--border);box-shadow:var(--shadow);border-radius:5px;font-size:12px;line-height:1.45;white-space:pre-line;overflow-wrap:anywhere; }
 #notebookNotice { top:70px;left:50%;transform:translateX(-50%); }
 #notebookTooltip { pointer-events:auto; }
+.notebook-tooltip-progress { display:flex;flex-direction:column;gap:8px;min-width:min(300px,calc(100vw - 40px)); }
+.notebook-tooltip-phase { color:var(--text);font-weight:600;line-height:1.35; }
+.notebook-tooltip-section { padding-top:6px;border-top:1px solid #ffffff1c; }
+.notebook-tooltip-section-title { margin-bottom:4px;color:var(--muted);font-size:11px; }
+.notebook-tooltip-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:18px;row-gap:3px; }
+.notebook-tooltip-metric { display:flex;justify-content:space-between;gap:8px;min-width:0; }
+.notebook-tooltip-metric span { color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.notebook-tooltip-metric strong { color:var(--text);font-variant-numeric:tabular-nums; }
+.notebook-tooltip-error { margin-top:3px;color:#e49b9b;overflow-wrap:anywhere; }
+.notebook-tooltip-muted,.notebook-tooltip-empty { color:var(--muted); }
 .notebook-region-label { overflow:hidden!important;clip-path:inset(0);pointer-events:none!important;background:none; }
 .notebook-region-label text { font-family:var(--map-label-font);font-weight:600;letter-spacing:0;fill:#e0e0e0;stroke:#20252b;paint-order:stroke fill;stroke-linejoin:round;text-rendering:geometricPrecision; }
 .notebook-fog { filter:none; }
@@ -56,12 +66,15 @@
 /* Game waypoint pickers share the notebook control sizes. */
 .notebook-screenshot { position:relative;width:min(900px,calc(100vw - 28px)); }
 .notebook-screenshot h2 { padding-right:40px; }
-.notebook-screenshot-close { position:absolute;right:12px;top:10px;font-size:22px; }
-.notebook-screenshot-preview { display:block;max-width:100%;max-height:60dvh;margin:auto;object-fit:contain;background:repeating-conic-gradient(#20252b 0% 25%,#303740 0% 50%) 0/16px 16px; }
-.notebook-screenshot .modal-actions { flex-wrap:wrap; }
-.notebook-screenshot { position:relative;width:min(900px,calc(100vw - 28px)); }
-.notebook-screenshot h2 { padding-right:40px; }
-.notebook-screenshot-close { position:absolute;right:12px;top:10px;font-size:22px; }
+.notebook-screenshot-close {
+  position:absolute;right:6px;top:6px;
+  width:44px;height:44px;min-width:44px;min-height:44px;
+  padding:0;border:0;border-radius:50%;
+  color:var(--muted);background:transparent;
+  font-size:26px;font-weight:400;line-height:1;
+}
+.notebook-screenshot-close:hover { color:var(--text);background:var(--hover); }
+.notebook-screenshot-close:focus-visible { outline:2px solid #8abdc5;outline-offset:-2px; }
 .notebook-screenshot-preview { display:block;max-width:100%;max-height:60dvh;margin:auto;object-fit:contain;background:repeating-conic-gradient(#20252b 0% 25%,#303740 0% 50%) 0/16px 16px; }
 .notebook-screenshot .modal-actions { flex-wrap:wrap; }
 .notebook-screenshot button:disabled { opacity:.5;cursor:default; }

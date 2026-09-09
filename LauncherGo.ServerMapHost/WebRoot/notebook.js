@@ -56,19 +56,27 @@
     try {sections.hiddenRegions.toggle.checked=localStorage.getItem(fogPreferenceKey)!=='off';}catch{}
     const tooltip=el('div',{id:'notebookTooltip',hidden:true});tooltip.setAttribute('role','tooltip');document.body.append(tooltip);let tooltipOwner;
     function closeTooltip(){tooltip.hidden=true;tooltipOwner?.setAttribute('aria-expanded','false');tooltipOwner?.removeAttribute('aria-describedby');tooltipOwner=null;}
-    function showTooltip(anchor,message){
-      if(tooltipOwner===anchor){closeTooltip();return;}closeTooltip();tooltipOwner=anchor;tooltip.textContent=message;tooltip.hidden=false;anchor.setAttribute('aria-expanded','true');anchor.setAttribute('aria-describedby',tooltip.id);
+    function positionTooltip(anchor){
       const bounds=anchor.getBoundingClientRect(),width=tooltip.offsetWidth,height=tooltip.offsetHeight;
       tooltip.style.left=`${Math.max(8,Math.min(bounds.left+bounds.width/2-width/2,innerWidth-width-8))}px`;
       tooltip.style.top=`${Math.max(8,bounds.top-height-8>=8?bounds.top-height-8:Math.min(bounds.bottom+8,innerHeight-height-8))}px`;
+    }
+    function setTooltipContent(message) {
+      if (typeof message === 'string') tooltip.textContent = message;
+      else tooltip.replaceChildren(message);
+      if (!tooltip.hidden && tooltipOwner) positionTooltip(tooltipOwner);
+    }
+    function showTooltip(anchor,message){
+      if(tooltipOwner===anchor){closeTooltip();return;}closeTooltip();tooltipOwner=anchor;setTooltipContent(message);tooltip.hidden=false;anchor.setAttribute('aria-expanded','true');anchor.setAttribute('aria-describedby',tooltip.id);
+      positionTooltip(anchor);
     }
     const markerInfo=button('ⓘ',()=>showTooltip(markerInfo,getLanguage()==='zh'?'部分图标等待同步：管理员使用新版地图模组进入游戏后会自动同步。':'Some icons await sync: an admin must join the game with the updated map mod.'));
     markerInfo.className='notebook-info';markerInfo.hidden=true;markerInfo.setAttribute('aria-expanded','false');sections.myMarkers.heading.append(markerInfo);
     const progressBox = el('div'); progressBox.id = 'notebookProgress'; document.querySelector('#sidebar .tools').before(progressBox);
     const progressTrack=el('div',{className:'notebook-progress-track'});progressTrack.setAttribute('role','group');progressBox.append(progressTrack);
-    progressTrack.addEventListener('click',event=>{if(event.target===progressTrack&&progressTrack.dataset.empty==='true')showTooltip(progressTrack,progressDetail('pending'));});
-    progressTrack.addEventListener('keydown',event=>{if(progressTrack.dataset.empty==='true'&&(event.key==='Enter'||event.key===' ')){event.preventDefault();showTooltip(progressTrack,progressDetail('pending'));}});
-    const progressSegments={};for(const key of ['failed','pending','completed']){const segment=button('',()=>showTooltip(segment,progressDetail(key)));segment.className=`notebook-progress-segment ${key}`;segment.setAttribute('aria-expanded','false');progressSegments[key]=segment;progressTrack.append(segment);}
+    progressTrack.addEventListener('click',event=>{if(event.target===progressTrack&&progressTrack.dataset.empty==='true')showTooltip(progressTrack,progressTooltipContent('pending'));});
+    progressTrack.addEventListener('keydown',event=>{if(progressTrack.dataset.empty==='true'&&(event.key==='Enter'||event.key===' ')){event.preventDefault();showTooltip(progressTrack,progressTooltipContent('pending'));}});
+    const progressSegments={};for(const key of ['failed','pending','completed']){const segment=button('',()=>showTooltip(segment,progressTooltipContent(key)));segment.className=`notebook-progress-segment ${key}`;segment.setAttribute('aria-expanded','false');progressSegments[key]=segment;progressTrack.append(segment);}
     const planButton = button('', () => startRoute()); planButton.id = 'planRoute'; document.querySelector('#sidebar .tools').prepend(planButton);
     const toolbar = el('div', { hidden:true }); toolbar.id = 'notebookToolbar'; toolbar.setAttribute('aria-live','polite'); document.body.append(toolbar);
     const noticeBox = el('div', { hidden:true }); noticeBox.id = 'notebookNotice'; noticeBox.setAttribute('role','status'); document.body.append(noticeBox);
@@ -348,6 +356,25 @@
       if(key==='completed')return `${text('completed')}: ${value.completed||0}${value.lastCompletedAt?'\n'+text('latest')+': '+new Date(value.lastCompletedAt).toLocaleTimeString():''}`;
       return `${text(['waiting-colormap','waiting-save'].includes(value.phase)?value.phase:(value.reason||value.phase))}${value.error?' · '+value.error:''}\n${text('sessionCompleted')}\n${text('surfaceColumns')}: ${value.surfaceExtraction||0} · ${text('colorTiles')}: ${value.coloring||0} · ${text('parentTiles')}: ${value.parents||0} · ${text('indexing')}: ${value.indexing||0}\n${text('translocatorEndpoints')}: ${value.translocatorCount||0}\n${text('queued')}: ${value.queued||0} · ${text('active')}: ${value.active||0}\n${text('retrying')}: ${value.retrying||0} · ${text('pendingSaveColumns')}: ${value.awaitingSave||0}\n${text('deferredGeneration')}: ${value.deferredGeneration||0}\n${text('regions')}: ${value.regionsDiscovered||0}`;
     }
+    function progressTooltipContent(key) {
+      const value=lastProgress;
+      if(!value) return el('div',{className:'notebook-tooltip-empty',textContent:text('noProgress')});
+      if(key==='failed'||key==='completed') {
+        const box=el('div',{className:'notebook-tooltip-simple'});
+        box.append(el('div',{className:'notebook-tooltip-phase',textContent:key==='failed'?`${text('failed')}: ${value.failed||0}`:`${text('completed')}: ${value.completed||0}`}));
+        if(key==='failed'&&value.error) box.append(el('div',{className:'notebook-tooltip-error',textContent:value.error}));
+        if(key==='completed'&&value.lastCompletedAt) box.append(el('div',{className:'notebook-tooltip-muted',textContent:`${text('latest')}: ${new Date(value.lastCompletedAt).toLocaleTimeString()}`}));
+        return box;
+      }
+      const box=el('div',{className:'notebook-tooltip-progress'});
+      const phase=text(['waiting-colormap','waiting-save'].includes(value.phase)?value.phase:(value.reason||value.phase));
+      box.append(el('div',{className:'notebook-tooltip-phase',textContent:phase}));
+      if(value.error) box.append(el('div',{className:'notebook-tooltip-error',textContent:value.error}));
+      const section=(title,rows)=>{const wrapper=el('section',{className:'notebook-tooltip-section'});wrapper.append(el('div',{className:'notebook-tooltip-section-title',textContent:title}));const grid=el('div',{className:'notebook-tooltip-grid'});for(const [label,val] of rows){const row=el('div',{className:'notebook-tooltip-metric'});row.append(el('span',{textContent:`${label}: `}),el('strong',{textContent:String(val)}));grid.append(row);}wrapper.append(grid);return wrapper;};
+      box.append(section(text('sessionCompleted'),[[text('surfaceColumns'),value.surfaceExtraction||0],[text('colorTiles'),value.coloring||0],[text('parentTiles'),value.parents||0],[text('indexing'),value.indexing||0],[text('translocatorEndpoints'),value.translocatorCount||0]]));
+      box.append(section(text('progress'),[[text('queued'),value.queued||0],[text('active'),value.active||0],[text('retrying'),value.retrying||0],[text('pendingSaveColumns'),value.awaitingSave||0],[text('deferredGeneration'),value.deferredGeneration||0],[text('regions'),value.regionsDiscovered||0]]));
+      return box;
+    }
     function renderProgress(value) {
       lastProgress=value;progressTrack.setAttribute('aria-label',text('progress'));progressBox.dataset.phase=value?.phase||'unavailable';
       const count=key=>Math.max(0,Number(value?.[key])||0),pending=Math.max(count('pending'),count('queued')+count('active')+count('retrying'))+count('awaitingSave');
@@ -356,9 +383,9 @@
       progressTrack.dataset.empty=String(isEmpty);progressTrack.tabIndex=isEmpty?0:-1;progressTrack.setAttribute('role',isEmpty?'button':'group');
       for(const [key,segment] of Object.entries(progressSegments)){
         segment.hidden=weights[key]===0;segment.style.flexGrow=weights[key];segment.classList.toggle('first-visible',key===visible[0]);segment.classList.toggle('last-visible',key===visible.at(-1));segment.setAttribute('aria-label',progressDetail(key));
-        if(tooltipOwner===segment){if(segment.hidden)closeTooltip();else tooltip.textContent=progressDetail(key);}
+        if(tooltipOwner===segment){if(segment.hidden)closeTooltip();else setTooltipContent(progressTooltipContent(key));}
       }
-      if(tooltipOwner===progressTrack){if(!isEmpty)closeTooltip();else tooltip.textContent=progressDetail('pending');}
+      if(tooltipOwner===progressTrack){if(!isEmpty)closeTooltip();else setTooltipContent(progressTooltipContent('pending'));}
     }
     async function refreshFog() {
       const epoch=authEpoch,next=await request('/hidden-regions');if(epoch!==authEpoch)return;
