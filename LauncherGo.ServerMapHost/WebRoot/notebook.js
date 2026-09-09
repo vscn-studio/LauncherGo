@@ -8,10 +8,12 @@
   };
   Object.assign(words.zh,{addGameMarker:'添加游戏标记',editMarker:'编辑游戏标记',deleteMarker:'删除游戏标记',shareMarker:'复制标记链接',saveMarkerShare:'保存到游戏标记',sharedMarker:'分享的标记',markerName:'名称',markerText:'说明',pinned:'置顶',suggestNames:'建议已保存名称',icon:'图标',markerSaved:'游戏标记已保存',deleteMarkerConfirm:'删除这个游戏标记？其分享链接也会失效。',markerShareWarning:'拥有链接的人可以查看这个标记。',mapDisabled:'服务器已禁用游戏地图'});
   Object.assign(words.en,{addGameMarker:'Add game marker',editMarker:'Edit game marker',deleteMarker:'Delete game marker',shareMarker:'Copy marker link',saveMarkerShare:'Save to Game markers',sharedMarker:'Shared marker',markerName:'Name',markerText:'Description',pinned:'Pinned',suggestNames:'Suggest saved names',icon:'Icon',markerSaved:'Game marker saved',deleteMarkerConfirm:'Delete this game marker? Its share links will stop working.',markerShareWarning:'Anyone with the link can view this marker.',mapDisabled:'Game map is disabled on this server'});
-  Object.assign(words.zh,{editPoi:'编辑地点标记',sharePoi:'复制地点链接',shareTranslocator:'复制传送器链接'});
-  Object.assign(words.en,{editPoi:'Edit place marker',sharePoi:'Copy place link',shareTranslocator:'Copy translocator link'});
+  Object.assign(words.zh,{deletePoi:'删除地点标记',editPoi:'编辑地点标记',sharePoi:'复制地点链接',shareTranslocator:'复制传送器链接'});
+  Object.assign(words.en,{deletePoi:'Delete place marker',editPoi:'Edit place marker',sharePoi:'Copy place link',shareTranslocator:'Copy translocator link'});
   Object.assign(words.zh,{'waiting-save':'等待游戏保存完成','waiting-colormap':'等待管理员客户端色表',build:'建立缓存',changes:'更新变化区域',season:'更新季节颜色',rebuild:'重建缓存',recovery:'恢复核对',repair:'修复缓存',render:'全图重绘',surface:'地表提取',coloring:'着色',parents:'缩放瓦片',indexing:'传送器索引'});
   Object.assign(words.en,{'waiting-save':'Waiting for world save completion','waiting-colormap':'Waiting for an administrator client colormap',build:'Building cache',changes:'Updating changed regions',season:'Updating seasonal colors',rebuild:'Rebuilding cache',recovery:'Checking recovery',repair:'Repairing cache',render:'Redrawing map',surface:'Surface extraction',coloring:'Coloring',parents:'Parent tiles',indexing:'Translocator index'});
+  Object.assign(words.zh,{captureRegion:'框选截图区域',captureHelp:'以右键位置为起点，左键点击对角位置截图；Esc 取消。按当前可见图层导出高清 PNG。',captureTitle:'区域截图',capturing:'正在生成高清截图…',copyImage:'复制到粘贴板',downloadImage:'下载',imageCopied:'图片已复制',clipboardUnavailable:'当前浏览器不支持图片复制，请使用 HTTPS 或下载图片。',captureFailed:'截图失败，请检查网络后重试。',selectionSmall:'请选择更大的截图区域。',selectionLarge:'选区过大，请缩小区域后重试。高清截图最多支持 8192 像素单边、3200 万像素。',missingTiles:'部分地图尚未生成，缺失区域保留透明。'});
+  Object.assign(words.en,{captureRegion:'Select screenshot region',captureHelp:'Start at the right-click position, then left-click the opposite corner. Esc cancels. Export visible layers as a high-resolution PNG.',captureTitle:'Region screenshot',capturing:'Generating high-resolution screenshot…',copyImage:'Copy to clipboard',downloadImage:'Download',imageCopied:'Image copied',clipboardUnavailable:'Image copying is unavailable. Use HTTPS or download the image.',captureFailed:'Screenshot failed. Check the connection and retry.',selectionSmall:'Select a larger screenshot region.',selectionLarge:'Region too large. Select a smaller area. Maximum: 8192 pixels per side and 32 million pixels.',missingTiles:'Some map tiles have not been generated; missing areas are transparent.'});
   function create(options) {
     const { map, api, gameLatLng, gamePoint, getAuth, getMetadata, getLanguage, cancelMeasurement, closePanels, invalidatePrivacy } = options;
     const text = key => words[getLanguage() === 'zh' ? 'zh' : 'en'][key] || key;
@@ -23,7 +25,7 @@
       deleteRoute:['M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7'],
       saveShared:['M12 3v12m-5-5 5 5 5-5','M5 16v5h14v-5']
     };
-    Object.assign(routeIcons,{sharePoi:routeIcons.shareRoute,shareTranslocator:routeIcons.shareRoute,editPoi:routeIcons.editRoute,shareMarker:routeIcons.shareRoute,editMarker:routeIcons.editRoute,deleteMarker:routeIcons.deleteRoute,saveMarkerShare:routeIcons.saveShared,editRegion:routeIcons.editRoute,removeRegion:routeIcons.deleteRoute});
+    Object.assign(routeIcons,{deletePoi:routeIcons.deleteRoute,sharePoi:routeIcons.shareRoute,shareTranslocator:routeIcons.shareRoute,editPoi:routeIcons.editRoute,shareMarker:routeIcons.shareRoute,editMarker:routeIcons.editRoute,deleteMarker:routeIcons.deleteRoute,saveMarkerShare:routeIcons.saveShared,editRegion:routeIcons.editRoute,removeRegion:routeIcons.deleteRoute});
     function routeIconButton(key,action){
       const b=button('',action),label=text(key),svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
       b.classList.add('notebook-icon-button');b.title=label;b.setAttribute('aria-label',label);b.dataset.icon=key;
@@ -70,7 +72,7 @@
     const noticeBox = el('div', { hidden:true }); noticeBox.id = 'notebookNotice'; noticeBox.setAttribute('role','status'); document.body.append(noticeBox);
     const modal = el('div', { className:'modal-backdrop', hidden:true }); modal.id = 'notebookModal'; document.body.append(modal);
     const contextMenu = document.querySelector('#contextMenu'), contextButtons = {};
-    for (const [key, handler] of Object.entries({addGameMarker:()=>markerDialog(),shareMarker:()=>shareMarker(contextMarker),editMarker:()=>markerDialog(contextMarker),deleteMarker:()=>removeMarker(contextMarker),sharePoint:sharePoint,shareRoute:() => shareRoute(contextRoute),editRoute:() => startRoute(contextRoute),deleteRoute:() => removeRoute(contextRoute),hideRegion:selectRegion,editRegion:() => regionDialog(contextRegion),removeRegion:() => removeRegion(contextRegion)})) {
+    for (const [key, handler] of Object.entries({addGameMarker:()=>markerDialog(),shareMarker:()=>shareMarker(contextMarker),editMarker:()=>markerDialog(contextMarker),deleteMarker:()=>removeMarker(contextMarker),sharePoint:sharePoint,shareRoute:() => shareRoute(contextRoute),editRoute:() => startRoute(contextRoute),deleteRoute:() => removeRoute(contextRoute),captureRegion:selectScreenshot,hideRegion:selectRegion,editRegion:() => regionDialog(contextRegion),removeRegion:() => removeRegion(contextRegion)})) {
       const b = button('', () => { contextMenu.classList.remove('show'); handler(); }); contextMenu.append(b); contextButtons[key] = b;
     }
     function notice(message) { clearTimeout(noticeTimer); noticeBox.textContent = message; noticeBox.hidden = false; noticeTimer = setTimeout(() => { noticeBox.hidden = true; }, 6000); }
@@ -226,6 +228,7 @@
         const redo=button(text('redo'),()=>{if(!redoDraft.length||draft.length>=512)return;draft.push(redoDraft.pop());renderDraft();renderToolbar();});redo.disabled=!redoDraft.length||draft.length>=512;
         toolbar.append(el('div',{className:'notebook-help',textContent:`${selectedRoute?.name || text('plan')} · ${text('routeHelp')} (${draft.length}/512)`}),undo,redo,button(text('finish'),finishRoute),button(text('cancel'),cancelMode));
       }
+      else if(mode==='screenshot') toolbar.append(el('div',{className:'notebook-help',textContent:text('captureHelp')}),button(text('cancel'),cancelMode));
       else if(mode==='region') toolbar.append(el('div',{className:'notebook-help',textContent:text('regionHelp')}),button(text('cancel'),cancelMode));
       else if(sharedMarker){toolbar.append(el('div',{className:'notebook-help',textContent:`${text('sharedMarker')}: ${sharedMarker.name}`}));if(getAuth().authenticated)toolbar.append(button(text('saveMarkerShare'),importMarker));toolbar.append(button(text('shareMarker'),()=>shareMarker(sharedMarker)),button(text('close'),()=>{toolbar.hidden=true;}));}
       else if(sharedRoute) {toolbar.append(el('div',{className:'notebook-help',textContent:`${text('sharedRoute')}: ${sharedRoute.name}`}));if(getAuth().authenticated)toolbar.append(button(text('saveShared'),importShared));toolbar.append(button(text('shareRoute'),()=>shareRoute(sharedRoute)),button(text('close'),()=>{toolbar.hidden=true;}));}
@@ -282,6 +285,42 @@
       }
 
     }
+    let captureController, captureUrl;
+    function closeScreenshot() {
+      captureController?.abort();captureController=null;
+      if(captureUrl){URL.revokeObjectURL(captureUrl);captureUrl=null;}
+      if(modal.querySelector('.notebook-screenshot'))modal.hidden=true;
+    }
+    function selectScreenshot() {
+      if(!ready||captureController)return;
+      cancelMode();closeScreenshot();closePanels();map.closePopup();mode='screenshot';
+      selectionStart=contextPosition||gamePoint(map.getCenter());map.dragging.disable();map.doubleClickZoom.disable();map.getContainer().style.cursor='crosshair';renderToolbar();
+    }
+    async function screenshot(bounds) {
+      closeScreenshot();const controller=captureController=new AbortController();
+      const form=el('div',{className:'modal notebook-screenshot'}),heading=el('h2',{textContent:text('captureTitle')}),close=button('×',()=>{closeScreenshot();modal.hidden=true;});
+      close.classList.add('notebook-screenshot-close');close.setAttribute('aria-label',text('close'));
+      form.setAttribute('role','dialog');form.setAttribute('aria-modal','true');heading.id='screenshotTitle';form.setAttribute('aria-labelledby',heading.id);
+      const status=el('p',{textContent:text('capturing')});status.setAttribute('role','status');form.append(heading,close,status);modal.replaceChildren(form);modal.hidden=false;close.focus();
+      const timeout=setTimeout(()=>controller.abort(Error('captureFailed')),60000);
+      try {
+        const result=await options.captureScreenshot(bounds,controller.signal);
+        if(controller!==captureController)return;
+        const url=captureUrl=URL.createObjectURL(result.blob),image=el('img',{src:url,alt:text('captureTitle')});image.className='notebook-screenshot-preview';
+        status.textContent=`${result.width} × ${result.height} · PNG${result.missingTiles?' · '+text('missingTiles'):''}`;
+        const actions=el('div',{className:'modal-actions'}),copy=button(text('copyImage'),async()=>{
+          copy.disabled=true;
+          try{await navigator.clipboard.write([new ClipboardItem({'image/png':result.blob})]);status.textContent=text('imageCopied');}
+          catch{status.textContent=text('copyFailed');}
+          finally{copy.disabled=false;}
+        });
+        copy.disabled=!navigator.clipboard?.write||typeof ClipboardItem==='undefined';
+        if(copy.disabled)form.append(el('p',{textContent:text('clipboardUnavailable')}));
+        const download=button(text('downloadImage'),()=>{const link=el('a',{href:url,download:`servermap-${new Date().toISOString().replace(/[:.]/g,'-')}.png`});document.body.append(link);link.click();link.remove();});
+        actions.append(copy,download);form.append(image,actions);
+      }catch(error){if(controller===captureController)status.textContent=text(words.zh[error.message]?error.message:'captureFailed');}
+      finally{clearTimeout(timeout);if(controller===captureController)captureController=null;}
+    }
     function selectRegion() {
       if(!getAuth().admin)return;cancelMode();cancelMeasurement();closePanels();mode='region';selectionStart=contextPosition||gamePoint(map.getCenter());map.dragging.disable();map.doubleClickZoom.disable();map.getContainer().style.cursor='crosshair';renderToolbar();
     }
@@ -322,12 +361,13 @@
     async function refreshFog() {
       const epoch=authEpoch,next=await request('/hidden-regions');if(epoch!==authEpoch)return;
       const signature=JSON.stringify(next);if(signature!==fogSignature){
-        privacyEpoch++;fogSignature=signature;regions=next;renderFog();map.closePopup();
+        closeScreenshot();privacyEpoch++;fogSignature=signature;regions=next;renderFog();map.closePopup();
         markerGroup.clearLayers();routeGroup.clearLayers();sharedRoute=null;sharedGroup.clearLayers();sharedMarker=null;sharedMarkerGroup.clearLayers();if(!mode)toolbar.hidden=true;markers=[];routes=[];markersSignature='';renderMarkers();renderRoutes();invalidatePrivacy();
         await refreshPrivate();if(sharedId)await loadShared(false);if(sharedMarkerId)await loadSharedMarker(false);
       }
     }
     async function privacyChanged() {
+      closeScreenshot();
       routeGroup.clearLayers();sharedGroup.clearLayers();sharedMarkerGroup.clearLayers();markerGroup.clearLayers();markersSignature='';fogSignature='';
       await refreshFog();await refreshPrivate();if(sharedId)await loadShared(false);if(sharedMarkerId)await loadSharedMarker(false);
     }
@@ -384,7 +424,7 @@
       renderMarkers();renderRoutes();renderFog();renderProgress(lastProgress);if(mode||sharedRoute||sharedMarker)renderToolbar();
     }
     function authChanged() {
-      authEpoch++;closeTooltip();markers=[];routes=[];markersSignature='';fogSignature='';selectedRoute=null;sharedRoute=null;sharedMarker=null;sharedMarkerGroup.clearLayers();routeGroup.clearLayers();sharedGroup.clearLayers();modal.hidden=true;cancelMode();languageChanged();
+      closeScreenshot();authEpoch++;closeTooltip();markers=[];routes=[];markersSignature='';fogSignature='';selectedRoute=null;sharedRoute=null;sharedMarker=null;sharedMarkerGroup.clearLayers();routeGroup.clearLayers();sharedGroup.clearLayers();modal.hidden=true;cancelMode();languageChanged();
       if(ready){invalidatePrivacy();safe(privacyChanged);}
     }
     sections.myMarkers.toggle.onchange=renderMarkers;sections.myRoutes.toggle.onchange=renderRoutes;
@@ -399,21 +439,22 @@
     });
     map.on('click',event=>{
       if(mode==='route'){if(draft.length>=512){notice(text('routeMax'));return;}const p=gamePoint(event.latlng);draft.push([Math.round(p.x),Math.round(p.z)]);redoDraft=[];renderDraft();renderToolbar();}
+      else if(mode==='screenshot'){const bounds=L.latLngBounds(gameLatLng(selectionStart.x,selectionStart.z),event.latlng);cancelMode();screenshot(bounds);}
       else if(mode==='region'){const p=gamePoint(event.latlng),start=selectionStart;if(Math.abs(p.x-start.x)<1||Math.abs(p.z-start.z)<1)return;const region={name:'',minX:Math.floor(Math.min(start.x,p.x)),minZ:Math.floor(Math.min(start.z,p.z)),maxX:Math.ceil(Math.max(start.x,p.x)),maxZ:Math.ceil(Math.max(start.z,p.z))};cancelMode();regionDialog(region);}
     });
     map.on('mousemove',event=>{
       if(mode==='route'&&draft.length){const last=draft.at(-1);if(!preview)preview=L.polyline([],{color:'#ffd000',dashArray:'5 5',weight:2,interactive:false}).addTo(draftGroup);preview.setLatLngs([gameLatLng(...last),event.latlng]);}
-      if(mode==='region'&&selectionStart){if(!selectionRect)selectionRect=L.rectangle([gameLatLng(selectionStart.x,selectionStart.z),event.latlng],{color:'#fff',fillColor:'#fff',fillOpacity:.5,interactive:false}).addTo(draftGroup);else selectionRect.setBounds([gameLatLng(selectionStart.x,selectionStart.z),event.latlng]);}
+      if((mode==='region'||mode==='screenshot')&&selectionStart){if(!selectionRect)selectionRect=L.rectangle([gameLatLng(selectionStart.x,selectionStart.z),event.latlng],{color:'#fff',fillColor:'#fff',fillOpacity:.5,interactive:false}).addTo(draftGroup);else selectionRect.setBounds([gameLatLng(selectionStart.x,selectionStart.z),event.latlng]);}
     });
     document.addEventListener('pointerdown',event=>{if(tooltipOwner&&!tooltip.contains(event.target)&&!tooltipOwner.contains(event.target))closeTooltip();});
-    document.addEventListener('keydown',event=>{if(event.key==='Escape'){closeTooltip();modal.hidden=true;cancelMode();}});
+    document.addEventListener('keydown',event=>{if(event.key==='Escape'){closeScreenshot();closeTooltip();modal.hidden=true;cancelMode();}});
     window.addEventListener('resize',closeTooltip);document.querySelector('#sidebar').addEventListener('scroll',closeTooltip);
     map.on('move zoom resize',closeTooltip);
 
     document.querySelector('#measure').addEventListener('click',()=>{if(mode)cancelMode();});
     document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});
     setInterval(poll,5000);languageChanged();
-    return { iconButton:routeIconButton,copyPointLink:sharePoint,hideRegions:()=>!getAuth().admin||sections.hiddenRegions.toggle.checked,focusSearchResult,authChanged,languageChanged,privacyChanged,ready:async()=>{ready=true;await poll();await loadShared();await loadSharedMarker();if(new URL(location.href).searchParams.get('point')==='1'){const p=gamePoint(map.getCenter()),origin=getMetadata().spawn;L.circleMarker(map.getCenter(),{radius:7,color:'#fff',fillColor:'#e66c75',fillOpacity:1}).bindPopup(`X ${Math.round(p.x-origin.x)}, Z ${Math.round(p.z-origin.z)}`).addTo(map).openPopup();}} };
+    return { isSelectingScreenshot:()=>mode==='screenshot', iconButton:routeIconButton,copyPointLink:sharePoint,hideRegions:()=>!getAuth().admin||sections.hiddenRegions.toggle.checked,focusSearchResult,authChanged,languageChanged,privacyChanged,ready:async()=>{ready=true;await poll();await loadShared();await loadSharedMarker();if(new URL(location.href).searchParams.get('point')==='1'){const p=gamePoint(map.getCenter()),origin=getMetadata().spawn;L.circleMarker(map.getCenter(),{radius:7,color:'#fff',fillColor:'#e66c75',fillOpacity:1}).bindPopup(`X ${Math.round(p.x-origin.x)}, Z ${Math.round(p.z-origin.z)}`).addTo(map).openPopup();}} };
   }
   window.ServerMapNotebook={create};
 })();

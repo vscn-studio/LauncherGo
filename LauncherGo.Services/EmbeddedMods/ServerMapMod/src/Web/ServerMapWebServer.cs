@@ -81,7 +81,7 @@ public sealed partial class ServerMapWebServer : IDisposable
                 ServeBytes(context, image, "image/png", "public, max-age=86400, immutable"); return;
             }
             if (path is "" or "servermap" or "index.html") { ServeBytes(context, Encoding.UTF8.GetBytes((announcements.Current.Site ?? new()).ApplyToHtml(File.ReadAllText(Path.Combine(webRoot, "index.html")))), "text/html; charset=utf-8", "no-store"); return; }
-            if (path.StartsWith("vendor/", StringComparison.OrdinalIgnoreCase) || path.StartsWith("assets/", StringComparison.OrdinalIgnoreCase) || path is "mobile.css" or "notebook.css" or "notebook.js") { ServeWebAsset(context, path); return; }
+            if (path.StartsWith("vendor/", StringComparison.OrdinalIgnoreCase) || path.StartsWith("assets/", StringComparison.OrdinalIgnoreCase) || path is "mobile.css" or "notebook.css" or "notebook.js" or "screenshot.js") { ServeWebAsset(context, path); return; }
             if (path == "api/v1/events") { events.Subscribe(context, stop.Token).GetAwaiter().GetResult(); return; }
             if (path == "api/v1/auth/login" && context.Request.HttpMethod == "POST") { Login(context); return; }
             if (path == "api/v1/auth/logout" && context.Request.HttpMethod == "POST") { auth.Logout(context.Request.Cookies["servermap_auth"]?.Value); context.Response.Headers["Set-Cookie"] = "servermap_auth=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict"; Json(context, new { authenticated = false }, true); return; }

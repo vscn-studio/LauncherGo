@@ -58,3 +58,8 @@ Rights in game models, textures, waypoint icons and avatars generated from those
 
 Keep this notice, LICENSE.txt and all vendor license files when copying,
 customizing or redistributing this web directory.
+
+html-to-image 1.11.13
+Source: https://github.com/bubkoo/html-to-image/tree/v1.11.13
+MIT License; full text: vendor/html-to-image-LICENSE.txt.
+Distributed file: vendor/html-to-image.js. Used to export visible DOM map overlays.

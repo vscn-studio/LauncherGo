@@ -54,6 +54,17 @@
   .notebook-progress-segment::before { top:17px;bottom:17px; }
 }
 /* Game waypoint pickers share the notebook control sizes. */
+.notebook-screenshot { position:relative;width:min(900px,calc(100vw - 28px)); }
+.notebook-screenshot h2 { padding-right:40px; }
+.notebook-screenshot-close { position:absolute;right:12px;top:10px;font-size:22px; }
+.notebook-screenshot-preview { display:block;max-width:100%;max-height:60dvh;margin:auto;object-fit:contain;background:repeating-conic-gradient(#20252b 0% 25%,#303740 0% 50%) 0/16px 16px; }
+.notebook-screenshot .modal-actions { flex-wrap:wrap; }
+.notebook-screenshot { position:relative;width:min(900px,calc(100vw - 28px)); }
+.notebook-screenshot h2 { padding-right:40px; }
+.notebook-screenshot-close { position:absolute;right:12px;top:10px;font-size:22px; }
+.notebook-screenshot-preview { display:block;max-width:100%;max-height:60dvh;margin:auto;object-fit:contain;background:repeating-conic-gradient(#20252b 0% 25%,#303740 0% 50%) 0/16px 16px; }
+.notebook-screenshot .modal-actions { flex-wrap:wrap; }
+.notebook-screenshot button:disabled { opacity:.5;cursor:default; }
 .notebook-icon-picker,.notebook-color-picker{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;max-height:190px;overflow:auto;}
 .notebook-icon-picker .notebook-button{width:36px;height:36px;display:flex;align-items:center;justify-content:center;padding:6px;flex:0 0 auto;}
 .notebook-icon-picker [aria-pressed="true"]{outline:2px solid var(--text);outline-offset:-2px;background:var(--hover);}
