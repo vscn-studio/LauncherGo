@@ -38,5 +38,7 @@ public sealed class ServerMapRenderProgress
     public long Parents { get; init; }
     public long Indexing { get; init; }
     public long AwaitingSave { get; init; }
+    public long DeferredGeneration { get; init; }
+    public long TranslocatorCount { get; init; }
     public string? Error { get; init; }
 }

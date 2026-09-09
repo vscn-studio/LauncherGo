@@ -66,8 +66,9 @@ public sealed class ServerMapModSystem : ModSystem
                 var reason = Volatile.Read(ref scanActive) != 0 ? scanReason : tasks.Any(w => w.Reason == "changes") ? "changes" : tasks.FirstOrDefault()?.Reason ?? (cache.AwaitingSave > 0 ? "changes" : "idle");
                 return new { phase = !running ? "waiting" : Volatile.Read(ref scanActive) != 0 ? "scanning" : progress.Active + progress.Queued > 0 ? "rendering" : progress.Retrying > 0 ? "retrying" : waitingForSave.Count > 0 || cache.AwaitingSave > 0 ? "waiting-save" : tasks.Length > 0 && materials?.HasClientColormap != true ? "waiting-colormap" : "idle",
                     queued = progress.Queued, active = progress.Active, retrying = progress.Retrying, completed = progress.Completed, failed = progress.Failed,
-                    columnsScanned = Volatile.Read(ref scannedColumns), regionsDiscovered = cache.Regions.Length, awaitingSave = cache.AwaitingSave, waitingSaveTasks = waitingForSave.Count, lastCompletedAt = progress.LastCompletedAt,
+                    columnsScanned = Volatile.Read(ref scannedColumns), regionsDiscovered = cache.Regions.Length, awaitingSave = cache.AwaitingSave, awaitingSaveChunks = cache.AwaitingSaveChunks, deferredGeneration = cache.DeferredGeneration, waitingSaveTasks = waitingForSave.Count, lastCompletedAt = progress.LastCompletedAt,
                     reason, rebuilding, rebuildId = cache.Get("rebuildId") ?? "", surfaceExtraction = web.ExtractedColumns, cacheReused = web.ReusedColumns, coloring = web.ColoredTiles, parents = web.ParentTiles, indexing = web.IndexedColumns,
+                    translocatorCount = web.TranslocatorCount, countersScope = "session-completed", pendingSurfaceColumns = tasks.Sum(w => w.Columns.Count),
                     mapColumnReads = db.MapColumnReads, chunkReads = db.ChunkDataReads, chunkDeserializations = db.ChunkDeserializations,
                     merged = cache.Merged, pending = tasks.Length, error = cache.Error ?? lastError ?? taskErrors.Values.FirstOrDefault(), cacheProtocol = 1 };
             };
@@ -89,7 +90,7 @@ public sealed class ServerMapModSystem : ModSystem
             api.Event.ServerRunPhase(EnumServerRunPhase.RunGame, StartBackgroundWork);
             colormapRequestListenerId = api.Event.RegisterGameTickListener(_ => RequestMissingColormap(), 30000);
             api.RegisterCommand("servermap", "ServerMap commands", "/servermap status|reload|psw <password>|render all|cache rebuild", OnCommand, "chat");
-            api.Logger.Notification("ServerMap initialized; database scans deferred until RunGame.");
+            api.Logger.Notification("ServerMap initialized; assembly-mvid={0}; database scans deferred until RunGame.", typeof(ServerMapModSystem).Assembly.ManifestModule.ModuleVersionId);
         }
         catch(Exception ex){api.Logger.Error("ServerMap initialization failed: {0}",ex);}
     }
@@ -103,9 +104,13 @@ public sealed class ServerMapModSystem : ModSystem
     }
     private void OnChunkColumnLoaded(Vec2i chunkPos, IWorldChunk[] chunks)
     {
-        // Loading a column is ordinary read activity. It must not enter the
-        // save wait queue; actual mutations arrive through ChunkDirty.
-        // Newly discovered columns are picked up by the persisted region scan.
+        // Normal loads of cached terrain are reads. A pre-generated border
+        // column can, however, finish generation without another block-dirty
+        // event. Only discover that transition for missing/deferred columns.
+        if (disposed || cache == null) return;
+        var id = $"{chunkPos.X}_{chunkPos.Y}";
+        if (!cache.NeedsGeneratedColumn(id) || !chunks.Any(chunk => chunk?.MapChunk?.CurrentPass == EnumWorldGenPass.Done)) return;
+        cache.MarkDirty($"{chunkPos.X}_0_{chunkPos.Y}");
     }
     private void Request(ChunkKey region, string reason, bool extract = false, bool verify = false, bool colorOnly = false, Dictionary<int, long>? columns = null, Dictionary<int, int[]>? objectYs = null)
     {
@@ -271,8 +276,12 @@ public sealed class ServerMapModSystem : ModSystem
                     waitingForSave.TryRemove(job, out _); return Render.RenderQueueOutcome.Yield;
                 }
                 var column = task.Columns.First();
-                if (web?.ExtractColumn(job, column.Key, column.Value, task.Verify, web.ObjectIndexRestored != true, task.ObjectYs.GetValueOrDefault(column.Key), cache.Epoch) == true)
-                    cache.MarkDirty($"{job.X * 16 + column.Key / 16}_0_{job.Z * 16 + column.Key % 16}");
+                var columnId = $"{job.X * 16 + column.Key / 16}_{job.Z * 16 + column.Key % 16}";
+                var incomplete = web?.ExtractColumn(job, column.Key, column.Value, task.Verify, web.ObjectIndexRestored != true, task.ObjectYs.GetValueOrDefault(column.Key), cache.Epoch) == true;
+                // A saved, partially generated border is not an unsaved world
+                // change. Re-inserting it into dirty made every autosave repeat
+                // thousands of reads forever. Wait for actual generation events.
+                cache.SetGenerationPending(columnId, incomplete);
                 cache.CompleteColumn(RegionId(job), column.Key, column.Value, task.Revision);
                 taskErrors.TryRemove(RegionId(job), out _);
                 return Render.RenderQueueOutcome.Yield;
@@ -311,16 +320,18 @@ public sealed class ServerMapModSystem : ModSystem
         {
             var columns = new Dictionary<int, long>();
             var objectYs = new Dictionary<int, HashSet<int>>();
+            var fullObjectColumns = new HashSet<int>();
             foreach (var (id, version) in group)
             {
                 var p = id.Split('_'); var x = int.Parse(p[0]); var z = int.Parse(p[2]);
                 var index = (x & 15) * 16 + (z & 15); columns[index] = Math.Max(columns.GetValueOrDefault(index), version);
                 if (!objectYs.TryGetValue(index, out var ys)) objectYs[index] = ys = new();
                 ys.Add(int.Parse(p[1]));
+                if (cache.NeedsGeneratedColumn($"{x}_{z}")) fullObjectColumns.Add(index);
                 cache.Set($"column:{x}_{z}", "yes");
             }
             // Journal the render before acknowledging any saved dirty entry.
-            Request(group.Key, "changes", columns: columns, objectYs: objectYs.ToDictionary(p => p.Key, p => p.Value.ToArray()));
+            Request(group.Key, "changes", columns: columns, objectYs: objectYs.Where(p => !fullObjectColumns.Contains(p.Key)).ToDictionary(p => p.Key, p => p.Value.ToArray()));
             foreach (var (id, version) in group) cache.ConfirmSaved(id, version);
         }
         foreach (var key in waitingForSave.Keys)

@@ -65,7 +65,7 @@ public sealed class ClientColormapSystem : ModSystem
             .RegisterMessageType<ClientWaypointIconPacket>()
             .SetMessageHandler<ServerColormapRequestPacket>(OnColormapRequested);
         tickListenerId = api.Event.RegisterGameTickListener(_ => CheckForGeneration(), 1000);
-        api.Logger.Notification("ServerMap client colormap channel ready.");
+        api.Logger.Notification("ServerMap client colormap channel ready; loaded build {0}.", typeof(ClientColormapSystem).Assembly.ManifestModule.ModuleVersionId.ToString("N"));
     }
 
     private void CheckForGeneration()
@@ -322,6 +322,12 @@ public sealed class ClientColormapSystem : ModSystem
     private uint[] GenerateBlockColors(Block block, BlockPos position)
     {
         if (api == null) throw new InvalidOperationException("Client API is unavailable.");
+
+        // Loose stones/boulders delegate their position-based map color to
+        // the block below them. Here position is the sampling player, not an
+        // instance of this block, so that overload copies unrelated terrain
+        // (often the white groundstorage placeholder) into every rock sample.
+        if (block is BlockLooseRock) return GroundStorageColors.SampleColors(api, block);
 
         // GetColor returns the atlas-native BGRA packed value. LiveMap flips
         // only this base value; GetRandomColor returns the atlas RGBA value

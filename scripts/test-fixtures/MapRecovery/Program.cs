@@ -176,6 +176,7 @@ static class SaveAdapterChecks
         ((SaveApiProxy)(object)api).World = server;
         var begun = 0; var confirmed = 0; var failures = new List<string>();
         using var adapter = new SaveCompletionAdapter(api, () => { begun++; return () => confirmed++; }, failures.Add);
+        DeferredGenerationChecks.Run(adapter);
         var type = typeof(SaveCompletionAdapter);
         object? Invoke(string name, params object?[] arguments) => type.GetMethod(name, BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, arguments);
         // Invoke the actually patched idle worker once: no completed save exists.

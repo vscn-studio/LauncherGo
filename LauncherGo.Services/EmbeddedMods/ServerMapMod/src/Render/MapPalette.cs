@@ -6,6 +6,7 @@ using System.Text;
 using ServerMap.Util;
 using Vintagestory.API.Common;
 using Vintagestory.API.MathTools;
+using Vintagestory.GameContent;
 
 namespace ServerMap.Render;
 
@@ -19,6 +20,7 @@ public sealed class MapPalette
     {
         public bool IsRoof { get; init; }
         public bool IsGroundStorage { get; init; }
+        public bool IsLooseRock { get; init; }
     }
 
     private readonly Entry?[] entries;
@@ -101,7 +103,7 @@ public sealed class MapPalette
                 || path.StartsWith("clutter-", StringComparison.OrdinalIgnoreCase)
                 || path.StartsWith("rocktyped-rubble", StringComparison.OrdinalIgnoreCase)
                 || path.StartsWith("banner-", StringComparison.OrdinalIgnoreCase);
-            result[block.Id] = new Entry(block.Id, code, color, water, ice, lava, overlay, cover, micro, placeholder, block.Id == 0) { IsRoof = RoofingColors.IsRoof(block), IsGroundStorage = GroundStorageColors.IsStorage(block) };
+            result[block.Id] = new Entry(block.Id, code, color, water, ice, lava, overlay, cover, micro, placeholder, block.Id == 0) { IsRoof = RoofingColors.IsRoof(block), IsGroundStorage = GroundStorageColors.IsStorage(block), IsLooseRock = block is BlockLooseRock };
         }
         result[0] ??= new Entry(0, "game:air", "land", false, false, false, false, false, false, false, true);
         api.Logger.Notification("ServerMap 2D palette captured {0} block definitions.", result.Count(entry => entry != null));
@@ -161,6 +163,13 @@ public sealed class MapPalette
             resolvedCount++;
         }
         if (resolvedCount == 0) return false;
+        // Existing extended colormaps already contain the correct stack
+        // texture samples. Repair their old position-dependent loose-rock
+        // entries when loading, so a restart can recolor cached surfaces
+        // without requiring another client upload or a world scan.
+        foreach (var entry in entries)
+            if (entry?.IsLooseRock == true && groundColors.TryGetValue(GroundStorageColors.Prefix + "block/" + entry.Code, out var samples))
+                next[entry.Id] = samples;
         var effective = new SortedDictionary<string, uint[]>(StringComparer.Ordinal);
         foreach (var entry in entries) if (entry != null && next[entry.Id] != null) effective[entry.Code] = next[entry.Id];
         foreach (var pair in roofColors.Concat(groundColors)) effective[pair.Key] = pair.Value;

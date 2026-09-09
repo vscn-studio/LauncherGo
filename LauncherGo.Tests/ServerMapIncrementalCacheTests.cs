@@ -31,6 +31,37 @@ public sealed class ServerMapIncrementalCacheTests : IDisposable
         Assert.True(next.MarkDirty("160_1_320") > revision);
     }
     [Fact]
+    public void SaveProgressCountsColumnsWithoutDiscardingVerticalDirtyGenerations()
+    {
+        using var state = new MapCacheState(Database);
+        state.MarkDirty("1_0_3"); state.MarkDirty("1_4_3"); state.MarkDirty("2_4_3");
+        Assert.Equal(2, state.AwaitingSave); Assert.Equal(3, state.AwaitingSaveChunks);
+        Assert.Equal(3, state.Freeze().Count);
+    }
+    [Fact]
+    public void DeferredWorldGenerationSurvivesRestartWithoutCreatingSaveOrRenderWork()
+    {
+        using (var state = new MapCacheState(Database))
+        {
+            state.Set("column:1_3", "yes");
+            Assert.False(state.NeedsGeneratedColumn("1_3"));
+            state.SetGenerationPending("1_3", true);
+            Assert.True(state.NeedsGeneratedColumn("1_3"));
+            Assert.Empty(state.Freeze()); Assert.Empty(state.Pending);
+            state.Close(true);
+        }
+        using var restored = new MapCacheState(Database);
+        Assert.Equal(1, restored.DeferredGeneration); Assert.Empty(restored.Freeze());
+        Assert.True(restored.NeedsGeneratedColumn("1_3"));
+        var generated = restored.MarkDirty("1_0_3");
+        var frozen = restored.Freeze(); var changedAgain = restored.MarkDirty("1_0_3");
+        restored.ConfirmSaved("1_0_3", frozen["1_0_3"]);
+        restored.SetGenerationPending("1_3", false);
+        Assert.Equal(0, restored.DeferredGeneration); Assert.False(restored.NeedsGeneratedColumn("1_3"));
+        Assert.Equal(changedAgain, restored.Freeze()["1_0_3"]);
+        Assert.True(changedAgain > generated);
+    }
+    [Fact]
     public void RepeatedDirtiesAndNewSaveDuringExtractionDoNotLoseChanges()
     {
         using var state = new MapCacheState(Database);

@@ -18,7 +18,7 @@ public sealed class MapRenderer
     private readonly int mapSizeY;
     private readonly MapPalette materials;
     public MapRenderer(WorldDatabaseReader reader, string root, int mapSizeY, MapPalette materials) { this.reader = reader; this.root = root; this.mapSizeY = mapSizeY; this.materials = materials; }
-    public sealed class ColumnAwaitingSaveException : IOException { }
+    public sealed class ColumnGenerationIncompleteException : IOException { }
     public long ExtractedColumns, ReusedColumns;
     public SurfaceRegion Extract(ChunkKey key, SurfaceRegion? previous = null, ISet<int>? columns = null, bool verify = false, bool singleColumn = false)
     {
@@ -53,7 +53,7 @@ public sealed class MapRenderer
             // Aborting the whole 512x512 tile here meant one actively
             // generating column prevented every 2D tile from ever being
             // written in partially explored worlds.
-            if (map.CurrentIncompletePass < EnumWorldGenPass.Done) throw new ColumnAwaitingSaveException();
+            if (map.CurrentIncompletePass < EnumWorldGenPass.Done) throw new ColumnGenerationIncompleteException();
             surface.Columns[columnIndex] = true;
             stableColumns++; Interlocked.Increment(ref ExtractedColumns);
             // LiveMap samples the rain height map, then reads the engine's

@@ -9106,9 +9106,11 @@ public partial class LauncherMainWindow : Window
             else if (busy || progress.Pending > 0 || progress.AwaitingSave > 0)
             {
                 var reason = progress.Phase == "waiting-save" ? T("等待游戏保存完成", "Waiting for world save completion") : progress.Phase == "waiting-colormap" ? T("等待管理员客户端色表", "Waiting for an administrator client colormap") : progress.Reason switch { "changes" => T("更新变化区域", "Updating changed regions"), "season" => T("更新季节颜色", "Updating seasonal colors"), "rebuild" => T("重建缓存", "Rebuilding cache"), "recovery" => T("恢复核对", "Checking recovery"), _ => T("建立缓存", "Building cache") };
-                SetMapCacheStatus(T($"{reason}：剩余 {progress.Pending}；地表 {progress.SurfaceExtraction}；着色 {progress.Coloring}；缩放 {progress.Parents}；索引 {progress.Indexing}；等待保存 {progress.AwaitingSave}", $"{reason}: pending {progress.Pending}; surface {progress.SurfaceExtraction}; coloring {progress.Coloring}; parents {progress.Parents}; index {progress.Indexing}; awaiting save {progress.AwaitingSave}"));
+                SetMapCacheStatus(T($"{reason}：剩余 {progress.Pending}；等待保存 {progress.AwaitingSave} 柱。累计已处理：地表 {progress.SurfaceExtraction} 柱；着色 {progress.Coloring} 张；缩放 {progress.Parents} 张；传送器检查 {progress.Indexing} 柱（端点 {progress.TranslocatorCount} 个）。未完成地形生成 {progress.DeferredGeneration} 柱，待探索后更新。", $"{reason}: pending {progress.Pending}; awaiting save {progress.AwaitingSave} columns. Completed this session: surface {progress.SurfaceExtraction} columns; coloring {progress.Coloring} tiles; parents {progress.Parents} tiles; translocator checks {progress.Indexing} columns ({progress.TranslocatorCount} endpoints). {progress.DeferredGeneration} unfinished generation columns update when explored."));
             }
-            else SetMapCacheStatus(T("地图缓存已就绪。", "Map cache is ready."));
+            else SetMapCacheStatus(progress.DeferredGeneration > 0
+                ? T($"地图缓存已就绪。边缘地形尚未生成完成：{progress.DeferredGeneration} 柱，探索后自动更新；传送器端点 {progress.TranslocatorCount} 个。", $"Map cache is ready. {progress.DeferredGeneration} border columns will update after exploration; {progress.TranslocatorCount} translocator endpoints.")
+                : T("地图缓存已就绪。", "Map cache is ready."));
         }
         catch (Exception ex)
         {

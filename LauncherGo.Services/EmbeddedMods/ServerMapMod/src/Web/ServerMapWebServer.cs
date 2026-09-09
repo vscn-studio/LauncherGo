@@ -492,6 +492,7 @@ public sealed partial class ServerMapWebServer : IDisposable
     public long ExtractedColumns => renderer.ExtractedColumns;
     public long ReusedColumns => renderer.ReusedColumns;
     public long ColoredTiles, ParentTiles, IndexedColumns;
+    public int TranslocatorCount => translocators.Values.Length;
     public bool SurfaceExists(ChunkKey key) => File.Exists(SurfaceRegion.PathFor(root, key.X, key.Z));
     public bool SurfaceIsEmpty(ChunkKey key) => surfaceReads.TryGet(key, out var value) && value != null && !value.Columns.Any(c => c);
     public void ForgetRegion(ChunkKey key) => knownRegions.TryRemove((key.X, key.Z), out _);
@@ -516,10 +517,12 @@ public sealed partial class ServerMapWebServer : IDisposable
         using var snapshot = reader.BeginSnapshot();
         SurfaceRegion column;
         try { column = renderer.Extract(key, previous, new HashSet<int> { index }, verify, singleColumn: true); }
-        catch (MapRenderer.ColumnAwaitingSaveException)
+        catch (MapRenderer.ColumnGenerationIncompleteException)
         {
-            // Preserve the previous column until world generation has actually
-            // saved a complete replacement; other columns can still finish.
+            // Partial world generation can persist at the exploration border
+            // for days. Preserve old pixels until a real generation event;
+            // this state must never be fed back into the save-dirty journal.
+            SaveCompletionAdapter.ValidateReadFence(fence);
             var old = SurfaceRegion.Load(SurfaceRegion.PathFor(root, key.X, key.Z))?.Column(index) ?? new SurfaceRegion(32);
             old.Generation = target; old.ObjectVersion = objectVersion; old.AwaitingSave = true; old.Save(path); return true;
         }

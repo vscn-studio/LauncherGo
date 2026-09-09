@@ -96,7 +96,25 @@ public sealed class MapCacheState : IDisposable
     public int PendingCount { get { lock (gate) return work.Count; } }
     public bool HasExtractionWork { get { lock (gate) return work.Values.Any(w => w.Columns.Count > 0); } }
     public bool HasRebuildWork { get { lock (gate) return work.Values.Any(w => w.Rebuild); } }
-    public int AwaitingSave { get { lock (gate) return dirty.Count; } }
+    // Dirty events identify vertical chunks, while extraction works on X/Z
+    // columns. Report these units separately instead of counting every Y slice.
+    public int AwaitingSave { get { lock (gate) return dirty.Keys.Select(ColumnOfDirty).Distinct().Count(); } }
+    public int AwaitingSaveChunks { get { lock (gate) return dirty.Count; } }
+    private static string ColumnOfDirty(string key) { var parts = key.Split('_'); return parts[0] + "_" + parts[2]; }
+    public int DeferredGeneration { get { lock (gate) return metadata.Count(p => p.Key.StartsWith("generation:", StringComparison.Ordinal) && p.Value == "pending"); } }
+    public void SetGenerationPending(string column, bool pending)
+    {
+        lock (gate)
+        {
+            var key = "generation:" + column;
+            if (pending) Set(key, "pending");
+            else if (metadata.Remove(key)) Write("metadata", key, null);
+        }
+    }
+    public bool NeedsGeneratedColumn(string column)
+    {
+        lock (gate) return metadata.GetValueOrDefault("generation:" + column) == "pending" || metadata.GetValueOrDefault("column:" + column) != "yes";
+    }
     public long MarkDirty(string key) { lock (gate) { var version = NextRevision(); dirty[key] = version; Write("dirty", key, version.ToString()); return version; } }
     public Dictionary<string, long> Freeze() { lock (gate) return new(dirty); }
     public void ConfirmSaved(string key, long version) { lock (gate) if (dirty.GetValueOrDefault(key) == version) { dirty.Remove(key); Write("dirty", key, null); } }

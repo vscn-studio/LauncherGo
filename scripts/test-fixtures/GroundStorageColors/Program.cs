@@ -6,6 +6,7 @@ using ServerMap.Render;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Datastructures;
+using Vintagestory.API.MathTools;
 using Vintagestory.GameContent;
 
 if (args.Length is < 1 or > 2) throw new ArgumentException("GameRoot [Save.vcdbs] required");
@@ -80,8 +81,14 @@ static class Checks
         try { GroundStorageColors.SampleColors(null!, new SampleItem { Color = 0x0000FF00 }); throw new Exception("Fully transparent texture was accepted"); }
         catch (InvalidDataException) { }
         Require(GroundStorageColors.SampleColors(client,new Block { Code = new("game:stone"), TextureSubIdForBlockColor = 7 }).All(v => v == 0x223344), "Native Block did not sample block atlas");
+        var looseRock = new BlockLooseStones { Code = new("game:loosestones-granite-free"), TextureSubIdForBlockColor = 7 };
+        var generator = new ServerMap.Client.ClientColormapSystem();
+        typeof(ServerMap.Client.ClientColormapSystem).GetField("api",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(generator,client);
+        var generate = typeof(ServerMap.Client.ClientColormapSystem).GetMethod("GenerateBlockColors",BindingFlags.Instance|BindingFlags.NonPublic)!;
+        var looseColors = (uint[])generate.Invoke(generator,[looseRock,new BlockPos(0,119,0)])!;
+        Require(looseColors.All(v=>v==0x223344),"Loose rocks sampled the player's underlying block instead of their own material");
 
-        var entries = new MapPalette.Entry?[] { new(0,"game:air","land",false,false,false,false,false,false,false,true), new(1,"game:groundstorage","land",false,false,false,false,false,false,false,false) { IsGroundStorage = true } };
+        var entries = new MapPalette.Entry?[] { new(0,"game:air","land",false,false,false,false,false,false,false,true), new(1,"game:groundstorage","land",false,false,false,false,false,false,false,false) { IsGroundStorage = true }, new(2,"game:looseboulders-granite-free","land",false,false,false,false,false,false,false,false) { IsLooseRock = true } };
         var palette = (MapPalette)Activator.CreateInstance(typeof(MapPalette), BindingFlags.NonPublic | BindingFlags.Instance, null, [entries], null)!;
         var property = typeof(MapPalette).GetProperty("GroundStorage", BindingFlags.NonPublic | BindingFlags.Instance)!;
         property.SetValue(palette, Activator.CreateInstance(property.PropertyType, BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance, null, [world], null));
@@ -105,10 +112,55 @@ static class Checks
             Require(!TileColorStamp.IsCurrent(tile,snapshot.Version),"Old white storage tile was not invalidated");
             TileColorStamp.Complete(tile,snapshot.Version);
             Require(TileColorStamp.IsCurrent(tile,snapshot.Version),"New storage tile stamp rejected");
+            CheckRenderedStorage(temporary, palette, wood, iron);
         }
         finally { Directory.Delete(temporary,true); }
         Console.WriteLine("PASS ground storage: native item/block sampling, RGBA, per-material pixels, mixed slots, offline pile IDs, empty storage, cache upgrade and snapshots");
         if (savePath != null) CheckSave(savePath);
+    }
+
+    // Verify the final PNG, including the persisted surface path. Testing only
+    // TryGroundColor would miss a renderer falling back to groundstorage's
+    // generic white block color or a surface cache losing its material key.
+    static void CheckRenderedStorage(string root, MapPalette palette, SampleItem wood, SampleItem iron)
+    {
+        var white = new SampleItem { Code = new("game:legitimate-white-material"), Color = 0xFFFFFFFF };
+        var samples = new Dictionary<string,uint[]> {
+            ["game:groundstorage"] = Enumerable.Repeat(0xFFFFFFu,30).ToArray(),
+            ["game:looseboulders-granite-free"] = Enumerable.Repeat(0xFFFFFFu,30).ToArray(),
+            [GroundStorageColors.Prefix+"block/game:looseboulders-granite-free"] = Enumerable.Repeat(0x8B8678u,30).ToArray(),
+            [GroundStorageColors.CompleteKey] = Enumerable.Repeat(1u,30).ToArray(),
+            [GroundStorageColors.Key(wood)] = GroundStorageColors.SampleColors(null!,wood),
+            [GroundStorageColors.Key(iron)] = GroundStorageColors.SampleColors(null!,iron),
+            [GroundStorageColors.Key(white)] = GroundStorageColors.SampleColors(null!,white)
+        };
+        Require(palette.ApplyClientColormap(JsonSerializer.Serialize(samples),6,out _), "Render palette rejected");
+        Require(palette.CaptureColors()!.Color(2,0,0,0)==((byte)139,(byte)134,(byte)120),"Cached loose-rock palette retained the player's white texture");
+        var surface = new SurfaceRegion();
+        var keys = new[] { GroundStorageColors.Key(wood), GroundStorageColors.Key(iron), GroundStorageColors.Prefix+"item/game:missing", "", GroundStorageColors.Key(white) };
+        for(var x=0;x<keys.Length;x++)
+        {
+            var i=10*512+10+x; surface.Valid[i]=true; surface.Heights[i]=119;
+            surface.Codes[i]="game:groundstorage"; surface.EntityKeys[i]=keys[x]; surface.SepiaKeys[i]="land";
+        }
+        var loosePixel=10*512+20; surface.Valid[loosePixel]=true; surface.Heights[loosePixel]=119;
+        surface.Codes[loosePixel]="game:looseboulders-granite-free"; surface.SepiaKeys[loosePixel]="land";
+        var cached = Path.Combine(root,"surface.br"); surface.Save(cached);
+        surface=SurfaceRegion.Load(cached) ?? throw new Exception("Surface cache roundtrip failed");
+        var renderer=new MapRenderer(null!,root,256,palette); var region=new ServerMap.World.ChunkKey(0,0,0);
+        Require(renderer.RenderSurface(region,surface),"Storage PNG was not rendered");
+        var decode=typeof(MapRenderer).Assembly.GetType("ServerMap.Render.PngEncoder")!.GetMethod("Decode")!;
+        byte[] Read(string name)=>(byte[])decode.Invoke(null,[File.ReadAllBytes(Path.Combine(root,"2d",name,"0","0_0.png"))])!;
+        var pixels=Read("basic");
+        byte[] Pixel(int x)=>pixels.AsSpan((10*512+10+x)*4,4).ToArray();
+        Require(Pixel(0).SequenceEqual(new byte[]{148,106,49,255}) && Pixel(1).SequenceEqual(new byte[]{67,73,81,255}), "Persisted material keys rendered as generic white instead of wood/iron");
+        Require(Pixel(2)[3]==0 && Pixel(3)[3]==0, "Missing storage material rendered the generic white block texture");
+        Require(Pixel(4).SequenceEqual(new byte[]{255,255,255,255}), "Legitimate white material was incorrectly filtered");
+        Require(pixels.AsSpan(loosePixel*4,4).SequenceEqual(new byte[]{139,134,120,255}),"Loose boulder PNG used the old white sample instead of the cached material");
+        Require(renderer.RenderSurface(region,surface,"sepia"),"Sepia storage PNG was not rendered");
+        pixels=Read("sepia");
+        Require(Pixel(0).SequenceEqual(new byte[]{172,136,88,255}),"Storage material colors changed the sepia layer");
+        Console.WriteLine("PASS storage PNG: surface roundtrip, wood/iron material pixels, unresolved materials, legitimate white, cached loose-rock repair and sepia");
     }
 
     static IWorldAccessor World(Dictionary<int,Block> blocks, Dictionary<int,Item> items) => Proxy.Make<IWorldAccessor>((method,args) => method switch {
