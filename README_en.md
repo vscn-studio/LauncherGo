@@ -31,7 +31,7 @@ This project is open source under the MIT License. You may use, copy, modify, di
 
 | Item | Current Status |
 | --- | --- |
-| Application version | Current version `2.7.1-pre.1`; Windows packaging and Release publishing override `Version` and `InformationalVersion` through `.github/workflows/windows-packages.yml`, `.github/workflows/publish-release.yml`, or `v*` tags |
+| Application version | Current version `2.7.1-pre.2`; Windows packaging and Release publishing override `Version` and `InformationalVersion` through `.github/workflows/windows-packages.yml`, `.github/workflows/publish-release.yml`, or `v*` tags |
 | Product stage | Second-generation server launcher, under active development |
 | Target framework | `.NET net10.0` |
 | Desktop UI | `Avalonia 12.0.1` and `Semi.Avalonia 12.0.1` |
