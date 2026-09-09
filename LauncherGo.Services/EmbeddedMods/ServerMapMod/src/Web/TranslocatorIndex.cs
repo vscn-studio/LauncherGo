@@ -30,8 +30,25 @@ public sealed class TranslocatorIndex
         }
         catch (Exception ex) { dirty = true; warn($"ServerMap translocator cache could not be restored: {ex.Message}"); }
     }
-    public TranslocatorPoint[] Values { get { lock (gate) return chunks.Values.SelectMany(v => v).ToArray(); } }
-    public int Count { get { lock (gate) return chunks.Values.Sum(v => v.Length); } }
+    public TranslocatorPoint[] Values
+    {
+        get
+        {
+            lock (gate)
+            {
+                // Older indexes could contain the same endpoint once per
+                // scanned chunk. The endpoint pair is the identity exposed to
+                // the web layer; collapse duplicates before serialization or
+                // rendering so two links cannot become thousands of markers.
+                return chunks.Values.SelectMany(v => v)
+                    .GroupBy(p => (p.X, p.Y, p.Z, p.TargetX, p.TargetY, p.TargetZ))
+                    .Select(g => g.First())
+                    .OrderBy(p => p.Id, StringComparer.Ordinal)
+                    .ToArray();
+            }
+        }
+    }
+    public int Count => Values.Length;
     public bool ReplaceChunk(int x, int y, int z, IEnumerable<TranslocatorPoint> points)
     {
         var next = points.Where(p => (p.X >> 5, p.Y >> 5, p.Z >> 5) == (x, y, z)).OrderBy(p => p.Id, StringComparer.Ordinal).ToArray();
@@ -50,7 +67,7 @@ public sealed class TranslocatorIndex
         lock (gate)
         {
             if (!dirty) return;
-            AtomicFile.Replace(path, temp => File.WriteAllText(temp, JsonSerializer.Serialize(chunks.Values.SelectMany(v => v))));
+            AtomicFile.Replace(path, temp => File.WriteAllText(temp, JsonSerializer.Serialize(Values)));
             dirty = false;
         }
     }
