@@ -159,6 +159,9 @@ public sealed class ServerMapModSystem : ModSystem
     private void InitializeColormapCache()
     {
         if (disposed || colormapCacheInitialized || sapi?.World.Calendar == null || materials == null) return;
+        materials.InitializeRoofing();
+        if (materials.Roofing is { } roofing)
+            sapi.Logger.Notification("ServerMap roofing definitions ready: roofs={0}; frames={1}.", roofing.RoofCount, roofing.FrameCount);
         colormapCacheInitialized = true;
         var month = Math.Clamp(sapi.World.Calendar.Month, 1, 12);
         var loaded = materials.LoadClientColormap(Path.Combine(dataRoot, "colormap"), month, message => sapi.Logger.Notification(message));
@@ -170,7 +173,7 @@ public sealed class ServerMapModSystem : ModSystem
         if (disposed || !running || sapi == null || sapi.World.Calendar == null || materials == null || colormapChannel == null) return;
         InitializeColormapCache();
         var month = Math.Clamp(sapi.World.Calendar.Month, 1, 12);
-        if (materials.HasClientColormap && materials.ClientColormapMonth == month) return;
+        if (materials.HasClientColormap && materials.ClientColormapMonth == month && materials.HasRoofingColormap && materials.HasGroundStorageColormap) return;
         var player = candidate is { } && candidate.HasPrivilege(Privilege.root)
             ? candidate : sapi.World.AllOnlinePlayers.OfType<IServerPlayer>().FirstOrDefault(value => value.HasPrivilege(Privilege.root));
         if (player == null) return;

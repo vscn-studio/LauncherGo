@@ -15,6 +15,37 @@ function pixel(png,x,y) {
 async function main() {
   const cookies={};
   for(const name of ['alice','bob','admin']) { const login=await call('/auth/login',null,{playerName:name,password:'notebook-test-password'});assert.equal(login.status,200);cookies[name]=login.headers.get('set-cookie').split(';')[0]; }
+  assert.equal((await call('/teleport',cookies.admin)).status,405);
+  assert.equal((await call('/teleport/quote',null,{x:64,z:72})).status,401);
+  assert.equal((await call('/teleport/quote',cookies.alice,{x:64,z:72},'POST',{'X-ServerMap-Request':'0'})).status,403);
+  assert.equal((await call('/teleport',cookies.admin,{quoteId:'forged',cost:0,admin:true})).status,409);
+  const initialSettings=(await call('/announcement')).json();
+  assert.equal(initialSettings.playerGearTeleportEnabled,false);
+  assert.deepEqual(initialSettings.playerTeleport,{itemCode:'game:gear-temporal',itemsPerJump:1,effectsEnabled:false,stabilityLossPercent:0,hungerLoss:0,healthLoss:0});
+  const disabled=await call('/teleport/quote',cookies.alice,{x:64,z:72});
+  assert.equal(disabled.status,403);assert.equal(disabled.json().error,'teleport_disabled');
+  const enableTeleport={html:initialSettings.html,serverWebsite:initialSettings.serverWebsite,playerGearTeleportEnabled:true};
+  assert.equal((await call('/announcement',cookies.alice,enableTeleport)).status,403);
+  assert.equal((await call('/announcement',cookies.admin,enableTeleport)).status,200);
+  assert.equal((await call('/announcement')).json().playerGearTeleportEnabled,true);
+  const teleportPolicy={itemCode:'game:gear-rusty',itemsPerJump:3,effectsEnabled:true,stabilityLossPercent:20,hungerLoss:100,healthLoss:2};
+  assert.equal((await call('/announcement',cookies.alice,{...enableTeleport,playerTeleport:teleportPolicy})).status,403);
+  assert.equal((await call('/announcement',cookies.admin,{...enableTeleport,playerTeleport:teleportPolicy})).status,200);
+  assert.deepEqual((await call('/announcement')).json().playerTeleport,teleportPolicy);
+  for(const invalid of [{itemCode:'game:nonexistent-map-test-item'},{itemsPerJump:0},{itemsPerJump:1.5},{healthLoss:-1},{stabilityLossPercent:101},{hungerLoss:100001},{itemCode:'game:*'}]){
+    assert.equal((await call('/announcement',cookies.admin,{...enableTeleport,playerTeleport:{...teleportPolicy,...invalid}})).status,400);
+    assert.deepEqual((await call('/announcement')).json().playerTeleport,teleportPolicy);
+  }
+  assert.equal((await call('/teleport/quote',cookies.alice,{x:1e100,z:0})).status,400);
+  for(const owner of ['alice','admin']){
+    const offline=await call('/teleport/quote',cookies[owner],{x:64,z:72});
+    assert.equal(offline.status,409);assert.equal(offline.json().error,'teleport_offline');
+  }
+  console.log('PASS real teleport API: login/header/method checks, server-owned confirmation, world bounds and offline accounts');
+  assert.equal((await call('/announcement',cookies.admin,{...enableTeleport,playerGearTeleportEnabled:false})).status,200);
+  assert.equal((await call('/teleport',cookies.alice,{quoteId:'old-confirmation'})).json().error,'teleport_disabled');
+  assert.equal((await call('/teleport/quote',cookies.admin,{x:64,z:72})).json().error,'teleport_offline','Admin must bypass the player toggle');
+  assert.equal((await call('/announcement',cookies.admin,enableTeleport)).status,200);
   assert.equal((await call('/my-waypoints')).status,401);
   const site={title:'社区地图 <test>',description:'World "map" & routes',keywords:'map,路线',faviconUrl:'https://example.com/favicon.ico?a=1&b=2'};
   const announcement={html:'<p>Site settings test</p>',serverWebsite:'https://example.com',site};
@@ -23,6 +54,8 @@ async function main() {
   assert.equal((await call('/announcement',cookies.admin,announcement,'POST',{'X-ServerMap-Request':'0'})).status,403);
   assert.equal((await call('/announcement',cookies.admin,announcement)).status,200);
   assert.deepEqual((await call('/announcement')).json().site,site);
+  assert.equal((await call('/announcement')).json().playerGearTeleportEnabled,true,'Older admin clients must preserve the toggle');
+  assert.deepEqual((await call('/announcement')).json().playerTeleport,teleportPolicy,'Legacy saves must preserve the teleport policy');
   const homepage=await fetch(api.replace(/\/api\/v1\/?$/,'/'));
   const html=await homepage.text();assert.equal(homepage.status,200);
   assert.match(html,/&lt;test&gt;/);assert.match(html,/name="description" content="World &quot;map&quot; &amp; routes"/);

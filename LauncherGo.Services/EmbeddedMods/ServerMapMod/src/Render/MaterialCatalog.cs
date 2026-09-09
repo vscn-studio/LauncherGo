@@ -1835,6 +1835,12 @@ public sealed class MaterialCatalog
                 "agedstraw" => new[] { "straw1", "agedstraw" },
                 "bamboo-top" => new[] { "bamboo-top", "normal-top", "top" },
                 "sides" => new[] { "normal-side", "sides", "side" },
+                // VS Roofing binds its slope faces through the variant
+                // key `material`; on a dedicated server the shape texture
+                // table may be unavailable, so resolve the block-level
+                // aliases used by roof.json before falling back to missing.
+                "material" => new[] { "normal-top", "normal-side", "top", "side", "all" },
+                "roof" => new[] { "normal-top", "normal-side", "top", "side", "all" },
                 _ => Array.Empty<string>()
             };
             foreach (var key in fallbackKeys)

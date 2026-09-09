@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$GameRoot, [switch]$ThroughHost)
+param([Parameter(Mandatory=$true)][string]$GameRoot, [switch]$ThroughHost, [ValidateSet('Debug','Release')][string]$HostConfiguration='Debug')
 $ErrorActionPreference='Stop'
 $repoRoot=Split-Path $PSScriptRoot -Parent
 $package=Join-Path $repoRoot 'LauncherGo.Services/EmbeddedMods/ServerMapMod/bin/Release/servermap.zip'
@@ -48,7 +48,7 @@ try {
         $hostPort=New-TestPort
         $hostConfig=Join-Path $hostDirectory 'host.json'
         @{ListenAddress='127.0.0.1';ListenPort=$hostPort;BackendPort=$mapPort;UseHttps=$false} | ConvertTo-Json | Set-Content -LiteralPath $hostConfig
-        $hostExe=Join-Path $repoRoot 'LauncherGo.ServerMapHost/bin/Debug/net10.0/LauncherGo.ServerMapHost.exe'
+        $hostExe=Join-Path $repoRoot "LauncherGo.ServerMapHost/bin/$HostConfiguration/net10.0/LauncherGo.ServerMapHost.exe"
         $hostInfo=[Diagnostics.ProcessStartInfo]::new($hostExe)
         $hostInfo.UseShellExecute=$false;$hostInfo.CreateNoWindow=$true;$hostInfo.RedirectStandardOutput=$true;$hostInfo.RedirectStandardError=$true
         $hostInfo.ArgumentList.Add('--config');$hostInfo.ArgumentList.Add($hostConfig)

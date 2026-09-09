@@ -15,11 +15,36 @@ public sealed class MapPalette
 {
     public const int MissingBlockId = -1;
 
-    public sealed record Entry(int Id, string Code, string MapColorCode, bool IsWater, bool IsIce, bool IsLava, bool IsOverlay, bool IsSurfaceCover, bool IsMicroBlock, bool IsPlaceholder, bool IsEmpty);
+    public sealed record Entry(int Id, string Code, string MapColorCode, bool IsWater, bool IsIce, bool IsLava, bool IsOverlay, bool IsSurfaceCover, bool IsMicroBlock, bool IsPlaceholder, bool IsEmpty)
+    {
+        public bool IsRoof { get; init; }
+        public bool IsGroundStorage { get; init; }
+    }
 
     private readonly Entry?[] entries;
+    private Block? roofingBlock;
+    internal RoofingColors? Roofing { get; private set; }
+    internal GroundStorageColors? GroundStorage { get; private set; }
     public sealed record ColorSnapshot(int Month, string Version, uint[][] Colors)
     {
+        public IReadOnlyDictionary<string, uint[]> RoofColors { get; init; } = new Dictionary<string, uint[]>();
+        public IReadOnlyDictionary<string, uint[]> GroundColors { get; init; } = new Dictionary<string, uint[]>();
+        public bool TryGroundColor(string? key, int x, int y, int z, out (byte R, byte G, byte B) color)
+        {
+            color = default;
+            if (key == null || !GroundColors.TryGetValue(key, out var values)) return false;
+            var value = values[GameMath.MurmurHash3Mod(x, y, z, values.Length)];
+            color = ((byte)(value >> 16), (byte)(value >> 8), (byte)value);
+            return true;
+        }
+        public bool TryRoofColor(string? key, int x, int y, int z, out (byte R, byte G, byte B) color)
+        {
+            color = default;
+            if (key == null || !RoofColors.TryGetValue(key, out var values)) return false;
+            var value = values[GameMath.MurmurHash3Mod(x, y, z, values.Length)];
+            color = ((byte)(value >> 16), (byte)(value >> 8), (byte)value);
+            return true;
+        }
         public bool HasColor(int id) => (uint)id < (uint)Colors.Length && Colors[id] is { Length: > 0 };
         public (byte R, byte G, byte B) Color(int id, int x, int y, int z)
         {
@@ -35,6 +60,8 @@ public sealed class MapPalette
 
     public int BlockCount => entries.Length;
     public bool HasClientColormap => Volatile.Read(ref clientColors) != null;
+    public bool HasRoofingColormap => (roofingBlock == null && Roofing == null) || CaptureColors()?.RoofColors.Keys.Any(key => key.StartsWith(RoofingColors.Prefix + "roof/", StringComparison.Ordinal)) == true;
+    public bool HasGroundStorageColormap => GroundStorage == null || CaptureColors()?.GroundColors.ContainsKey(GroundStorageColors.CompleteKey) == true;
     public int ClientColormapMonth => CaptureColors()?.Month ?? 0;
     public string ClientColormapVersion => CaptureColors()?.Version ?? "fallback";
     public ColorSnapshot? CaptureColors() => Volatile.Read(ref clientColors);
@@ -72,11 +99,22 @@ public sealed class MapPalette
                 || path.StartsWith("clutter-", StringComparison.OrdinalIgnoreCase)
                 || path.StartsWith("rocktyped-rubble", StringComparison.OrdinalIgnoreCase)
                 || path.StartsWith("banner-", StringComparison.OrdinalIgnoreCase);
-            result[block.Id] = new Entry(block.Id, code, color, water, ice, lava, overlay, cover, micro, placeholder, block.Id == 0);
+            result[block.Id] = new Entry(block.Id, code, color, water, ice, lava, overlay, cover, micro, placeholder, block.Id == 0) { IsRoof = RoofingColors.IsRoof(block), IsGroundStorage = GroundStorageColors.IsStorage(block) };
         }
         result[0] ??= new Entry(0, "game:air", "land", false, false, false, false, false, false, false, true);
         api.Logger.Notification("ServerMap 2D palette captured {0} block definitions.", result.Count(entry => entry != null));
-        return new MapPalette(result);
+        var palette = new MapPalette(result);
+        palette.roofingBlock = blocks.FirstOrDefault(block => block != null && RoofingColors.IsRoof(block));
+        if (result.Any(entry => entry?.IsGroundStorage == true)) palette.GroundStorage = new GroundStorageColors(api.World);
+        return palette;
+    }
+
+    // StartServerSide runs before Block.OnLoaded fills VS Roofing's static
+    // definitions. Capture at GameReady, before loading colors/queueing tiles,
+    // otherwise an empty dictionary is retained for the entire server session.
+    internal void InitializeRoofing()
+    {
+        if (roofingBlock != null && Roofing == null) Roofing = new RoofingColors(roofingBlock);
     }
 
     public Entry Get(int id) => (uint)id < (uint)entries.Length && entries[id] != null
@@ -100,15 +138,28 @@ public sealed class MapPalette
         if (source == null) return false;
         var byCode = entries.Where(entry => entry != null).ToDictionary(entry => entry!.Code, entry => entry!.Id, StringComparer.OrdinalIgnoreCase);
         var next = new uint[entries.Length][];
+        var roofColors = new Dictionary<string, uint[]>(StringComparer.Ordinal);
+        var groundColors = new Dictionary<string, uint[]>(StringComparer.Ordinal);
         foreach (var (code, colors) in source)
         {
-            if (!byCode.TryGetValue(code, out var id) || colors is not { Length: 30 }) continue;
+            if (colors is not { Length: 30 }) continue;
+            if (code.StartsWith(GroundStorageColors.Prefix, StringComparison.Ordinal))
+            {
+                groundColors[code] = colors.Select(value => value & 0xFFFFFF).ToArray();
+                continue;
+            }
+            if (code.StartsWith(RoofingColors.Prefix, StringComparison.Ordinal))
+            {
+                roofColors[code] = colors.Select(value => value & 0xFFFFFF).ToArray();
+                continue;
+            }
+            if (!byCode.TryGetValue(code, out var id)) continue;
             next[id] = colors.Select(value => value & 0xFFFFFF).ToArray();
             resolvedCount++;
         }
         if (resolvedCount == 0) return false;
         var version = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json))).Substring(0, 16);
-        Volatile.Write(ref clientColors, new ColorSnapshot(month, version, next));
+        Volatile.Write(ref clientColors, new ColorSnapshot(month, version, next) { RoofColors = roofColors, GroundColors = groundColors });
         return true;
     }
 

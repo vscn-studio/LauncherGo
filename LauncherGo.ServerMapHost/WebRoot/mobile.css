@@ -4,9 +4,14 @@
 @media (max-width:700px), (pointer:coarse) {
   body { --glass:#18181af5; }
   #map { height:100dvh; }
+  /* Keep panning and tile compositing on the compositor thread. */
+  #map,.leaflet-container { touch-action:pan-x pan-y; }
+  .leaflet-marker-icon,.leaflet-marker-shadow { will-change:transform; }
+  .leaflet-zoom-animated { transition:none!important; }
   .map-control,aside,#announcement,#contributors,.player-tooltip,.leaflet-control-zoom a { backdrop-filter:none!important;box-shadow:none!important;text-shadow:none; }
   #mobileTools { position:fixed;z-index:1003;top:max(8px,env(safe-area-inset-top));left:max(8px,env(safe-area-inset-left));right:max(8px,env(safe-area-inset-right));display:flex;gap:6px;pointer-events:none; }
   #mobileTools button { pointer-events:auto;min-width:44px;min-height:44px;padding:8px 12px;border-radius:6px;font:inherit;touch-action:manipulation; }
+  #mobileTools button,#contextMenu button { white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
   #mobileTools button[aria-expanded=true] { color:#8edcf1!important;background:#294049!important; }
   #mobileMenu { margin-right:auto; }
   #sidebarShade:not([hidden]) { display:block;position:fixed;inset:0;z-index:1001;background:#0006;border:0; }
@@ -42,4 +47,6 @@
   .modal textarea { min-height:100px; }
   .player-tip { grid-template-columns:20px 70px; }
   .player-tip>img { width:20px;height:20px; }
+  .leaflet-control-attribution { font-size:9px;line-height:14px;max-width:70vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+  .leaflet-popup-content { margin:10px 12px;font-size:14px; }
 }

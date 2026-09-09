@@ -8,6 +8,8 @@ public sealed class AnnouncementStore
     public sealed record Announcement(string Html, string ServerWebsite, string UpdatedBy, DateTimeOffset UpdatedAt)
     {
         public WebPageMetadata Site { get; init; } = new();
+        public bool PlayerGearTeleportEnabled { get; init; } = false;
+        public PlayerTeleportSettings PlayerTeleport { get; init; } = new();
     }
     private readonly string path;
     private readonly object gate = new();
@@ -23,14 +25,19 @@ public sealed class AnnouncementStore
 
     public Announcement Current { get { lock (gate) return current; } }
 
-    public Announcement Save(string html, string serverWebsite, string updatedBy, WebPageMetadata? site = null)
+    public Announcement Save(string html, string serverWebsite, string updatedBy, WebPageMetadata? site = null, bool? playerGearTeleportEnabled = null, PlayerTeleportSettings? playerTeleport = null)
     {
         if (html.Length > 50_000) html = html[..50_000];
         if (!Uri.TryCreate(serverWebsite, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")) serverWebsite = "https://vintagestory.at";
         else serverWebsite = uri.ToString();
         lock (gate)
         {
-            var next = new Announcement(html, serverWebsite, updatedBy, DateTimeOffset.UtcNow) { Site = (site ?? current.Site ?? new()).Normalize() };
+            var next = new Announcement(html, serverWebsite, updatedBy, DateTimeOffset.UtcNow)
+            {
+                Site = (site ?? current.Site ?? new()).Normalize(),
+                PlayerGearTeleportEnabled = playerGearTeleportEnabled ?? current.PlayerGearTeleportEnabled,
+                PlayerTeleport = (playerTeleport ?? current.PlayerTeleport ?? new()).Validate()
+            };
             AtomicFile.Replace(path, temp => File.WriteAllText(temp, JsonSerializer.Serialize(next, new JsonSerializerOptions { WriteIndented = true })));
             current = next;
             return current;

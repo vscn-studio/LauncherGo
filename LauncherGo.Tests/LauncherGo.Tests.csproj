@@ -28,6 +28,7 @@
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\TranslocatorIndex.cs" Link="ServerMap\TranslocatorIndex.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Render\TileColorStamp.cs" Link="ServerMap\TileColorStamp.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\WebPageMetadata.cs" Link="ServerMap\WebPageMetadata.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\PlayerTeleportSettings.cs" Link="ServerMap\PlayerTeleportSettings.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\AnnouncementStore.cs" Link="ServerMap\AnnouncementStore.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Util\LruCache.cs" Link="ServerMap\LruCache.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Util\ResettableCache.cs" Link="ServerMap\ResettableCache.cs" />

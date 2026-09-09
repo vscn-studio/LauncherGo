@@ -24,6 +24,7 @@ public sealed class MapRenderer
         var colors = materials.CaptureColors();
         if (colored && colors == null) return false;
         const int size = 512; var pixels = new byte[size * size * 4]; var heights = new ushort[size * size]; var ids = new int[size * size]; var hasData = new bool[size * size];
+        var entityKeys = colored ? new string?[size * size] : null;
         var topBlocks = new Dictionary<int, int>();
         var emptyPixels = 0;
         var stableColumns = 0;
@@ -97,6 +98,18 @@ public sealed class MapRenderer
                     var pixelX = chunkOffsetX * 32 + x;
                     var pixelZ = chunkOffsetZ * 32 + z;
                     var pixel = pixelZ * size + pixelX;
+                    if (materials.Get(id).IsRoof && chunks.TryGetValue(y >> 5, out var roofChunk) && roofChunk != null
+                        && roofChunk.BlockEntities.TryGetValue(new BlockPos(cx * 32 + x, y, cz * 32 + z), out var roofEntity)
+                        && materials.Roofing is { } roofing)
+                    {
+                        var roofKey = roofing.Resolve(roofEntity, out var infillId);
+                        if (entityKeys != null) entityKeys[pixel] = roofKey;
+                        if (infillId > 0) id = reader.ResolveMetaBlockLayer(cx * 32 + x, y, cz * 32 + z, infillId) ?? MapPalette.MissingBlockId;
+                    }
+                    if (colored && materials.Get(id).IsGroundStorage && materials.GroundStorage is { } storage
+                        && chunks.TryGetValue(y >> 5, out var storageChunk) && storageChunk != null
+                        && storageChunk.BlockEntities.TryGetValue(new BlockPos(cx * 32 + x, y, cz * 32 + z), out var storageEntity))
+                        entityKeys![pixel] = storage.Resolve(storageEntity, cx * 32 + x, y, cz * 32 + z);
                     hasData[pixel] = true;
                     heights[pixel] = (ushort)y;
                     if (id == MapPalette.MissingBlockId)
@@ -122,6 +135,10 @@ public sealed class MapRenderer
         // mapchunk is persisted.
         if (stableColumns == 0) return false;
 
+        var roofPixels = 0;
+        var missingRoofColors = 0;
+        var storagePixels = 0;
+        var missingStorageColors = 0;
         for (var pixelZ = 0; pixelZ < size; pixelZ++) for (var pixelX = 0; pixelX < size; pixelX++)
         {
             var pixel = pixelZ * size + pixelX;
@@ -140,20 +157,33 @@ public sealed class MapRenderer
             // LiveMap uses its explicit water-edge colour where a water/ice
             // column touches a non-water column.  Empty cells outside a region
             // count as water, matching BlockData.Get's null behaviour.
-            if (colored && !colors!.HasColor(id)) continue;
+            (byte R, byte G, byte B) entityColor = default;
+            var entityColored = colored && (colors!.TryRoofColor(entityKeys![pixel], pixelX, heights[pixel], pixelZ, out entityColor)
+                || colors.TryGroundColor(entityKeys![pixel], pixelX, heights[pixel], pixelZ, out entityColor));
+            if (colored && materials.Get(id).IsRoof)
+            {
+                roofPixels++;
+                if (!entityColored) missingRoofColors++;
+            }
+            if (colored && materials.Get(id).IsGroundStorage)
+            {
+                storagePixels++;
+                if (!entityColored) missingStorageColors++;
+            }
+            if (colored && !entityColored && (materials.Get(id).IsRoof || materials.Get(id).IsGroundStorage || !colors!.HasColor(id))) continue;
             var mapColor = !colored && materials.IsMapWaterBlock(id) && IsWaterEdge(ids, hasData, pixelX, pixelZ, size)
                 ? (R: (byte)72, G: (byte)48, B: (byte)24)
                 : colored
                     // LiveMap hashes colour variants in region-local coordinates.
                     // Using absolute world coordinates changes the selected one
                     // of the 30 client colours and makes the same block look wrong.
-                    ? colors!.Color(id, pixelX, heights[pixel], pixelZ)
+                    ? entityColored ? entityColor : colors!.Color(id, pixelX, heights[pixel], pixelZ)
                     : materials.SepiaColor(id);
             var offset = pixel * 4;
             pixels[offset] = mapColor.R; pixels[offset + 1] = mapColor.G; pixels[offset + 2] = mapColor.B; pixels[offset + 3] = 255;
         }
         ApplyLiveMapShading(pixels, heights, hasData, size);
-        reader.LogNotification("ServerMap 2D {0},{1}: stable-columns={2}; missing={3}; empty={4}; water={5}; colors={6}", key.X, key.Z, stableColumns, topBlocks.GetValueOrDefault(MapPalette.MissingBlockId), emptyPixels, ids.Count(materials.IsMapWaterBlock), colored && materials.HasClientColormap ? "client" : "stable");
+        reader.LogNotification("ServerMap 2D {0},{1}: stable-columns={2}; missing={3}; empty={4}; water={5}; colors={6}; roofing={7}; roofing-missing-color={8}; groundstorage={9}; groundstorage-missing-color={10}", key.X, key.Z, stableColumns, topBlocks.GetValueOrDefault(MapPalette.MissingBlockId), emptyPixels, ids.Count(materials.IsMapWaterBlock), colored && materials.HasClientColormap ? "client" : "stable", roofPixels, missingRoofColors, storagePixels, missingStorageColors);
         var path = Path.Combine(root, "2d", colored ? "basic" : "sepia", "0", $"{key.X}_{key.Z}.png");
         var png = PngEncoder.Encode(size, size, pixels);
         if (colored) TileColorStamp.Invalidate(path);

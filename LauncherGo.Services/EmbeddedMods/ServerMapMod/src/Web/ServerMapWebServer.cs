@@ -93,6 +93,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             if (path == "api/v1/status") { Json(context, Status(), true); return; }
             if (path == "api/v1/search") { Json(context, Search(context.Request.QueryString["q"], Principal(context.Request)), true); return; }
             if (path == "api/v1/pois") { HandlePois(context); return; }
+            if (path is "api/v1/teleport" or "api/v1/teleport/quote") { HandleTeleport(context, path.EndsWith("/quote", StringComparison.Ordinal)); return; }
             if (path == "api/v1/height") { Height(context); return; }
             if (path == "api/v1/map/metadata") { Json(context, Metadata(), true); return; }
             if (path == "api/v1/settings") { Json(context, Settings(), true); return; }
@@ -184,7 +185,7 @@ public sealed partial class ServerMapWebServer : IDisposable
 
     private void HandleAnnouncement(HttpListenerContext context)
     {
-        object Response(AnnouncementStore.Announcement value) => new { html = value.Html, serverWebsite = value.ServerWebsite, site = value.Site ?? new(), updatedBy = value.UpdatedBy, updatedAt = value.UpdatedAt };
+        object Response(AnnouncementStore.Announcement value) => new { html = value.Html, serverWebsite = value.ServerWebsite, site = value.Site ?? new(), playerGearTeleportEnabled = value.PlayerGearTeleportEnabled, playerTeleport = value.PlayerTeleport ?? new(), updatedBy = value.UpdatedBy, updatedAt = value.UpdatedAt };
         if (context.Request.HttpMethod == "GET") { Json(context, Response(announcements.Current), true); return; }
         var principal = Principal(context.Request);
         if (context.Request.HttpMethod != "POST") { Error(context, 405, "Method not allowed"); return; }
@@ -196,8 +197,26 @@ public sealed partial class ServerMapWebServer : IDisposable
             var html = document.RootElement.GetProperty("html").GetString() ?? "";
             var website = document.RootElement.TryGetProperty("serverWebsite", out var websiteValue) ? websiteValue.GetString() ?? "" : announcements.Current.ServerWebsite;
             var site = document.RootElement.TryGetProperty("site", out var siteValue) ? siteValue.Deserialize<WebPageMetadata>() : null;
-            Json(context, Response(announcements.Save(html, website, principal.PlayerName, site)), true);
+            bool? playerTeleport = document.RootElement.TryGetProperty("playerGearTeleportEnabled", out var teleportValue) ? teleportValue.GetBoolean() : null;
+            var teleportSettings = document.RootElement.TryGetProperty("playerTeleport", out var settingsValue)
+                ? settingsValue.Deserialize<PlayerTeleportSettings>(new JsonSerializerOptions { PropertyNameCaseInsensitive = true })?.Validate()
+                    ?? throw new ArgumentException("Missing teleport settings") : null;
+            // Serialize setting changes with teleport commits on the game thread:
+            // switching off cannot race the final eligibility check and payment.
+            var saved = OnGameThread(() =>
+            {
+                if (Principal(context.Request)?.IsAdmin != true) throw new UnauthorizedAccessException();
+                if (teleportSettings != null && api.World.GetItem(new AssetLocation(teleportSettings.ItemCode)) == null
+                    && api.World.GetBlock(new AssetLocation(teleportSettings.ItemCode)) == null)
+                    throw new ArgumentException("Unknown teleport item code");
+                var value = announcements.Save(html, website, principal.PlayerName, site, playerTeleport, teleportSettings);
+                events.Publish("settings", new { playerGearTeleportEnabled = value.PlayerGearTeleportEnabled, playerTeleport = value.PlayerTeleport });
+                return value;
+            });
+            Json(context, Response(saved), true);
         }
+        catch (UnauthorizedAccessException) { Error(context, 403, "Admin login required"); }
+        catch (TimeoutException) { Error(context, 503, "Game thread busy"); }
         catch { Error(context, 400, "Invalid announcement"); }
     }
 
@@ -321,7 +340,10 @@ public sealed partial class ServerMapWebServer : IDisposable
     private static void NotFound(HttpListenerContext context) { context.Response.StatusCode = 404; context.Response.Close(); }
     private static bool Safe(string part) => part.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 && !part.Contains("..", StringComparison.Ordinal) && !part.Contains('/') && !part.Contains('\\');
     private static bool IsLoopback(string address) => address.Equals("localhost", StringComparison.OrdinalIgnoreCase) || IPAddress.TryParse(address, out var ip) && IPAddress.IsLoopback(ip);
-    private static bool IsClientDisconnect(Exception exception) => exception is OperationCanceledException || exception is HttpListenerException { ErrorCode: 64 or 995 } || exception.InnerException != null && IsClientDisconnect(exception.InnerException);
+    // 1229 (ERROR_INVALID_CONNECTION) is reported by HttpListener when the
+    // browser/proxy closes a keep-alive connection while a response is being
+    // written. Treat it like the other normal client disconnect codes.
+    private static bool IsClientDisconnect(Exception exception) => exception is OperationCanceledException || exception is HttpListenerException { ErrorCode: 64 or 995 or 1229 } || exception.InnerException != null && IsClientDisconnect(exception.InnerException);
 
     private object Metadata()
     {
@@ -335,7 +357,7 @@ public sealed partial class ServerMapWebServer : IDisposable
         var maxZoom = TilePyramidBuilder.MaxZoom;
         var span = Math.Max(maxX - minX, maxZ - minZ);
         var maxZoomOut = Math.Clamp((int)Math.Ceiling(Math.Log2(Math.Max(1d, span / 512d))) + 1, 2, 8);
-        return new { version = 11, serverName = api.Server.Config.ServerName, updatedAt = startedAt, serverMapVersion = "0.3.0", tileVersion = typeof(ServerMapWebServer).Assembly.ManifestModule.ModuleVersionId.ToString("N"), colorVersion = materials.ClientColormapVersion, tileSize = 512, minZoom = 0, maxZoom, maxZoomOut, origin = new[] { 0, 0 }, scale = 1, zAxis = "positive-down", bounds = new[] { minX, minZ, maxX, maxZ }, spawn = new { x = api.World.DefaultSpawnPosition?.X ?? 0, z = api.World.DefaultSpawnPosition?.Z ?? 0 }, center = new { x = defaultX, z = defaultZ }, renderers = new { basic = baseTiles["basic"].Count, sepia = baseTiles["sepia"].Count }, colormapReady = materials.HasClientColormap };
+        return new { version = 11, serverName = api.Server.Config.ServerName, updatedAt = startedAt, serverMapVersion = "0.3.1", tileVersion = typeof(ServerMapWebServer).Assembly.ManifestModule.ModuleVersionId.ToString("N"), colorVersion = materials.ClientColormapVersion, tileSize = 512, minZoom = 0, maxZoom, maxZoomOut, origin = new[] { 0, 0 }, scale = 1, zAxis = "positive-down", bounds = new[] { minX, minZ, maxX, maxZ }, spawn = new { x = api.World.DefaultSpawnPosition?.X ?? 0, z = api.World.DefaultSpawnPosition?.Z ?? 0 }, center = new { x = defaultX, z = defaultZ }, renderers = new { basic = baseTiles["basic"].Count, sepia = baseTiles["sepia"].Count }, colormapReady = materials.HasClientColormap };
     }
     private object Settings() => new { version = 7, enable2d = config.Enable2D, colormapReady = materials.HasClientColormap, colormapMonth = materials.ClientColormapMonth, ranges = Metadata() };
     private object Manifest() => new { version = layerVersions.Values.DefaultIfEmpty().Max(), layers = Layers.Select(name => new { id = name, version = layerVersions[name], visible = name is "players" or "spawn" or "claims" or "translocators" or "pois" }).ToArray() };

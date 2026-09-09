@@ -3,8 +3,8 @@
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
-using HarmonyLib;
 using ServerMap.Network;
+using ServerMap.Render;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Config;
@@ -30,13 +30,8 @@ public sealed class ClientColormapSystem : ModSystem
     private const int BlocksPerBatch = 64;
     private const int ChunksPerBatch = 2;
 
-    [ThreadStatic] private static BlockPos? overridePosition;
-    [ThreadStatic] private static float? overrideMonth;
-    private static readonly object PatchGate = new();
-
     private ICoreClientAPI? api;
     private IClientNetworkChannel? channel;
-    private Harmony? harmony;
     private long tickListenerId;
     private int requestedMonth;
     private int sentMonth;
@@ -44,7 +39,6 @@ public sealed class ClientColormapSystem : ModSystem
     private bool wasConnected;
     private Queue<ClientWaypointIconPacket>? waypointIcons;
     private bool iconsSent;
-    private bool patched;
     private bool disposed;
     private CancellationTokenSource stop = new();
 
@@ -53,6 +47,9 @@ public sealed class ClientColormapSystem : ModSystem
     private BlockPos? generationPosition;
     private int generationMonth;
     private int generationIndex;
+    private IEnumerator<RoofingColors.Sample>? roofingSamples;
+    private Block? roofingBlock;
+    private IEnumerator<CollectibleObject>? groundSamples;
     private byte[]? transferData;
     private string? transferId;
     private int transferIndex;
@@ -67,7 +64,6 @@ public sealed class ClientColormapSystem : ModSystem
             .RegisterMessageType<ClientColormapChunkPacket>()
             .RegisterMessageType<ClientWaypointIconPacket>()
             .SetMessageHandler<ServerColormapRequestPacket>(OnColormapRequested);
-        harmony = new Harmony("servermap-livemap-colormap");
         tickListenerId = api.Event.RegisterGameTickListener(_ => CheckForGeneration(), 1000);
         api.Logger.Notification("ServerMap client colormap channel ready.");
     }
@@ -139,8 +135,6 @@ public sealed class ClientColormapSystem : ModSystem
                 AbortGeneration(null);
                 return;
             }
-
-            EnsurePatched();
             var player = api.World.Player?.Entity;
             if (player == null)
             {
@@ -152,6 +146,10 @@ public sealed class ClientColormapSystem : ModSystem
             generationPosition = player.SidedPos.AsBlockPos;
 #pragma warning restore CS0618
             generationBlocks = api.World.Blocks.Where(block => block?.Code is not null).ToList();
+            roofingBlock = generationBlocks.FirstOrDefault(RoofingColors.IsRoof);
+            roofingSamples = roofingBlock == null ? null : new RoofingColors(roofingBlock).Samples(api.World).GetEnumerator();
+            groundSamples = generationBlocks.Any(GroundStorageColors.IsStorage)
+                ? generationBlocks.Cast<CollectibleObject>().Concat(api.World.Items).Where(c => c?.Code != null && !c.IsMissing).GetEnumerator() : null;
             generationColors = new Dictionary<string, uint[]>(StringComparer.Ordinal);
             generationMonth = month;
             generationIndex = 0;
@@ -173,11 +171,8 @@ public sealed class ClientColormapSystem : ModSystem
                 AbortGeneration(null);
                 return;
             }
-
-            overridePosition = generationPosition;
             // LiveMap generates the middle of the selected month, not the
             // current day within that month.
-            overrideMonth = (generationMonth - 0.5f) / 12f;
             var end = Math.Min(generationBlocks.Count, generationIndex + BlocksPerBatch);
             for (; generationIndex < end; generationIndex++)
             {
@@ -197,9 +192,50 @@ public sealed class ClientColormapSystem : ModSystem
                 api.Event.EnqueueMainThreadTask(ProcessGenerationBatch, "servermap-colormap-batch");
                 return;
             }
-
-            overridePosition = null;
-            overrideMonth = null;
+            // RoofBlock.GetColor(playerPosition) has no roof entity to inspect.
+            // Sample the mod's material textures independently, including items
+            // (shingles, plates, planks) which have no block-id colormap entry.
+            if (roofingSamples != null)
+            {
+                for (var i = 0; i < BlocksPerBatch; i++)
+                {
+                    if (!roofingSamples.MoveNext())
+                    {
+                        roofingSamples.Dispose(); roofingSamples = null;
+                        api.Logger.Notification("ServerMap sampled {0} VS Roofing material colors.", generationColors.Keys.Count(k => k.StartsWith(RoofingColors.Prefix, StringComparison.Ordinal)));
+                        break;
+                    }
+                    var sample = roofingSamples.Current;
+                    try { generationColors[sample.Key] = GenerateRoofColors(sample, generationPosition); }
+                    catch (Exception ex) { api.Logger.Warning("ServerMap skipped roofing colormap {0}: {1}", sample.Key, ex.Message); }
+                }
+                if (roofingSamples != null)
+                {
+                    api.Event.EnqueueMainThreadTask(ProcessGenerationBatch, "servermap-roofing-colormap-batch");
+                    return;
+                }
+            }
+            if (groundSamples != null)
+            {
+                for (var i = 0; i < BlocksPerBatch; i++)
+                {
+                    if (!groundSamples.MoveNext())
+                    {
+                        groundSamples.Dispose(); groundSamples = null;
+                        generationColors[GroundStorageColors.CompleteKey] = Enumerable.Repeat(1u, 30).ToArray();
+                        api.Logger.Notification("ServerMap sampled {0} ground-storage collectible colors.", generationColors.Keys.Count(k => k.StartsWith(GroundStorageColors.Prefix, StringComparison.Ordinal)) - 1);
+                        break;
+                    }
+                    var collectible = groundSamples.Current;
+                    try { generationColors[GroundStorageColors.Key(collectible)] = GroundStorageColors.SampleColors(api, collectible); }
+                    catch (Exception ex) { api.Logger.Warning("ServerMap skipped ground-storage colormap {0}: {1}", collectible.Code, ex.Message); }
+                }
+                if (groundSamples != null)
+                {
+                    api.Event.EnqueueMainThreadTask(ProcessGenerationBatch, "servermap-groundstorage-colormap-batch");
+                    return;
+                }
+            }
             var json = JsonSerializer.Serialize(generationColors);
             var month = generationMonth;
             var clientApi = api;
@@ -258,6 +294,7 @@ public sealed class ClientColormapSystem : ModSystem
                 Buffer.BlockCopy(transferData, offset, data, 0, length);
                 channel.SendPacket(new ClientColormapChunkPacket
                 {
+                    ProtocolVersion = 2,
                     TransferId = transferId,
                     ChunkIndex = transferIndex,
                     TotalChunks = transferTotal,
@@ -300,6 +337,28 @@ public sealed class ClientColormapSystem : ModSystem
         return variants;
     }
 
+    private uint[] GenerateRoofColors(RoofingColors.Sample sample, BlockPos position)
+    {
+        var client = api ?? throw new InvalidOperationException("Client API is unavailable.");
+        sample.Texture.Bake(client.Assets);
+        var baked = sample.Texture.Baked;
+        if (sample.Texture.Alternates != null && baked.BakedVariants is { Length: > 0 })
+            baked = baked.BakedVariants[GameMath.MurmurHash3Mod(position.X, position.Y, position.Z, baked.BakedVariants.Length)];
+        if (!client.BlockTextureAtlas.GetOrInsertTexture(baked.BakedName, out _, out var atlasPosition)
+            || atlasPosition == null || atlasPosition == client.BlockTextureAtlas.UnknownTexturePosition)
+            throw new InvalidDataException($"Roof texture is unavailable: {baked.BakedName}");
+        var baseColor = BgraToRgb((uint)atlasPosition.AvgColor);
+        var variants = new uint[30];
+        for (var i = 0; i < variants.Length; i++)
+        {
+            var randomColor = client.BlockTextureAtlas.GetRandomColor(atlasPosition, i);
+            if (sample.TintGrass && roofingBlock != null && client.World.GetColorMapData(roofingBlock, position.X, position.Y, position.Z) is { } climate)
+                randomColor = client.World.ApplyColorMapOnRgba("climatePlantTint", "seasonalGrass", randomColor, climate.Rainfall, climate.Temperature, true);
+            variants[i] = Blend(baseColor, (uint)randomColor, .4f) & 0xFFFFFF;
+        }
+        return variants;
+    }
+
     private void LogSample(Block block, uint baseColor, uint randomColor, uint blended)
     {
         if (api == null || block.Code == null) return;
@@ -315,39 +374,20 @@ public sealed class ClientColormapSystem : ModSystem
     {
         if (api == null) return 0;
         if (block is BlockRequireSolidGround)
-            return Reverse((uint)api.BlockTextureAtlas.GetAverageColor(block.TextureSubIdForBlockColor));
+            return BgraToRgb((uint)api.BlockTextureAtlas.GetAverageColor(block.TextureSubIdForBlockColor));
         if (block is BlockPlant)
         {
             var grass = api.World.GetBlock(new AssetLocation("game:tallgrass-tall-free"));
-            if (grass != null) return Reverse((uint)grass.GetColor(api, position));
+            if (grass != null) return BgraToRgb((uint)grass.GetColor(api, position));
         }
-        return Reverse((uint)block.GetColor(api, position));
-    }
-
-    private void EnsurePatched()
-    {
-        if (patched || harmony == null) return;
-        lock (PatchGate)
-        {
-            if (patched || harmony == null) return;
-            var getter = AccessTools.PropertyGetter(typeof(GameCalendar), "YearRel");
-            if (getter == null) throw new MissingMethodException(typeof(GameCalendar).FullName, "get_YearRel");
-            harmony.Patch(getter, prefix: new HarmonyMethod(typeof(ClientColormapSystem), nameof(PreYearRel)));
-            patched = true;
-        }
-    }
-
-    public static bool PreYearRel(ref float __result)
-    {
-        if (overrideMonth == null) return true;
-        __result = overrideMonth.Value;
-        return false;
+        return BgraToRgb((uint)block.GetColor(api, position));
     }
 
     private void FinishGeneration()
     {
-        overridePosition = null;
-        overrideMonth = null;
+        roofingSamples?.Dispose(); roofingSamples = null;
+        groundSamples?.Dispose(); groundSamples = null;
+        roofingBlock = null;
         generationBlocks = null;
         generationColors = null;
         generationPosition = null;
@@ -362,8 +402,6 @@ public sealed class ClientColormapSystem : ModSystem
     private void AbortGeneration(Exception? exception)
     {
         if (exception != null) api?.Logger.Warning("ServerMap client colormap generation failed: {0}", exception);
-        overridePosition = null;
-        overrideMonth = null;
         FinishGeneration();
     }
 
@@ -374,17 +412,12 @@ public sealed class ClientColormapSystem : ModSystem
         return output.ToArray();
     }
 
-    // This intentionally mirrors livemap.data.Color.Reverse, including its
-    // alpha placement. The generated payload drops alpha after blending, but
-    // preserving this bit-level behavior keeps custom/transparent blocks
-    // identical to the reference implementation.
-    private static uint Reverse(uint color)
+    private static uint BgraToRgb(uint color)
     {
-        var alpha = (color >> 24) & 0xFF;
-        var red = (color >> 16) & 0xFF;
+        var red = color & 0xFF;
         var green = (color >> 8) & 0xFF;
-        var blue = color & 0xFF;
-        return alpha | red | (green << 8) | (blue << 16);
+        var blue = (color >> 16) & 0xFF;
+        return (red << 16) | (green << 8) | blue;
     }
 
     private static uint Blend(uint color0, uint color1, float ratio)
@@ -401,11 +434,9 @@ public sealed class ClientColormapSystem : ModSystem
         disposed = true;
         stop.Cancel();
         AbortGeneration(null);
-        if (harmony != null && patched) harmony.UnpatchAll(harmony.Id);
         if (api != null && tickListenerId != 0) api.Event.UnregisterGameTickListener(tickListenerId);
         channel = null;
         api = null;
-        harmony = null;
         stop.Dispose();
         base.Dispose();
     }

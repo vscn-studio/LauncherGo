@@ -21,6 +21,8 @@ public sealed class ServerColormapRequestPacket
 [ProtoContract]
 public sealed class ClientColormapChunkPacket
 {
+    /// <summary>Versioned material summary wire format.</summary>
+    [ProtoMember(6)] public int ProtocolVersion { get; set; } = 2;
     [ProtoMember(1)] public string TransferId { get; set; } = "";
     [ProtoMember(2)] public int ChunkIndex { get; set; }
     [ProtoMember(3)] public int TotalChunks { get; set; }

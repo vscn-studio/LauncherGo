@@ -54,7 +54,7 @@ $mods = @(
 foreach ($mod in $mods) {
     $info = Get-Content -LiteralPath (Join-Path $repository "LauncherGo.Services/EmbeddedMods/$($mod.Folder)/modinfo.json") -Raw | ConvertFrom-Json
     Assert-Equal $info.modid $mod.Id 'Mod identity'
-    if ($info.version -notmatch '^\d+\.\d+\.0$') { throw "Invalid release version: $($mod.Id) $($info.version)" }
+    if ($info.version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid release version: $($mod.Id) $($info.version)" }
     $source = Get-Content -LiteralPath (Join-Path $repository $mod.Source) -Raw
     $match = [regex]::Match($source, $mod.Symbol + '\s*=\s*"([^"]+)"')
     Assert-Equal $match.Groups[1].Value $info.version "Deployment/API version for $($mod.Id)"

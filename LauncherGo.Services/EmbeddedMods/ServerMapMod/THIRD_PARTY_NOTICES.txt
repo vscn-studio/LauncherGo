@@ -20,6 +20,9 @@ These portions were integrated and modified for ServerMap; their original
 copyright is not replaced by LauncherGo's copyright.
 
 WebCartographer and Leaflet
+The server-side teleport route calculation adapts WebCartographer's shortest
+route algorithm. Copyright (c) 2023 Th3Dilli, MIT License; the complete license
+is included in WebCartographer-LICENSE.txt.
 The browser route planner, images, icons and Leaflet library are distributed
 separately in LauncherGo.ServerMapHost/WebRoot, not in this API-only mod ZIP.
 Their sources, copyrights and complete license texts are identified in that

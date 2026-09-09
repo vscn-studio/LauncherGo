@@ -41,7 +41,8 @@ public sealed class ClientColormapReceiver : IDisposable
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(packet.TransferId) || packet.TransferId.Length > 80
+        if (packet.ProtocolVersion != 2
+            || string.IsNullOrWhiteSpace(packet.TransferId) || packet.TransferId.Length > 80
             || packet.TotalChunks is <= 0 or > MaxChunks || packet.ChunkIndex < 0
             || packet.ChunkIndex >= packet.TotalChunks || packet.Data is not { Length: > 0 and <= MaxChunkBytes }
             || packet.Month is < 1 or > 12)

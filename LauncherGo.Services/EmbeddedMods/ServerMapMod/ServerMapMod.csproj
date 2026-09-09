@@ -21,12 +21,12 @@
     <Reference Include="SkiaSharp" HintPath="$(VINTAGE_STORY)\Lib\SkiaSharp.dll" Private="false" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="modinfo.json;README.txt;LICENSE.txt;THIRD_PARTY_NOTICES.txt;VS-LiveMap-Revival-LICENSE.txt;assets\**" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="modinfo.json;README.txt;LICENSE.txt;THIRD_PARTY_NOTICES.txt;VS-LiveMap-Revival-LICENSE.txt;WebCartographer-LICENSE.txt;assets\**" CopyToOutputDirectory="PreserveNewest" />
     <Compile Remove="src\Render\MaterialCatalog.cs;src\Render\MeshTile.cs" />
   </ItemGroup>
   <Target Name="Package" AfterTargets="Build">
     <ItemGroup>
-      <_RequiredLicense Include="$(OutputPath)LICENSE.txt;$(OutputPath)THIRD_PARTY_NOTICES.txt;$(OutputPath)VS-LiveMap-Revival-LICENSE.txt" />
+      <_RequiredLicense Include="$(OutputPath)LICENSE.txt;$(OutputPath)THIRD_PARTY_NOTICES.txt;$(OutputPath)VS-LiveMap-Revival-LICENSE.txt;$(OutputPath)WebCartographer-LICENSE.txt" />
     </ItemGroup>
     <Error Condition="!Exists('%(_RequiredLicense.Identity)')" Text="Missing ServerMap license: %(_RequiredLicense.Identity)" />
     <ZipDirectory SourceDirectory="$(OutputPath)" DestinationFile="$(PackagePath)" Overwrite="true" />
