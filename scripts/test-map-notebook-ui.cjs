@@ -101,6 +101,8 @@ async function main(){
    const assetNotice=page.locator('#contributors [data-i18n="gameAssetNotice"]');
    assert.match(await assetNotice.textContent(),/不随 LauncherGo 安装包、携带版或模组 ZIP 分发/);
    await page.locator('#contributors .right').click();
+   assert.equal(await assetNotice.isVisible(),false);
+   await page.locator('#contributors .contributors-notice summary').click();
    assert.equal(await assetNotice.isVisible(),true);
    await page.locator('#contributors .right').click();
    return {page,errors};

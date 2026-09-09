@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
@@ -11,6 +12,7 @@ using ServerMap.Util;
 using Vintagestory.API.Common;
 using Vintagestory.API.MathTools;
 using Vintagestory.API.Server;
+using Vintagestory.API.Config;
 using Vintagestory.GameContent;
 
 namespace ServerMap.Web;
@@ -341,7 +343,67 @@ public sealed partial class ServerMapWebServer : IDisposable
         var maxZoom = TilePyramidBuilder.MaxZoom;
         var span = Math.Max(maxX - minX, maxZ - minZ);
         var maxZoomOut = Math.Clamp((int)Math.Ceiling(Math.Log2(Math.Max(1d, span / 512d))) + 1, 2, 8);
-        return new { version = 11, serverName = api.Server.Config.ServerName, updatedAt = startedAt, serverMapVersion = "0.3.1", tileVersion = typeof(ServerMapWebServer).Assembly.ManifestModule.ModuleVersionId.ToString("N"), colorVersion = materials.ClientColormapVersion, tileSize = 512, minZoom = 0, maxZoom, maxZoomOut, origin = new[] { 0, 0 }, scale = 1, zAxis = "positive-down", bounds = new[] { minX, minZ, maxX, maxZ }, spawn = new { x = api.World.DefaultSpawnPosition?.X ?? 0, z = api.World.DefaultSpawnPosition?.Z ?? 0 }, center = new { x = defaultX, z = defaultZ }, renderers = new { basic = baseTiles["basic"].Count, sepia = baseTiles["sepia"].Count }, colormapReady = materials.HasClientColormap };
+        using var process = Process.GetCurrentProcess();
+        var cacheBytes = CacheSizeBytes(root);
+        var mapSizeX = api.World.BlockAccessor.MapSizeX;
+        var mapSizeZ = api.World.BlockAccessor.MapSizeZ;
+        var mapSizeY = api.World.BlockAccessor.MapSizeY;
+        return new
+        {
+            version = 12,
+            serverName = api.Server.Config.ServerName,
+            updatedAt = startedAt,
+            serverMapVersion = "0.3.1",
+            tileVersion = typeof(ServerMapWebServer).Assembly.ManifestModule.ModuleVersionId.ToString("N"),
+            colorVersion = materials.ClientColormapVersion,
+            tileSize = 512,
+            minZoom = 0,
+            maxZoom,
+            maxZoomOut,
+            origin = new[] { 0, 0 },
+            scale = 1,
+            zAxis = "positive-down",
+            bounds = new[] { minX, minZ, maxX, maxZ },
+            spawn = new { x = api.World.DefaultSpawnPosition?.X ?? 0, z = api.World.DefaultSpawnPosition?.Z ?? 0 },
+            center = new { x = defaultX, z = defaultZ },
+            renderers = new { basic = baseTiles["basic"].Count, sepia = baseTiles["sepia"].Count },
+            colormapReady = materials.HasClientColormap,
+            // Additional site information used by the compact website panel.
+            server = new { version = GameVersion.LongGameVersion, apiVersion = GameVersion.APIVersion, cpuCount = Environment.ProcessorCount, workingSetBytes = process.WorkingSet64 },
+            map = new { sizeX = mapSizeX, sizeY = mapSizeY, sizeZ = mapSizeZ, exploredTiles = all.Length, exploredBounds = new[] { minX, minZ, maxX, maxZ } },
+            cache = new { bytes = cacheBytes, files = CacheFileCount(root) },
+            rendering = new { elapsedMilliseconds = RenderMilliseconds, extractedColumns = ExtractedColumns, coloredTiles = ColoredTiles, parentTiles = ParentTiles, indexedColumns = IndexedColumns },
+            // Flat aliases keep the metadata easy to consume for lightweight
+            // custom web roots that do not understand the nested objects.
+            serverVersion = GameVersion.LongGameVersion,
+            mapVersion = "0.3.1",
+            mapSize = $"{mapSizeX} × {mapSizeZ} × {mapSizeY}",
+            cacheSizeBytes = cacheBytes,
+            renderTimeMs = RenderMilliseconds,
+            serverConfig = new { cpu = $"{Environment.ProcessorCount} cores", ram = FormatBytes(process.WorkingSet64), maxClients = api.Server.Config.MaxClients }
+        };
+    }
+
+    private static string FormatBytes(long value)
+    {
+        if (value < 1024) return value + " B";
+        var units = new[] { "KB", "MB", "GB", "TB" }; var size = (double)value; var index = -1;
+        do { size /= 1024; index++; } while (size >= 1024 && index < units.Length - 1);
+        return $"{size:0.#} {units[index]}";
+    }
+
+    private static long CacheSizeBytes(string path)
+    {
+        try { return Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories).Sum(file => new FileInfo(file).Length); }
+        catch (IOException) { return 0; }
+        catch (UnauthorizedAccessException) { return 0; }
+    }
+
+    private static int CacheFileCount(string path)
+    {
+        try { return Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories).Count(); }
+        catch (IOException) { return 0; }
+        catch (UnauthorizedAccessException) { return 0; }
     }
     private object Settings() => new { version = 7, enable2d = config.Enable2D, colormapReady = materials.HasClientColormap, colormapMonth = materials.ClientColormapMonth, ranges = Metadata() };
     private object Manifest() => new { version = layerVersions.Values.DefaultIfEmpty().Max(), layers = Layers.Select(name => new { id = name, version = layerVersions[name], visible = name is "players" or "spawn" or "claims" or "translocators" or "pois" }).ToArray() };
@@ -482,8 +544,13 @@ public sealed partial class ServerMapWebServer : IDisposable
     public string ParentDependencies(string name, int zoom, int x, int z) => pyramid.Dependencies(name, zoom, x, z);
     public void RenderParent(string name, int zoom, int x, int z, string reason, bool rebuild)
     {
-        if (pyramid.BuildParent(name, zoom, x, z)) { Interlocked.Increment(ref ParentTiles); events.Publish("tile", new { renderer = name, zoom, x, z }); }
-        if (zoom < TilePyramidBuilder.MaxZoom) RequestParent?.Invoke(name, zoom + 1, TilePyramidBuilder.FloorDiv(x, 2), TilePyramidBuilder.FloorDiv(z, 2), reason, rebuild);
+        var watch = Stopwatch.StartNew();
+        try
+        {
+            if (pyramid.BuildParent(name, zoom, x, z)) { Interlocked.Increment(ref ParentTiles); events.Publish("tile", new { renderer = name, zoom, x, z }); }
+            if (zoom < TilePyramidBuilder.MaxZoom) RequestParent?.Invoke(name, zoom + 1, TilePyramidBuilder.FloorDiv(x, 2), TilePyramidBuilder.FloorDiv(z, 2), reason, rebuild);
+        }
+        finally { Interlocked.Add(ref RenderMilliseconds, watch.ElapsedMilliseconds); }
     }
     private readonly object objectGate = new();
     private bool indexRepairComplete;
@@ -491,7 +558,7 @@ public sealed partial class ServerMapWebServer : IDisposable
     public void MarkIndexReady() { translocators.Save(); indexRepairComplete = true; }
     public long ExtractedColumns => renderer.ExtractedColumns;
     public long ReusedColumns => renderer.ReusedColumns;
-    public long ColoredTiles, ParentTiles, IndexedColumns;
+    public long ColoredTiles, ParentTiles, IndexedColumns, RenderMilliseconds;
     public int TranslocatorCount => translocators.Values.Length;
     public bool SurfaceExists(ChunkKey key) => File.Exists(SurfaceRegion.PathFor(root, key.X, key.Z));
     public bool SurfaceIsEmpty(ChunkKey key) => surfaceReads.TryGet(key, out var value) && value != null && !value.Columns.Any(c => c);
@@ -540,42 +607,47 @@ public sealed partial class ServerMapWebServer : IDisposable
     }
     public bool RenderCached(ChunkKey key, RegionWork work)
     {
-        var path = SurfaceRegion.PathFor(root, key.X, key.Z);
-        var existing = SurfaceRegion.Load(path);
-        var surface = existing ?? new SurfaceRegion();
-        var changed = existing == null;
-        var patches = new List<string>();
-        for (var index = 0; index < 256; index++)
+        var watch = Stopwatch.StartNew();
+        try
         {
-            var patchPath = PatchPath(key, index);
-            if (!File.Exists(patchPath)) { if (existing == null) throw new DamagedColumnException(index); continue; }
-            var patch = SurfaceRegion.Load(patchPath);
-            if (patch?.Width != 32) throw new DamagedColumnException(index);
-            changed |= !surface.MatchesColumn(index, patch);
-            surface.MergeColumn(index, patch); patches.Add(patchPath);
-        }
-        if (changed)
-        {
-            surface.Generation = work.Revision; surface.ContentVersion = Guid.NewGuid().ToString("N"); surface.Save(path);
-        }
-        // Durable regional replacement precedes patch cleanup and task acknowledgement.
-        foreach (var patch in patches) File.Delete(patch);
-        surfaceReads.Set(key, surface);
-        foreach (var name in work.ColorOnly ? new[] { "basic" } : Renderers)
-        {
-            var tile = Path.Combine(root, "2d", name, "0", $"{key.X}_{key.Z}.png");
-            var stamp = ImagePrefix(name) + surface.ContentVersion + (name == "basic" ? ":" + materials.ClientColormapVersion : "");
-            if (work.ForceImages || work.Reason == "render" || !File.Exists(tile) || !File.Exists(tile + ".surface") || File.ReadAllText(tile + ".surface") != stamp || !HasBaseTile(name, key))
+            var path = SurfaceRegion.PathFor(root, key.X, key.Z);
+            var existing = SurfaceRegion.Load(path);
+            var surface = existing ?? new SurfaceRegion();
+            var changed = existing == null;
+            var patches = new List<string>();
+            for (var index = 0; index < 256; index++)
             {
-                if (!renderer.RenderSurface(key, surface, name)) continue;
-                AtomicFile.Replace(tile + ".surface", temp => File.WriteAllText(temp, stamp));
-                Interlocked.Increment(ref ColoredTiles);
-                baseTiles[name].TryAdd((key.X, key.Z), 0);
-                events.Publish("tile", new { renderer = name, zoom = 0, x = key.X, z = key.Z });
+                var patchPath = PatchPath(key, index);
+                if (!File.Exists(patchPath)) { if (existing == null) throw new DamagedColumnException(index); continue; }
+                var patch = SurfaceRegion.Load(patchPath);
+                if (patch?.Width != 32) throw new DamagedColumnException(index);
+                changed |= !surface.MatchesColumn(index, patch);
+                surface.MergeColumn(index, patch); patches.Add(patchPath);
             }
-            RequestParent?.Invoke(name, 1, TilePyramidBuilder.FloorDiv(key.X, 2), TilePyramidBuilder.FloorDiv(key.Z, 2), work.Reason, work.Rebuild);
+            if (changed)
+            {
+                surface.Generation = work.Revision; surface.ContentVersion = Guid.NewGuid().ToString("N"); surface.Save(path);
+            }
+            // Durable regional replacement precedes patch cleanup and task acknowledgement.
+            foreach (var patch in patches) File.Delete(patch);
+            surfaceReads.Set(key, surface);
+            foreach (var name in work.ColorOnly ? new[] { "basic" } : Renderers)
+            {
+                var tile = Path.Combine(root, "2d", name, "0", $"{key.X}_{key.Z}.png");
+                var stamp = ImagePrefix(name) + surface.ContentVersion + (name == "basic" ? ":" + materials.ClientColormapVersion : "");
+                if (work.ForceImages || work.Reason == "render" || !File.Exists(tile) || !File.Exists(tile + ".surface") || File.ReadAllText(tile + ".surface") != stamp || !HasBaseTile(name, key))
+                {
+                    if (!renderer.RenderSurface(key, surface, name)) continue;
+                    AtomicFile.Replace(tile + ".surface", temp => File.WriteAllText(temp, stamp));
+                    Interlocked.Increment(ref ColoredTiles);
+                    baseTiles[name].TryAdd((key.X, key.Z), 0);
+                    events.Publish("tile", new { renderer = name, zoom = 0, x = key.X, z = key.Z });
+                }
+                RequestParent?.Invoke(name, 1, TilePyramidBuilder.FloorDiv(key.X, 2), TilePyramidBuilder.FloorDiv(key.Z, 2), work.Reason, work.Rebuild);
+            }
+            return materials.HasClientColormap;
         }
-        return materials.HasClientColormap;
+        finally { Interlocked.Add(ref RenderMilliseconds, watch.ElapsedMilliseconds); }
     }
     public void RefreshObjectColumn(int x, int z, int[]? selectedYs = null, Action? validate = null)
     {

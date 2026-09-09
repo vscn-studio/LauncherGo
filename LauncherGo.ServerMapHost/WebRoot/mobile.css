@@ -39,11 +39,12 @@
   .coordinates { left:max(8px,env(safe-area-inset-left));bottom:calc(8px + env(safe-area-inset-bottom));font-size:11px;max-width:calc(100vw - 84px);overflow:hidden;text-overflow:ellipsis; }
   .leaflet-control-zoom { left:max(8px,env(safe-area-inset-left));bottom:calc(48px + env(safe-area-inset-bottom)); }
   .leaflet-control-zoom a { width:44px!important;height:44px!important;line-height:44px!important; }
-  #contributors,aside.show~#contributors,aside:hover~#contributors { right:max(8px,env(safe-area-inset-right));bottom:calc(8px + env(safe-area-inset-bottom));max-width:calc(100vw - 16px);z-index:1000;transition:none; }
-  #contributors .left { gap:5px;padding:8px 10px;max-height:65dvh; }
+  #contributors,aside.show~#contributors,aside:hover~#contributors { right:max(8px,env(safe-area-inset-right));bottom:calc(8px + env(safe-area-inset-bottom));width:min(440px,calc(100vw - 16px));max-width:calc(100vw - 16px);z-index:1000;transition:none; }
+  #contributors .contributors-panel { max-height:65dvh;padding:8px 10px; }
+  #contributors .contributors-table th { width:40%;padding-right:8px; }
   #contributors .contributors-links { grid-template-columns:1fr;gap:3px;padding-top:5px; }
   #contributors .contributors-notice { padding-top:6px;font-size:10px;line-height:1.45; }
-  #contributors .right { width:68px;flex-basis:68px;min-height:44px;padding:12px 4px;font-size:11px; }
+  #contributors .right { width:100%;min-height:40px;padding:8px 10px;font-size:clamp(11px,3.5vw,14px);border-left:0; }
   #routeInfo { bottom:calc(50px + env(safe-area-inset-bottom))!important;left:62px!important;right:8px;transform:none!important;max-height:30dvh;overflow:auto;font-size:12px; }
   #contextMenu { max-height:calc(100dvh - 80px);overflow:auto; }
   .modal { padding:12px;max-height:calc(100dvh - 28px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
