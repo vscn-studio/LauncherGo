@@ -103,8 +103,9 @@ public sealed class ServerMapModSystem : ModSystem
     }
     private void OnChunkColumnLoaded(Vec2i chunkPos, IWorldChunk[] chunks)
     {
-        if (disposed || cache == null || cache.Get($"column:{chunkPos.X}_{chunkPos.Y}") == "yes") return;
-        for (var y = 0; y < chunks.Length; y++) cache.MarkDirty($"{chunkPos.X}_{y}_{chunkPos.Y}");
+        // Loading a column is ordinary read activity. It must not enter the
+        // save wait queue; actual mutations arrive through ChunkDirty.
+        // Newly discovered columns are picked up by the persisted region scan.
     }
     private void Request(ChunkKey region, string reason, bool extract = false, bool verify = false, bool colorOnly = false, Dictionary<int, long>? columns = null, Dictionary<int, int[]>? objectYs = null)
     {

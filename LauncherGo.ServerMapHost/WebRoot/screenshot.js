@@ -69,7 +69,7 @@
     const canvas = document.createElement('canvas'); canvas.width = outputWidth; canvas.height = outputHeight;
     const ctx = canvas.getContext('2d');
     if (!ctx) throw Error('captureFailed');
-    let next = 0, missingTiles = 0;
+    let next = 0, missingTiles = 0, drawnTiles = 0;
     // Snapshot visible DOM overlays before waiting for network I/O. Popups,
     // controls, draft selection and terrain are intentionally not in this pass.
     const overlayPromise = htmlToImage.toSvg(map.getContainer(), {
@@ -88,10 +88,17 @@
           const image = await decode(await response.blob(), signal);
           ctx.imageSmoothingEnabled = false;
           ctx.drawImage(image, (job.x * 512 - start.x) * tileScale, (job.y * 512 - start.y) * tileScale, 512 * tileScale, 512 * tileScale);
+          drawnTiles++;
         }
       });
       const [svgUrl] = await Promise.all([overlayPromise, ...workers]);
       signal.throwIfAborted();
+      if (!drawnTiles) {
+        // The selected tile may still be loading. Use the browser-composited
+        // map as a safe fallback instead of returning an all-transparent PNG.
+        const composed = await htmlToImage.toCanvas(map.getContainer(), { pixelRatio: ratio, backgroundColor: '#00122d', skipFonts: true });
+        ctx.drawImage(composed, left * ratio, top * ratio, width * ratio, height * ratio, 0, 0, outputWidth, outputHeight);
+      }
       ctx.save(); ctx.scale(ratio, ratio); ctx.translate(-left, -top); drawVectors(ctx, vectors); ctx.restore();
       const svg = new DOMParser().parseFromString(decodeURIComponent(svgUrl.split(',')[1]), 'image/svg+xml').documentElement;
       svg.setAttribute('width', outputWidth); svg.setAttribute('height', outputHeight);
