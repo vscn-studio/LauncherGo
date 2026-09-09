@@ -281,7 +281,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             results.Add(new { kind = "player", name = player.PlayerName, hasLocation = visible && pos != null, x = visible ? pos?.X : null, z = visible ? pos?.Z : null });
         }
         foreach (var claim in api.WorldManager.LandClaims) if ((Match(claim.Description) || Match(claim.LastKnownOwnerName)) && CanView(principal, claim.Center.X, claim.Center.Z) && (principal?.IsAdmin == true || !claim.Areas.Any(a => notebook.Regions.Any(r => MapVisibility.Intersects(r, a.MinX, a.MinZ, a.MaxX + 1, a.MaxZ + 1))))) { var center = claim.Center; results.Add(new { kind = "claim", name = string.IsNullOrWhiteSpace(claim.Description) ? claim.LastKnownOwnerName : claim.Description, hasLocation = true, x = (double?)center.X, z = (double?)center.Z }); }
-        foreach (var point in translocators.Values) if (Match(point.Name) && CanView(principal, point.X, point.Z) && (principal?.IsAdmin == true || !notebook.Regions.Any(r => MapVisibility.Intersects(r, Math.Min(point.X, point.TargetX), Math.Min(point.Z, point.TargetZ), Math.Max(point.X, point.TargetX), Math.Max(point.Z, point.TargetZ))))) results.Add(new { kind = point.Kind, name = point.Name, hasLocation = true, x = (double?)point.X, z = (double?)point.Z });
+        foreach (var point in translocators.Values) if (Match(point.Name) && CanView(principal, point.X, point.Z)) results.Add(new { kind = point.Kind, name = point.Name, hasLocation = true, x = (double?)point.X, z = (double?)point.Z });
         foreach (var poi in pois.All) if ((Match(poi.Name) || Match(poi.Text)) && PoiVisible(principal, poi)) results.Add(new { kind = "poi", name = poi.Name, hasLocation = true, x = (double?)poi.X, z = (double?)poi.Z });
         return results.Take(50).ToArray();
     }
@@ -386,7 +386,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             }
         }
         else if (name.Equals("chunks", StringComparison.OrdinalIgnoreCase)) foreach (var region in baseTiles["sepia"].Keys) { var minX = region.X * 512d; var minZ = region.Z * 512d; var maxX = minX + 512; var maxZ = minZ + 512; if (Intersects(minX, minZ, maxX, maxZ, bounds)) features.Add(new { type = "Feature", id = $"region-{region.X}-{region.Z}", geometry = new { type = "Polygon", coordinates = new[] { new[] { new[] { minX, minZ }, new[] { maxX, minZ }, new[] { maxX, maxZ }, new[] { minX, maxZ }, new[] { minX, minZ } } } }, properties = new { state = "generated", kind = "chunk" } }); }
-        else if (name.Equals("translocators", StringComparison.OrdinalIgnoreCase)) AddTranslocators(features, bounds);
+        else if (name.Equals("translocators", StringComparison.OrdinalIgnoreCase)) AddTranslocators(features, bounds, principal);
         else if (name.Equals("pois", StringComparison.OrdinalIgnoreCase))
             foreach (var poi in pois.All)
                 if (InBounds(poi.X, poi.Z, bounds) && PoiVisible(principal, poi)) features.Add(PointFeature(poi.Id, poi.X, poi.Z, new { name = poi.Name, text = poi.Text, color = poi.Color, rotation = poi.Rotation, poiType = poi.Type, kind = "poi", editable = principal != null && (principal.IsAdmin || principal.PlayerUid == poi.OwnerUid) }));
@@ -397,17 +397,35 @@ public sealed partial class ServerMapWebServer : IDisposable
         foreach (var point in points) if (InBounds(point.X, point.Z, bounds)) features.Add(PointFeature(point.Id, point.X, point.Z, new { name = point.Name, y = point.Y, kind = point.Kind, targetX = point.TargetX, targetY = point.TargetY, targetZ = point.TargetZ }));
     }
 
-    private void AddTranslocators(List<object> features, (double MinX, double MinZ, double MaxX, double MaxZ)? bounds)
+    private void AddTranslocators(List<object> features, (double MinX, double MinZ, double MaxX, double MaxZ)? bounds, MapAuthStore.Principal? principal)
     {
         var emitted = new HashSet<string>(StringComparer.Ordinal);
         foreach (var point in translocators.Values)
         {
             var targetX = point.TargetX; var targetZ = point.TargetZ;
+            var sourceVisible = principal?.IsAdmin == true || MapVisibility.Visible(notebook.Regions, point.X, point.Z);
+            var targetVisible = principal?.IsAdmin == true || MapVisibility.Visible(notebook.Regions, targetX, targetZ);
             var sourceKey = FormattableString.Invariant($"{point.X},{point.Y},{point.Z}");
             var targetKey = FormattableString.Invariant($"{targetX},{point.TargetY},{targetZ}");
             var pairKey = string.CompareOrdinal(sourceKey, targetKey) <= 0 ? sourceKey + "|" + targetKey : targetKey + "|" + sourceKey;
-            if (!emitted.Add(pairKey) || !Intersects(Math.Min(point.X, targetX), Math.Min(point.Z, targetZ), Math.Max(point.X, targetX), Math.Max(point.Z, targetZ), bounds)) continue;
-            features.Add(new { type = "Feature", id = point.Id, geometry = new { type = "LineString", coordinates = new[] { new[] { point.X, point.Z }, new[] { targetX, targetZ } } }, properties = new { name = point.Name, y = point.Y, targetY = point.TargetY, kind = point.Kind } });
+            if (!emitted.Add(pairKey) || !MapVisibility.TranslocatorVisible(notebook.Regions, point.X, point.Z, targetX, targetZ) || !Intersects(Math.Min(point.X, targetX), Math.Min(point.Z, targetZ), Math.Max(point.X, targetX), Math.Max(point.Z, targetZ), bounds)) continue;
+
+            // Never send the hidden endpoint to a non-admin browser. Keep the
+            // feature anchored at the visible endpoint so its marker can still
+            // be displayed as "unknown destination" without leaking coordinates.
+            var safeSourceX = sourceVisible ? point.X : targetX;
+            var safeSourceZ = sourceVisible ? point.Z : targetZ;
+            var safeTargetX = targetVisible ? targetX : point.X;
+            var safeTargetZ = targetVisible ? targetZ : point.Z;
+            var lineVisible = principal?.IsAdmin == true || MapVisibility.TranslocatorLineVisible(notebook.Regions, point.X, point.Z, targetX, targetZ);
+            var safeId = principal?.IsAdmin == true || sourceVisible
+                ? point.Id
+                : $"translocator-{targetX}-{point.TargetY}-{targetZ}";
+            features.Add(new { type = "Feature", id = safeId,
+                geometry = new { type = "LineString", coordinates = new[] { new[] { safeSourceX, safeSourceZ }, new[] { safeTargetX, safeTargetZ } } },
+                properties = new { name = point.Name, y = sourceVisible || principal?.IsAdmin == true ? point.Y : (double?)null,
+                    targetY = targetVisible || principal?.IsAdmin == true ? point.TargetY : (double?)null,
+                    kind = point.Kind, sourceVisible, targetVisible, lineVisible } });
         }
     }
 

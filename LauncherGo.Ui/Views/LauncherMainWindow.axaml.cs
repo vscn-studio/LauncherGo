@@ -8933,7 +8933,9 @@ public partial class LauncherMainWindow : Window
         ServerMapCertificateTextBox.Text = settings.CertificatePath;
         ServerMapPrivateKeyTextBox.Text = settings.PrivateKeyPath;
         ServerMapWebRootTextBox.Text = settings.WebRoot;
-        ToolTip.SetTip(ServerMapWebRootUpdateButton, T("覆盖目标目录中的内置网页同名文件，保留其他文件。", "Replace bundled web files in the destination; keep other files."));
+        ToolTip.SetTip(ServerMapWebRootUpdateButton, T("更新自定义 WebRoot；留空时更新运行中的内置网页，停止后下次启动应用。", "Update the custom WebRoot; when empty, update the running bundled page or apply it on the next start."));
+        ToolTip.SetTip(ServerMapResetWebButton, T("重置为当前安装包内置网页；地图数据和瓦片缓存不受影响。", "Reset to the bundled web page; map data and tile caches are not changed."));
+        ServerMapWebRootUpdateButton.IsEnabled = !_isUpdatingServerMapWeb;
         var status = _serverMapService.GetStatus(profile);
         if (!_isTogglingServerMap)
         {
@@ -8986,7 +8988,10 @@ public partial class LauncherMainWindow : Window
     private void OnServerMapWebRootChanged(object? sender, TextChangedEventArgs e)
     {
         if (ServerMapWebRootUpdateButton is not null)
-            ServerMapWebRootUpdateButton.IsEnabled = !_isUpdatingServerMapWeb && !string.IsNullOrWhiteSpace(ServerMapWebRootTextBox.Text);
+            // An empty WebRoot means the bundled page. It is still a valid
+            // target: running Hosts can be refreshed, and stopped Hosts pick
+            // up the bundled files on their next start.
+            ServerMapWebRootUpdateButton.IsEnabled = !_isUpdatingServerMapWeb;
     }
 
     private async void OnServerMapWebRootBrowseClick(object? sender, RoutedEventArgs e)
@@ -9010,15 +9015,26 @@ public partial class LauncherMainWindow : Window
         ServerMapBackButton.IsEnabled = false;
         try
         {
+            var previousSettings = await _serverMapService.LoadSettingsAsync(profile);
             var settings = await CollectServerMapSettingsAsync(profile);
             var running = _serverMapService.GetStatus(profile).IsRunning;
+            var webRootChanged = !string.Equals(previousSettings.WebRoot, settings.WebRoot, StringComparison.OrdinalIgnoreCase);
             SetServerMapStatus(T("正在更新地图网页…", "Updating map web files..."));
             var count = await _serverMapService.UpdateWebRootAsync(profile, settings);
             if (_editingServerMapProfileId == profile.Id)
             {
                 await LoadServerMapForProfileAsync(profile);
-                SetServerMapStatus(T($"已更新 {count} 个网页文件并保存配置。", $"Updated {count} web files and saved settings.") +
-                    (running ? T(" 同目录更新后刷新网页即可；更改目录需要重启地图。", " Refresh the page for the same directory; restart the map if the directory changed.") : string.Empty));
+                var suffix = running
+                    ? (webRootChanged
+                        ? T(" 网页目录已变更，重启地图后生效。", " The web directory changed; restart the map to apply it.")
+                        : T(" 刷新网页即可。", " Refresh the page to see the changes."))
+                    : T(" 下次启动地图时应用。", " Applied on the next map start.");
+                var defaultWebRoot = string.IsNullOrWhiteSpace(settings.WebRoot);
+                SetServerMapStatus(count > 0
+                    ? T($"已更新 {count} 个网页文件并保存配置。", $"Updated {count} web files and saved settings.") + suffix
+                    : (defaultWebRoot
+                        ? T("当前使用内置网页，已确认无需复制；地图数据和瓦片缓存未修改。", "The bundled page is already selected; no files needed copying. Map data and tile caches were not changed.")
+                        : T("网页目录未发现需要复制的文件；地图数据和瓦片缓存未修改。", "No web files needed copying. Map data and tile caches were not changed.")) + suffix);
             }
         }
         catch (Exception ex) { SetServerMapStatus(T($"网页更新失败：{ex.Message}", $"Web update failed: {ex.Message}")); }
@@ -9030,7 +9046,7 @@ public partial class LauncherMainWindow : Window
             ServerMapToggleButton.IsEnabled = true;
             ServerMapRefreshButton.IsEnabled = true;
             ServerMapBackButton.IsEnabled = true;
-            ServerMapWebRootUpdateButton.IsEnabled = !string.IsNullOrWhiteSpace(ServerMapWebRootTextBox.Text);
+            ServerMapWebRootUpdateButton.IsEnabled = !_isUpdatingServerMapWeb;
         }
     }
 

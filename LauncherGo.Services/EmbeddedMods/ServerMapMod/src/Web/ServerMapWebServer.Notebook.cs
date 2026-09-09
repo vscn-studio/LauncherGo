@@ -56,7 +56,7 @@ public sealed partial class ServerMapWebServer
         if (principal?.IsAdmin == true) return features.ToArray();
         var regions = notebook.Regions;
         if (regions.Length == 0) return features.ToArray();
-        return features.Where(f => MapVisibility.GeometryVisible(regions, JsonSerializer.SerializeToElement(f).GetProperty("geometry").GetProperty("coordinates"))).ToArray();
+        return features.Where(f => MapVisibility.FeatureVisible(regions, JsonSerializer.SerializeToElement(f))).ToArray();
     }
     private static object RouteView(MapNotebookStore.Route route) => new { id = route.Id, name = route.Name, color = route.Color, points = route.Points, updatedAt = route.UpdatedAt };
     private bool RouteAllowed(MapAuthStore.Principal? principal, MapNotebookStore.Route route) => principal?.IsAdmin == true || MapVisibility.RouteVisible(notebook.Regions, route.Points);

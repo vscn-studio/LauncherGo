@@ -10,6 +10,25 @@ public static class MapVisibility
     public static bool Intersects(MapNotebookStore.Region r, double minX, double minZ, double maxX, double maxZ) =>
         minX <= r.MaxX && maxX >= r.MinX && minZ <= r.MaxZ && maxZ >= r.MinZ;
     public static bool Visible(IEnumerable<MapNotebookStore.Region> regions, double x, double z) => !regions.Any(r => Intersects(r, x, z, x, z));
+    // Keep a link when at least one endpoint is visible so the visible endpoint
+    // can still be shown with an unknown destination. The line itself is only
+    // allowed when both endpoints are visible.
+    public static bool TranslocatorVisible(IEnumerable<MapNotebookStore.Region> regions, double x, double z, double targetX, double targetZ) =>
+        Visible(regions, x, z) || Visible(regions, targetX, targetZ);
+    public static bool TranslocatorLineVisible(IEnumerable<MapNotebookStore.Region> regions, double x, double z, double targetX, double targetZ) =>
+        Visible(regions, x, z) && Visible(regions, targetX, targetZ);
+    public static bool FeatureVisible(IEnumerable<MapNotebookStore.Region> regions, JsonElement feature)
+    {
+        var geometry = feature.GetProperty("geometry");
+        var coordinates = geometry.GetProperty("coordinates");
+        // Endpoint visibility is carried in the feature properties so a link
+        // can cross fog without exposing a translocator inside it.
+        if (geometry.GetProperty("type").GetString() == "LineString" && coordinates.GetArrayLength() == 2
+            && feature.TryGetProperty("properties", out var properties)
+            && properties.TryGetProperty("kind", out var kind) && kind.GetString() == "translocator")
+            return true;
+        return GeometryVisible(regions, coordinates);
+    }
     public static bool GeometryVisible(IEnumerable<MapNotebookStore.Region> regions, JsonElement coordinates)
     {
         var points = new List<(double X, double Z)>();

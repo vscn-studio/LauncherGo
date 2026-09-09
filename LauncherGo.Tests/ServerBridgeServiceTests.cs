@@ -11,6 +11,117 @@ namespace LauncherGo.Tests;
 
 public sealed class ServerBridgeServiceTests
 {
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    public async Task SubscribeAsync_LatestSkipsHistoryOnReloadAndResumesOnReconnect(bool reload, bool serverRestart)
+    {
+        var directory = Directory.CreateTempSubdirectory("launchergo-bridge-relay-");
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var firstReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var received = new List<long>();
+        var secondSequence = serverRestart ? 4L : 42L;
+        try
+        {
+            var server = Task.Run(async () =>
+            {
+                for (var connection = 0; connection < 2; connection++)
+                {
+                    using var client = await listener.AcceptTcpClientAsync(cts.Token);
+                    await using var stream = client.GetStream();
+                    using var reader = new StreamReader(stream, Encoding.UTF8, false, leaveOpen: true);
+                    using var request = JsonDocument.Parse((await reader.ReadLineAsync(cts.Token))!);
+                    Assert.Equal(connection == 0 || reload ? long.MaxValue : 41L, request.RootElement.GetProperty("since").GetInt64());
+                    var cursor = connection == 1 && serverRestart ? 3 : 40 + connection;
+                    await stream.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
+                    {
+                        version = 2, success = true, data = new { currentSequence = cursor, oldestSequence = 1 }
+                    }) + "\n"), cts.Token);
+                    // Even if a bridge sends replay/duplicates, only the next live event is relayed.
+                    foreach (var sequence in new long[] { 1, cursor, cursor + 1 })
+                        await stream.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
+                        {
+                            version = 2, type = "event", sequence, @event = "chat",
+                            timestampUtc = DateTimeOffset.UtcNow, data = new { name = "Ada", message = "hello" }
+                        }) + "\n"), cts.Token);
+                    if (connection == 1 && serverRestart)
+                    {
+                        // Sequence reset triggers the existing status/player snapshot refresh.
+                        foreach (var method in new[] { "server.status", "players.list" })
+                        {
+                            using var queryClient = await listener.AcceptTcpClientAsync(cts.Token);
+                            await using var queryStream = queryClient.GetStream();
+                            using var queryReader = new StreamReader(queryStream, Encoding.UTF8, false, leaveOpen: true);
+                            using var query = JsonDocument.Parse((await queryReader.ReadLineAsync(cts.Token))!);
+                            Assert.Equal(method, query.RootElement.GetProperty("method").GetString());
+                            await queryStream.WriteAsync(Encoding.UTF8.GetBytes("{\"version\":2,\"success\":true,\"data\":{}}\n"), cts.Token);
+                        }
+                    }
+                    await (connection == 0 ? releaseFirst.Task : secondReceived.Task).WaitAsync(cts.Token);
+                }
+            }, cts.Token);
+            var profile = new InstanceProfile { Id = "relay-test", DirectoryPath = directory.FullName };
+            var service = new ServerBridgeService(new UnusedServerConfigService());
+            await service.SaveSettingsAsync(profile, new ServerBridgeSettings
+            {
+                Enabled = true, Port = ((IPEndPoint)listener.LocalEndpoint).Port, AccessToken = new string('c', 64)
+            }, cts.Token);
+            Task Handle(ServerBridgeEvent value)
+            {
+                lock (received) received.Add(value.Sequence);
+                if (value.Sequence == 41) firstReceived.TrySetResult();
+                if (value.Sequence == secondSequence) secondReceived.TrySetResult();
+                return Task.CompletedTask;
+            }
+            var options = new ServerBridgeSubscriptionOptions { Events = ["chat"], StartFromLatest = true };
+            await using var subscription = await service.SubscribeAsync(profile, options, Handle, cts.Token);
+            await firstReceived.Task.WaitAsync(cts.Token);
+            if (reload) await subscription.DisposeAsync();
+            releaseFirst.TrySetResult();
+            await using var restarted = reload ? await service.SubscribeAsync(profile, options, Handle, cts.Token) : null;
+            await secondReceived.Task.WaitAsync(cts.Token);
+            await server;
+            lock (received) Assert.Equal(new long[] { 41, secondSequence }, received);
+        }
+        finally { directory.Delete(true); }
+    }
+
+    [Fact]
+    public async Task SubscribeAsync_LatestWithoutCursorRejectsSubscriptionInsteadOfRelayingHistory()
+    {
+        var directory = Directory.CreateTempSubdirectory("launchergo-bridge-no-cursor-");
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        try
+        {
+            var server = Task.Run(async () =>
+            {
+                using var client = await listener.AcceptTcpClientAsync(cts.Token);
+                await using var stream = client.GetStream();
+                using var reader = new StreamReader(stream, Encoding.UTF8, false, leaveOpen: true);
+                await reader.ReadLineAsync(cts.Token);
+                await stream.WriteAsync(Encoding.UTF8.GetBytes("{\"version\":2,\"success\":true}\n"), cts.Token);
+            }, cts.Token);
+            var profile = new InstanceProfile { Id = "no-cursor", DirectoryPath = directory.FullName };
+            var service = new ServerBridgeService(new UnusedServerConfigService());
+            await service.SaveSettingsAsync(profile, new ServerBridgeSettings
+            {
+                Enabled = true, Port = ((IPEndPoint)listener.LocalEndpoint).Port, AccessToken = new string('c', 64)
+            }, cts.Token);
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.SubscribeAsync(profile,
+                new ServerBridgeSubscriptionOptions { StartFromLatest = true }, _ => throw new Exception("History must not be relayed"), cts.Token));
+            Assert.Contains("事件序号", error.Message);
+            await server;
+        }
+        finally { directory.Delete(true); }
+    }
+
     [Fact]
     public async Task QueryAsync_WhenDisabled_ReturnsStructuredBridgeDisabledError()
     {

@@ -115,6 +115,7 @@ public sealed class Vs2QQProcessService
                 (eventPayload, token) => HandleOneBotEventAsync(runtime, eventPayload, token));
             runtime.OneBot = oneBot;
             _runCts = new CancellationTokenSource();
+            var runToken = _runCts.Token;
             if (_serverBridgeService is not null)
             {
                 foreach (var profileId in normalized.ProfileBindings.Select(x => x.ProfileId).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase))
@@ -122,13 +123,13 @@ public sealed class Vs2QQProcessService
                     var profile = _instanceProfileService.GetProfileById(profileId);
                     if (profile is null) continue;
                     runtime.BridgeConnectionTasks.Add(Task.Run(
-                        () => MaintainBridgeSubscriptionAsync(runtime, profile, _runCts.Token),
+                        () => MaintainBridgeSubscriptionAsync(runtime, profile, runToken),
                         CancellationToken.None));
                 }
             }
 
             _runtime = runtime;
-            _runTask = Task.Run(() => RunRuntimeAsync(runtime, _runCts.Token), CancellationToken.None);
+            _runTask = Task.Run(() => RunRuntimeAsync(runtime, runToken), CancellationToken.None);
 
             CurrentStatus = new RobotRuntimeStatus
             {
@@ -253,13 +254,14 @@ public sealed class Vs2QQProcessService
             _runtimeGate.Release();
         }
 
-        ctsToDispose?.Dispose();
+        ctsToDispose?.Cancel();
         try { await Task.WhenAll(runtime.BridgeConnectionTasks).ConfigureAwait(false); } catch { }
         foreach (var subscription in runtime.BridgeSubscriptions)
         {
             try { await subscription.DisposeAsync().ConfigureAwait(false); } catch { }
         }
         runtime.BridgeSubscriptions.Clear();
+        ctsToDispose?.Dispose();
         await runtime.DisposeAsync();
 
         if (shouldNotifyStopped)
@@ -1220,8 +1222,9 @@ public sealed class Vs2QQProcessService
         return result;
     }
 
-    private async Task HandleBridgeEventAsync(Vs2QQRuntimeContext runtime, string profileId, ServerBridgeEvent evt)
+    private async Task HandleBridgeEventAsync(Vs2QQRuntimeContext runtime, string profileId, ServerBridgeEvent evt, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var name = NormalizeDisplayText(evt.Data["name"]?.GetValue<string>());
         var content = NormalizeInboundServerText(name, evt.Data["message"]?.GetValue<string>());
         if (evt.Event == "chat")
@@ -1235,8 +1238,9 @@ public sealed class Vs2QQProcessService
             {
                 var profileName = _instanceProfileService.GetProfileById(profileId)?.Name ?? profileId;
                 var confirmation = $"绑定成功：QQ {completed.QqUserId} 已绑定玩家 {completed.PlayerName}（{profileName}）。";
-                try { await runtime.OneBot.SendGroupMsgAsync(completed.GroupId, confirmation, CancellationToken.None).ConfigureAwait(false); } catch { }
-                try { await runtime.OneBot.SendPrivateMsgAsync(completed.QqUserId, confirmation, CancellationToken.None).ConfigureAwait(false); } catch { }
+                try { await runtime.OneBot.SendGroupMsgAsync(completed.GroupId, confirmation, cancellationToken).ConfigureAwait(false); } catch { }
+                cancellationToken.ThrowIfCancellationRequested();
+                try { await runtime.OneBot.SendPrivateMsgAsync(completed.QqUserId, confirmation, cancellationToken).ConfigureAwait(false); } catch { }
             }
         }
         var deathReason = evt.Event == "player.died" ? FormatDeathReason(evt.Data) : string.Empty;
@@ -1262,7 +1266,8 @@ public sealed class Vs2QQProcessService
                      .Where(x => string.Equals(x.ProfileId, profileId, StringComparison.OrdinalIgnoreCase) && x.GroupId > 0)
                      .Select(x => x.GroupId).Distinct())
         {
-            try { await runtime.OneBot.SendGroupMsgAsync(groupId, message, CancellationToken.None).ConfigureAwait(false); } catch { }
+            cancellationToken.ThrowIfCancellationRequested();
+            try { await runtime.OneBot.SendGroupMsgAsync(groupId, message, cancellationToken).ConfigureAwait(false); } catch { }
         }
     }
 
@@ -1276,8 +1281,8 @@ public sealed class Vs2QQProcessService
             try
             {
                 var subscription = await _serverBridgeService.SubscribeAsync(profile,
-                    new ServerBridgeSubscriptionOptions { Events = ["player.joined", "player.left", "player.died", "chat", "server.notification"] },
-                    evt => HandleBridgeEventAsync(runtime, profile.Id, evt), cancellationToken).ConfigureAwait(false);
+                    new ServerBridgeSubscriptionOptions { Events = ["player.joined", "player.left", "player.died", "chat", "server.notification"], StartFromLatest = true },
+                    evt => HandleBridgeEventAsync(runtime, profile.Id, evt, cancellationToken), cancellationToken).ConfigureAwait(false);
                 runtime.BridgeSubscriptions.Add(subscription);
                 return;
             }

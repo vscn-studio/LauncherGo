@@ -115,17 +115,45 @@ public sealed class ServerMapService : IServerMapService
 
     public async Task<int> UpdateWebRootAsync(InstanceProfile profile, ServerMapSettings settings, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(settings.WebRoot))
-            throw new InvalidOperationException("请先选择自定义 WebRoot 目录。 ");
         settings = Normalize(profile, settings);
         await webUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var count = await CopyWebRootAsync(builtInWebRoot, settings.WebRoot, cancellationToken).ConfigureAwait(false);
+            string? target = string.IsNullOrWhiteSpace(settings.WebRoot)
+                ? ResolveRunningDefaultWebRoot(profile)
+                : settings.WebRoot;
+
+            // The bundled WebRoot is already the source of truth for the default
+            // configuration. When the Host is stopped, the next start stages it
+            // into a new immutable runtime directory; there is nothing to copy.
+            var count = string.IsNullOrWhiteSpace(target)
+                ? 0
+                : await CopyWebRootAsync(builtInWebRoot, target, cancellationToken).ConfigureAwait(false);
             await SaveSettingsAsync(profile, settings, cancellationToken).ConfigureAwait(false);
+            logger.LogInformation("Map web root update checked. ProfileId={ProfileId}, CustomWebRoot={CustomWebRoot}, Target={Target}, Copied={Copied}.",
+                profile.Id, !string.IsNullOrWhiteSpace(settings.WebRoot), target ?? "next-start", count);
             return count;
         }
         finally { webUpdateGate.Release(); }
+    }
+
+    private string? ResolveRunningDefaultWebRoot(InstanceProfile profile)
+    {
+        var statePath = Path.Combine(RuntimeDirectory(profile.Id), "host.state.json");
+        var state = BackgroundHostFiles.Read<BackgroundHostState>(statePath);
+        if (state is null)
+            return null;
+
+        using var process = BackgroundHostFiles.ResolveProcess(
+            state.ProcessId, state.ProcessStartTimeUtcTicks, state.ExecutablePath);
+        if (process is null || string.IsNullOrWhiteSpace(state.ExecutablePath))
+            return null;
+
+        var hostDirectory = Path.GetDirectoryName(Path.GetFullPath(state.ExecutablePath));
+        if (string.IsNullOrWhiteSpace(hostDirectory))
+            return null;
+        var webRoot = Path.Combine(hostDirectory, "WebRoot");
+        return File.Exists(Path.Combine(webRoot, "index.html")) ? webRoot : null;
     }
 
     internal static Task<int> CopyWebRootAsync(string sourceDirectory, string targetDirectory, CancellationToken cancellationToken = default) =>

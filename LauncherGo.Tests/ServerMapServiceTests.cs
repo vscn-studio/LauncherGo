@@ -58,7 +58,9 @@ public sealed class ServerMapServiceTests : IDisposable
         var service = new ServerMapService(Source);
         await service.SaveSettingsAsync(Profile, new ServerMapSettings { WebRoot = "   " });
         Assert.Equal(string.Empty, (await service.LoadSettingsAsync(Profile)).WebRoot);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.UpdateWebRootAsync(Profile, new ServerMapSettings()));
+        var copied = await service.UpdateWebRootAsync(Profile, new ServerMapSettings());
+        Assert.Equal(0, copied);
+        Assert.Equal(string.Empty, (await service.LoadSettingsAsync(Profile)).WebRoot);
     }
 
     [Fact]

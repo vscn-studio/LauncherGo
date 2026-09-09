@@ -287,6 +287,7 @@ public sealed class ServerBridgeService : IServerBridgeService
         var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var lastSequence = options.Since;
+        var initializeCursor = options.StartFromLatest;
         var runTask = Task.Run(async () =>
         {
             while (!linked.IsCancellationRequested)
@@ -303,15 +304,22 @@ public sealed class ServerBridgeService : IServerBridgeService
                     await writer.WriteLineAsync(JsonSerializer.Serialize(new ServerBridgeRequest
                     {
                         Version = 2, Type = "subscribe", Id = Guid.NewGuid().ToString("N"), Token = settings.AccessToken,
-                        Events = options.Events?.ToArray() ?? [], Since = lastSequence, MaxQueueSize = options.MaxQueueSize
+                        Events = options.Events?.ToArray() ?? [], Since = initializeCursor ? long.MaxValue : lastSequence, MaxQueueSize = options.MaxQueueSize
                     }, WireJsonOptions).AsMemory(), linked.Token).ConfigureAwait(false);
                     var ack = JsonSerializer.Deserialize<ServerBridgeResponse>(await reader.ReadLineAsync(linked.Token) ?? string.Empty, WireJsonOptions);
                     if (ack is null || !ack.Success) throw new InvalidOperationException(ack?.Error ?? "服务器桥接拒绝订阅。");
                     var currentSequence = ack.Data?["currentSequence"]?.GetValue<long?>();
                     var oldestSequence = ack.Data?["oldestSequence"]?.GetValue<long?>();
-                    if (currentSequence is not null && currentSequence < lastSequence)
+                    if (options.StartFromLatest && (currentSequence is null || currentSequence < 0))
+                        throw new InvalidOperationException("服务器桥接未返回有效事件序号，已暂停实时转发以避免重复发送历史消息。");
+                    if (initializeCursor)
                     {
-                        lastSequence = 0;
+                        lastSequence = currentSequence!.Value;
+                        initializeCursor = false;
+                    }
+                    else if (currentSequence is not null && currentSequence < lastSequence)
+                    {
+                        lastSequence = options.StartFromLatest ? currentSequence.Value : 0;
                         await QueryAsync(profile, "server.status", cancellationToken: linked.Token).ConfigureAwait(false);
                         await QueryAsync(profile, "players.list", cancellationToken: linked.Token).ConfigureAwait(false);
                     }
@@ -336,6 +344,7 @@ public sealed class ServerBridgeService : IServerBridgeService
                         lastSequence = evt.Sequence;
                         var bridgeEvent = new ServerBridgeEvent { Sequence = evt.Sequence, Event = evt.Event, TimestampUtc = evt.TimestampUtc, Data = evt.Data ?? new() };
                         _stateStore?.AddEvent(profile.Id, bridgeEvent);
+                        linked.Token.ThrowIfCancellationRequested();
                         await handler(bridgeEvent).ConfigureAwait(false);
                     }
                 }

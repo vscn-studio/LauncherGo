@@ -163,5 +163,53 @@ public sealed class MapNotebookTests : IDisposable
         Assert.False(MapVisibility.GeometryVisible(regions,JsonSerializer.SerializeToElement(new[]{new double[]{0,15},new double[]{30,15}})));
         Assert.True(MapVisibility.RouteVisible(regions,[[0,0],[5,5]]));
     }
+    [Theory]
+    [InlineData(512556, 512432, 513609, 507194)]
+    [InlineData(512053, 511711, 512981, 512923)]
+    [InlineData(512800, 512400, 513000, 512400)]
+    [InlineData(512900, 512400, 513000, 512400)]
+    public void TranslocatorLinksIgnoreHiddenRegions(double x, double z, double targetX, double targetZ)
+    {
+        var regions = new[] { new MapNotebookStore.Region("hidden", "", 512831, 512346, 512985, 512521) };
+        var feature = TranslocatorFeature(x, z, targetX, targetZ);
+        Assert.False(MapVisibility.GeometryVisible(regions, feature.GetProperty("geometry").GetProperty("coordinates")));
+        Assert.True(MapVisibility.FeatureVisible(regions, feature));
+        Assert.True(MapVisibility.TranslocatorVisible(regions, x, z, targetX, targetZ));
+        Assert.True(MapVisibility.FeatureVisible(regions, TranslocatorFeature(targetX, targetZ, x, z)));
+    }
+
+    [Fact]
+    public void TranslocatorExceptionDoesNotRelaxOtherFeaturePrivacy()
+    {
+        var regions = new[] { new MapNotebookStore.Region("hidden", "", 10, 10, 20, 20) };
+        var feature = JsonSerializer.SerializeToElement(new
+        {
+            geometry = new { type = "LineString", coordinates = new[] { new[] { 0, 15 }, new[] { 30, 15 } } },
+            properties = new { kind = "route" }
+        });
+        Assert.False(MapVisibility.FeatureVisible(regions, feature));
+        Assert.True(MapVisibility.FeatureVisible([], TranslocatorFeature(0, 15, 30, 15)));
+    }
+
+    [Fact]
+    public void TranslocatorLinksHideCrossRegionLinesAndKeepVisibleEndpoint()
+    {
+        var regions = new[] { new MapNotebookStore.Region("hidden", "", 10, 10, 20, 20) };
+        Assert.True(MapVisibility.TranslocatorVisible(regions, 15, 15, 30, 15));
+        Assert.False(MapVisibility.TranslocatorLineVisible(regions, 15, 15, 30, 15));
+        Assert.False(MapVisibility.TranslocatorVisible(regions, 12, 12, 18, 18));
+        Assert.False(MapVisibility.TranslocatorLineVisible(regions, 12, 12, 18, 18));
+        Assert.False(MapVisibility.Visible(regions, 12, 12));
+        Assert.True(MapVisibility.Visible(regions, 30, 15));
+        Assert.True(MapVisibility.TranslocatorLineVisible(regions, 0, 0, 30, 30));
+    }
+
+    private static JsonElement TranslocatorFeature(double x, double z, double targetX, double targetZ) =>
+        JsonSerializer.SerializeToElement(new
+        {
+            geometry = new { type = "LineString", coordinates = new[] { new[] { x, z }, new[] { targetX, targetZ } } },
+            properties = new { kind = "translocator" }
+        });
+
     public void Dispose() { if (Directory.Exists(root)) Directory.Delete(root,true); }
 }

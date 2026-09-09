@@ -16,6 +16,9 @@ public sealed class ServerBridgeSubscriptionOptions
 {
     public IReadOnlyCollection<string> Events { get; init; } = [];
     public long Since { get; init; }
+    // Relay consumers should start at the current event cursor, not replay chat history.
+    // Reconnects within the same subscription still resume from the last event.
+    public bool StartFromLatest { get; init; }
     public int MaxQueueSize { get; init; } = 256;
 }
 

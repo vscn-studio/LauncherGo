@@ -115,7 +115,7 @@
     function startMeasurement(){setMeasureActive(true);resetMeasurement();}
     function clearMeasurement(){setMeasureActive(false);}
     async function loadTranslocatorNetwork(){
-      if(!translocatorNetworkPromise||Date.now()>=translocatorNetworkExpires){translocatorNetworkExpires=Date.now()+15000;translocatorNetworkPromise=fetch(`${api}/layers/translocators`,{cache:'no-store'}).then(response=>{if(!response.ok)throw Error();return response.json();}).then(data=>data.features.filter(feature=>feature.geometry?.type==='LineString'&&feature.geometry.coordinates?.length>=2)).catch(()=>{translocatorNetworkExpires=0;return [];});}
+      if(!translocatorNetworkPromise||Date.now()>=translocatorNetworkExpires){translocatorNetworkExpires=Date.now()+15000;translocatorNetworkPromise=fetch(`${api}/layers/translocators`,{cache:'no-store'}).then(response=>{if(!response.ok)throw Error();return response.json();}).then(data=>data.features.filter(feature=>feature.geometry?.type==='LineString'&&feature.geometry.coordinates?.length>=2&&feature.properties?.lineVisible!==false)).catch(()=>{translocatorNetworkExpires=0;return [];});}
       return translocatorNetworkPromise;
     }
     function routeMarker(point,start){
@@ -211,9 +211,16 @@ function avatarImage(p){const labels=language==='zh'?{'waiting-client':'等待�
     }
     function makeTranslocator(feature){
       const coordinates=feature.geometry.coordinates,p=feature.properties||{},displayName=p.name&&p.name!=='Translocator'?p.name:t('layer.translocators'),a=coordinates[0],b=coordinates[1],localA={x:a[0]-(metadata?.spawn.x||0),z:a[1]-(metadata?.spawn.z||0)},localB={x:b[0]-(metadata?.spawn.x||0),z:b[1]-(metadata?.spawn.z||0)},latlngs=[gameLatLng(a[0],a[1]),gameLatLng(b[0],b[1])],size=19;
-      const icon=L.divIcon({className:'',iconSize:[size,size],iconAnchor:[size/2,size/2],html:'<img class="map-marker light" src="assets/icons/spiral.svg" alt="">'}),details=[`X ${Math.round(localA.x)}, Z ${Math.round(localA.z)} · Y ${Math.round(p.y||0)}`,`↔ X ${Math.round(localB.x)}, Z ${Math.round(localB.z)} · Y ${Math.round(p.targetY||0)}`],line=L.polyline(latlngs,{className:'translocator-line',color:layerColors.translocators,weight:1.5,opacity:.85});
-      const popup=point=>()=>mapPointPopup(displayName,details,{x:point[0],z:point[1]},'shareTranslocator');
-      line.bindPopup(popup(a));return L.layerGroup([line,L.marker(latlngs[0],{icon,title:displayName}).bindPopup(popup(a)),L.marker(latlngs[1],{icon,title:displayName}).bindPopup(popup(b))]);
+      const icon=L.divIcon({className:'',iconSize:[size,size],iconAnchor:[size/2,size/2],html:'<img class="map-marker light" src="assets/icons/spiral.svg" alt="">'}),sourceVisible=p.sourceVisible!==false,targetVisible=p.targetVisible!==false,details=[];
+      if(sourceVisible)details.push(`X ${Math.round(localA.x)}, Z ${Math.round(localA.z)} · Y ${Math.round(p.y||0)}`);
+      else if(targetVisible)details.push('未知');
+      if(targetVisible)details.push(`↔ X ${Math.round(localB.x)}, Z ${Math.round(localB.z)} · Y ${Math.round(p.targetY||0)}`);
+      else if(sourceVisible)details.push('↔ 未知');
+      const line=p.lineVisible!==false&&sourceVisible&&targetVisible?L.polyline(latlngs,{className:'translocator-line',color:layerColors.translocators,weight:1.5,opacity:.85}):null,popup=point=>()=>mapPointPopup(displayName,details,{x:point[0],z:point[1]},'shareTranslocator'),layers=[];
+      if(line)layers.push(line.bindPopup(popup(sourceVisible?a:b)));
+      if(sourceVisible)layers.push(L.marker(latlngs[0],{icon,title:displayName}).bindPopup(popup(a)));
+      if(targetVisible)layers.push(L.marker(latlngs[1],{icon,title:displayName}).bindPopup(popup(b)));
+      return L.layerGroup(layers);
     }
     function makeMarker(feature,name){
       if(name==='pois')return makePoiLabel(feature);
