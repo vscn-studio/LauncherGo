@@ -5,7 +5,7 @@ namespace ServerMap.Render;
 public static class TileColorStamp
 {
     // Bump only when the basic rendering algorithm changes, not on every build.
-    private const string Format = "client-colors-4:";
+    private const string Format = "client-colors-5:";
     public static bool IsCurrent(string tilePath, string colorVersion)
     {
         if (colorVersion == "fallback" || !File.Exists(tilePath)) return false;

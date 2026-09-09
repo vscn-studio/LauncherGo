@@ -107,6 +107,9 @@
     let metadata, rendererName=localStorage.getItem('servermap-renderer')||'basic', nativeZoom=12, scale=1, activeLayer, players=[], layers={}, requests={}, authState={authenticated:false,admin:false}, editingPoi=null, playerGearTeleportEnabled=false;const tileVersions=new Map();
     let notebook, viewReady=false;
     const gameLatLng=(x,z)=>L.latLng(z*scale,x*scale), gamePoint=latlng=>({x:latlng.lng/scale,z:latlng.lat/scale});
+    // The north-pointing SVG uses clockwise screen angles; game yaw uses
+    // the opposite turn direction and zero faces south (LiveMap convention).
+    const playerMapHeading=yaw=>((Math.PI-(Number.isFinite(yaw)?yaw:0))%(2*Math.PI)+2*Math.PI)%(2*Math.PI);
     const relativePoint=point=>({x:point.x-(metadata?.spawn.x||0),z:point.z-(metadata?.spawn.z||0)});
     const localPoint=latlng=>relativePoint(gamePoint(latlng));
     const crs=L.Util.extend({},L.CRS.Simple,{transformation:new L.Transformation(1,0,1,0)});
@@ -246,7 +249,7 @@ function avatarImage(p){const labels=language==='zh'?{'waiting-client':'等待�
     function makeMarker(feature,name){
       if(name==='pois')return makePoiLabel(feature);
       if(name==='translocators')return makeTranslocator(feature);
-      const [x,z]=feature.geometry.coordinates,p=feature.properties||{},localX=x-(metadata?.spawn.x||0),localZ=z-(metadata?.spawn.z||0),file=iconFiles[name]||'marker.svg',size=name==='players'||name==='spawn'?20:18,light=name==='traders',rotation=name==='players'?`transform:rotate(${p.yaw||0}rad)`:'';
+      const [x,z]=feature.geometry.coordinates,p=feature.properties||{},localX=x-(metadata?.spawn.x||0),localZ=z-(metadata?.spawn.z||0),file=iconFiles[name]||'marker.svg',size=name==='players'||name==='spawn'?20:18,light=name==='traders',rotation=name==='players'?`transform:rotate(${playerMapHeading(p.yaw)}rad)`:'';
       const icon=L.divIcon({className:'',iconSize:[size,size],iconAnchor:[size/2,size/2],popupAnchor:[0,-size/2],html:`<img class="map-marker ${light?'light':''}" src="assets/icons/${file}" alt="" style="${rotation}">`}),marker=L.marker(gameLatLng(x,z),{icon,title:p.name||t(`layer.${name}`)}),details=[`<b>${escapeHtml(p.name||t(`layer.${name}`))}</b>`,`X ${Math.round(localX)}, Z ${Math.round(localZ)}`];
       if(p.y!==undefined)details.push(`${t('height')} ${Math.round(p.y)}`);if(p.health)details.push(`HP ${p.health.current.toFixed(1)} / ${p.health.maximum.toFixed(1)}`);if(p.satiety)details.push(`${language==='zh'?'饱食度':'Satiety'} ${Math.round(p.satiety.current)} / ${Math.round(p.satiety.maximum)}`);if(p.yaw!==undefined)details.push(`${t('direction')} ${Math.round(p.yaw*180/Math.PI)}°`);if(p.mode)details.push(`${t('mode')} ${escapeHtml(p.mode)}`);marker.bindPopup(details.join('<br>'));if(name==='players')marker.bindTooltip(playerTooltip(p),{permanent:true,direction:'right',offset:[10,0],className:'player-tooltip',interactive:true});return marker;
     }
@@ -280,7 +283,7 @@ function avatarImage(p){const labels=language==='zh'?{'waiting-client':'等待�
           const layer=name==='chunks'||name==='claims'||name==='claim-areas'?polygonFeature(feature,name):makeMarker(feature,name);
           if(old&&name==='players'){
             old.layer.setLatLng(layer.getLatLng());old.layer.setPopupContent(layer.getPopup().getContent());
-            const element=old.layer.getElement();if(element){element.title=feature.properties?.name||'Player';const icon=element.querySelector('img');if(icon)icon.style.transform=`rotate(${feature.properties?.yaw||0}rad)`;}
+            const element=old.layer.getElement();if(element){element.title=feature.properties?.name||'Player';const icon=element.querySelector('img');if(icon)icon.style.transform=`rotate(${playerMapHeading(feature.properties?.yaw)}rad)`;}
             if(isMobile())old.layer.unbindTooltip();else if(old.layer.getTooltip())old.layer.setTooltipContent(layer.getTooltip().getContent());else old.layer.bindTooltip(layer.getTooltip().getContent(),layer.getTooltip().options);
             next.set(key,{signature,layer:old.layer});return;
           }

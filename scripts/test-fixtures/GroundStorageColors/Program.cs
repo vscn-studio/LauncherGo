@@ -52,11 +52,33 @@ static class Checks
         Require(Key(new BlockEntityGroundStorage()) == null, "Empty inventory produced white placeholder color");
         Require(GroundStorageColors.SampleColors(null!, wood).All(v => v == 0x946A31) && wood.Calls == 30, "Item color override, count or RGBA channel order failed");
         Require(GroundStorageColors.SampleColors(null!, block).All(v => v == 0x112233), "Block stack sampling used wrong overload");
-        var itemAtlas = Proxy.Make<IItemTextureAtlasAPI>((method,args) => method == "GetRandomColor" && (int)args[0]! == 9 ? unchecked((int)0xFF956B32) : throw new Exception("Wrong item atlas request"));
+        var texturePosition = new TextureAtlasPosition();
+        var unknownPosition = new TextureAtlasPosition();
+        var itemAtlas = Proxy.Make<IItemTextureAtlasAPI>((method,args) => method switch {
+            "get_Item" => ((AssetLocation)args[0]!).Path == "wood" ? texturePosition : unknownPosition,
+            "get_UnknownTexturePosition" => unknownPosition,
+            // Simulate a stale sub-id pointing at a green, unrelated texture.
+            "GetRandomColor" when args[0] is int => unchecked((int)0xFF00FF00),
+            "GetRandomColor" when ReferenceEquals(args[0], texturePosition) => (int)args[1]! % 2 == 0 ? unchecked((int)0xFF956B32) : 0x0000FF00,
+            _ => throw new Exception("Wrong item atlas request")
+        });
         var blockAtlas = Proxy.Make<IBlockTextureAtlasAPI>((method,args) => method == "GetRandomColor" && (int)args[0]! == 7 ? unchecked((int)0xFF223344) : throw new Exception("Wrong block atlas request"));
         var client = Proxy.Make<ICoreClientAPI>((method,_) => method == "get_ItemTextureAtlas" ? itemAtlas : method == "get_BlockTextureAtlas" ? blockAtlas : null);
-        var nativeItem = new Item { Code = new("game:firewood"), Textures = new() { ["wood"] = new CompositeTexture { Baked = new BakedCompositeTexture { TextureSubId = 9 } } } };
-        Require(GroundStorageColors.SampleColors(client,nativeItem).All(v => v == 0x956B32), "Native Item did not sample item atlas");
+        var nativeItem = new Item { Code = new("game:firewood"), Textures = new() { ["wood"] = new CompositeTexture { Baked = new BakedCompositeTexture { TextureSubId = 9, BakedName = new("game:wood") } } } };
+        Require(nativeItem.GetRandomColor(client,new ItemStack(nativeItem)) == unchecked((int)0xFF00FF00), "Fixture must reproduce stale atlas id returning green");
+        Require(GroundStorageColors.SampleColors(client,nativeItem).All(v => v == 0x956B32), "Wrong atlas id or transparent green leaked into storage colors");
+        Require(nativeItem.Textures["wood"].Baked.TextureSubId == 9, "Sampling mutated the game's texture registration");
+        foreach (Item item in new Item[] { new ItemStone(), new ItemIngot() })
+        {
+            item.Code = new("game:test-pile"); item.Textures = nativeItem.Textures;
+            Require(GroundStorageColors.SampleColors(client,item).All(v => v == 0x956B32), "Native stone/ingot subclass used stale atlas id");
+        }
+        nativeItem.Textures["wood"].Baked.BakedName = new("game:missing");
+        try { GroundStorageColors.SampleColors(client,nativeItem); throw new Exception("Unknown atlas texture was accepted"); }
+        catch (InvalidDataException) { }
+        Require(GroundStorageColors.SampleColors(null!, new SampleItem { Color = 0xFF00FF00 }).All(v => v == 0x00FF00), "Legitimate opaque green was removed");
+        try { GroundStorageColors.SampleColors(null!, new SampleItem { Color = 0x0000FF00 }); throw new Exception("Fully transparent texture was accepted"); }
+        catch (InvalidDataException) { }
         Require(GroundStorageColors.SampleColors(client,new Block { Code = new("game:stone"), TextureSubIdForBlockColor = 7 }).All(v => v == 0x223344), "Native Block did not sample block atlas");
 
         var entries = new MapPalette.Entry?[] { new(0,"game:air","land",false,false,false,false,false,false,false,true), new(1,"game:groundstorage","land",false,false,false,false,false,false,false,false) { IsGroundStorage = true } };
@@ -69,13 +91,17 @@ static class Checks
         var snapshot = palette.CaptureColors()!;
         Require(palette.HasGroundStorageColormap && snapshot.TryGroundColor(GroundStorageColors.Key(wood),0,0,0,out var rgb) && rgb == ((byte)148,(byte)106,(byte)49), "Storage color stayed generic white");
         Require(!snapshot.TryGroundColor(GroundStorageColors.Prefix+"invalid",0,0,0,out _), "Invalid samples accepted");
+        samples.Remove(GroundStorageColors.CompleteKey);
+        samples[GroundStorageColors.Prefix+"version-1"] = Enumerable.Repeat(1u,30).ToArray();
+        Require(palette.ApplyClientColormap(JsonSerializer.Serialize(samples),6,out _) && !palette.HasGroundStorageColormap
+            && !palette.CaptureColors()!.TryGroundColor(GroundStorageColors.Key(wood),0,0,0,out _), "Old green storage cache survived version upgrade");
         palette.ApplyClientColormap(JsonSerializer.Serialize(new Dictionary<string,uint[]> { ["game:groundstorage"] = new uint[30] }),6,out _);
         Require(!palette.HasGroundStorageColormap && snapshot.TryGroundColor(GroundStorageColors.Key(wood),0,0,0,out _), "Palette replacement mutated in-flight samples or hid legacy cache");
         var temporary = Directory.CreateTempSubdirectory("LauncherGo-groundstorage-colors-").FullName;
         try
         {
             var tile=Path.Combine(temporary,"tile.png"); File.WriteAllBytes(tile,[]);
-            File.WriteAllText(tile+".colors","client-colors-3:"+snapshot.Version);
+            File.WriteAllText(tile+".colors","client-colors-4:"+snapshot.Version);
             Require(!TileColorStamp.IsCurrent(tile,snapshot.Version),"Old white storage tile was not invalidated");
             TileColorStamp.Complete(tile,snapshot.Version);
             Require(TileColorStamp.IsCurrent(tile,snapshot.Version),"New storage tile stamp rejected");

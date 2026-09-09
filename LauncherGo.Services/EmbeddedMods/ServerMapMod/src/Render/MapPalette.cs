@@ -142,12 +142,13 @@ public sealed class MapPalette
         var next = new uint[entries.Length][];
         var roofColors = new Dictionary<string, uint[]>(StringComparer.Ordinal);
         var groundColors = new Dictionary<string, uint[]>(StringComparer.Ordinal);
+        var currentGroundColors = source.TryGetValue(GroundStorageColors.CompleteKey, out var groundVersion) && groundVersion is { Length: 30 };
         foreach (var (code, colors) in source)
         {
             if (colors is not { Length: 30 }) continue;
             if (code.StartsWith(GroundStorageColors.Prefix, StringComparison.Ordinal))
             {
-                groundColors[code] = colors.Select(value => value & 0xFFFFFF).ToArray();
+                if (currentGroundColors) groundColors[code] = colors.Select(value => value & 0xFFFFFF).ToArray();
                 continue;
             }
             if (code.StartsWith(RoofingColors.Prefix, StringComparison.Ordinal))
