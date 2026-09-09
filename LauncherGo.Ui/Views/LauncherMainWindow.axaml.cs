@@ -1854,7 +1854,7 @@ public partial class LauncherMainWindow : Window
                 return _dashboardSettingsByProfile.TryGetValue(id, out var settings) ? settings.MaxClients : 0;
             })
             .Sum();
-        DashboardPlayersCountText.Text = $"{players.Count.ToString(CultureInfo.InvariantCulture)}/{(maxPlayers > 0 ? maxPlayers.ToString(CultureInfo.InvariantCulture) : "--")}";
+        DashboardPlayersCountText.Text = $"{runningStatuses.Sum(status => status.OnlinePlayers).ToString(CultureInfo.InvariantCulture)}/{(maxPlayers > 0 ? maxPlayers.ToString(CultureInfo.InvariantCulture) : "--")}";
 
         UpdateDashboardUptimeItems(runningStatuses);
     }

@@ -254,6 +254,12 @@ public sealed class WorldDatabaseReader : IDisposable
         return DeserializeChunk(bytes, key);
     }
 
+    public Web.TranslocatorPoint[]? ReadTranslocators(ChunkKey key)
+    {
+        var bytes = Read(key.ToIndex(), "chunk");
+        return bytes == null ? null : SavedTranslocators.Read(bytes);
+    }
+
     /// <summary>Reads a saved chunk, or asynchronously asks the engine to generate a complete column.</summary>
     public ServerChunk? LoadChunkOrGenerate(ChunkKey key)
     {

@@ -18,6 +18,7 @@ public sealed class ServerMapModSystem : ModSystem
     private const string CacheFormatVersion = "2d-live-flat-5";
     private ICoreServerAPI? sapi; private WorldDatabaseReader? db; private ServerMapWebServer? web; private ServerMapConfig? config; private Render.RenderQueue? queue; private Render.MapPalette? materials; private ClientColormapReceiver? colormapReceiver; private IServerNetworkChannel? colormapChannel; private string dataRoot="", configPath="";
     private readonly ConcurrentDictionary<ChunkKey, byte> regionsAwaitingSave = new();
+    private readonly ConcurrentDictionary<ChunkKey, byte> objectChunksAwaitingSave = new();
     private readonly ConcurrentDictionary<ChunkKey, byte> basicOnlyRegions = new();
     private long colormapRequestListenerId;
     private int requestedColormapMonth;
@@ -46,7 +47,7 @@ public sealed class ServerMapModSystem : ModSystem
             var announcementStore = new AnnouncementStore(Path.Combine(dataRoot, "announcement.json"));
             web = new ServerMapWebServer(api, config, dataRoot, db, materials, authStore, poiStore, announcementStore);
             queue = new Render.RenderQueue(config.RenderThreads, RenderRegion);
-            web.RequestRender = (region, priority) => queue?.Enqueue(region, priority);
+            web.RequestRender = (region, priority) => { if (queue?.Promote(region) == false) queue.Enqueue(region, priority); };
             web.RenderProgress = () =>
             {
                 var progress = queue.Progress;
@@ -76,10 +77,12 @@ public sealed class ServerMapModSystem : ModSystem
     }
     private void OnChunkDirty(Vec3i chunkPos, IWorldChunk chunk, EnumChunkDirtyReason reason)
     {
+        objectChunksAwaitingSave.TryAdd(new ChunkKey(chunkPos.X, chunkPos.Y, chunkPos.Z), 0);
         QueueAfterSave(new ChunkKey(chunkPos.X >> 4, 0, chunkPos.Z >> 4));
     }
     private void OnChunkColumnLoaded(Vec2i chunkPos, IWorldChunk[] chunks)
     {
+        for (var y = 0; y < chunks.Length; y++) objectChunksAwaitingSave.TryAdd(new ChunkKey(chunkPos.X, y, chunkPos.Y), 0);
         QueueAfterSave(new ChunkKey(chunkPos.X >> 4, 0, chunkPos.Y >> 4));
     }
     private void QueueAfterSave(ChunkKey region)
@@ -118,15 +121,17 @@ public sealed class ServerMapModSystem : ModSystem
             Volatile.Write(ref scannedColumns, columns);
             var region = new ChunkKey(column.X >> 4, 0, column.Z >> 4);
             if (!regions.Add(region)) continue;
+            web?.NoteRegion(region);
             Volatile.Write(ref discoveredRegions, regions.Count);
             // A new world still needs its sepia base tile. Only narrow the
             // redraw when the non-colour tile already exists.
-            if (basicOnly) basicOnlyRegions[region] = 0;
-            if (force || basicOnly || web?.HasBaseTile("basic", region) != true || web.HasBaseTile("sepia", region) != true)
-                // Colormap redraws must jump ahead of the initial world scan;
-                // otherwise newly discovered bottom regions can keep workers
-                // occupied while stale fallback-colour tiles remain above.
-                queue?.Enqueue(region, priority: basicOnly);
+            if (force || web?.HasBaseTile("basic", region) != true || web.HasBaseTile("sepia", region) != true)
+            {
+                if (basicOnly && web?.HasBaseTile("sepia", region) == true) basicOnlyRegions[region] = 0;
+                // Visible tiles are promoted by HTTP requests; a full rescan
+                // must not fill the priority lane with off-screen work.
+                queue?.Enqueue(region);
+            }
             if (regions.Count % 128 == 0) sapi?.Logger.Notification("ServerMap region scan: {0} regions discovered.", regions.Count);
         }
         sapi?.Logger.Notification("ServerMap region scan complete: {0} columns, {1} regions.", columns, regions.Count);
@@ -137,7 +142,18 @@ public sealed class ServerMapModSystem : ModSystem
     {
         requestedColormapMonth = 0;
         web?.NotifyColormapApplied();
-        background?.Enqueue("colormap-redraw", token => ScanRegionsAsync(true, true, token));
+        // Cached tiles are already known. Do not wait for a full SQL rescan
+        // before queuing stale colors, including after a cached palette load.
+        background?.Enqueue("colormap-redraw", async token =>
+        {
+            if (web != null) foreach (var region in web.StaleColorRegions())
+            {
+                token.ThrowIfCancellationRequested();
+                if (web.HasBaseTile("sepia", region)) basicOnlyRegions[region] = 0;
+                queue?.Enqueue(region);
+            }
+            await ScanRegionsAsync(true, false, token).ConfigureAwait(false);
+        });
     }
     private void OnPlayerNowPlaying(IServerPlayer player) => RequestMissingColormap(player);
     private void InitializeColormapCache()
@@ -147,7 +163,7 @@ public sealed class ServerMapModSystem : ModSystem
         var month = Math.Clamp(sapi.World.Calendar.Month, 1, 12);
         var loaded = materials.LoadClientColormap(Path.Combine(dataRoot, "colormap"), month, message => sapi.Logger.Notification(message));
         sapi.Logger.Notification("ServerMap client colormap cache: month={0}, loaded={1}.", month, loaded);
-        if (loaded) web?.NotifyColormapApplied();
+        if (loaded) OnClientColormapApplied();
     }
     private void RequestMissingColormap(IServerPlayer? candidate = null)
     {
@@ -189,6 +205,11 @@ public sealed class ServerMapModSystem : ModSystem
         {
             await Task.Delay(1000, token).ConfigureAwait(false);
             db?.Clear();
+            foreach (var key in objectChunksAwaitingSave.Keys)
+            {
+                token.ThrowIfCancellationRequested();
+                if (objectChunksAwaitingSave.TryRemove(key, out _)) web?.QueueObjectChunk(key);
+            }
             await FlushSavedRegionsAsync(token).ConfigureAwait(false);
         });
     }
@@ -198,7 +219,7 @@ public sealed class ServerMapModSystem : ModSystem
         foreach (var region in regionsAwaitingSave.Keys)
         {
             token.ThrowIfCancellationRequested();
-            if (regionsAwaitingSave.TryRemove(region, out _)) queue?.Enqueue(region, priority: true);
+            if (regionsAwaitingSave.TryRemove(region, out _)) { basicOnlyRegions.TryRemove(region, out _); queue?.Enqueue(region, priority: true); }
             if (++count % 256 == 0) await Task.Delay(25, token).ConfigureAwait(false);
         }
     }

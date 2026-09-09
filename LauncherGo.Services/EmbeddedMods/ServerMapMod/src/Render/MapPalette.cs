@@ -18,16 +18,26 @@ public sealed class MapPalette
     public sealed record Entry(int Id, string Code, string MapColorCode, bool IsWater, bool IsIce, bool IsLava, bool IsOverlay, bool IsSurfaceCover, bool IsMicroBlock, bool IsPlaceholder, bool IsEmpty);
 
     private readonly Entry?[] entries;
-    private uint[][]? clientColors;
-    private int clientColormapMonth;
-    private string clientColormapVersion = "fallback";
+    public sealed record ColorSnapshot(int Month, string Version, uint[][] Colors)
+    {
+        public bool HasColor(int id) => (uint)id < (uint)Colors.Length && Colors[id] is { Length: > 0 };
+        public (byte R, byte G, byte B) Color(int id, int x, int y, int z)
+        {
+            if (!HasColor(id)) return (0, 0, 0);
+            var values = Colors[id];
+            var value = values[GameMath.MurmurHash3Mod(x, y, z, values.Length)];
+            return ((byte)(value >> 16), (byte)(value >> 8), (byte)value);
+        }
+    }
+    private ColorSnapshot? clientColors;
 
     private MapPalette(Entry?[] entries) => this.entries = entries;
 
     public int BlockCount => entries.Length;
     public bool HasClientColormap => Volatile.Read(ref clientColors) != null;
-    public int ClientColormapMonth => Volatile.Read(ref clientColormapMonth);
-    public string ClientColormapVersion => Volatile.Read(ref clientColormapVersion);
+    public int ClientColormapMonth => CaptureColors()?.Month ?? 0;
+    public string ClientColormapVersion => CaptureColors()?.Version ?? "fallback";
+    public ColorSnapshot? CaptureColors() => Volatile.Read(ref clientColors);
 
     public static MapPalette Capture(ICoreAPI api)
     {
@@ -97,9 +107,8 @@ public sealed class MapPalette
             resolvedCount++;
         }
         if (resolvedCount == 0) return false;
-        Volatile.Write(ref clientColormapMonth, month);
-        Volatile.Write(ref clientColormapVersion, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json))).Substring(0, 16));
-        Volatile.Write(ref clientColors, next);
+        var version = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json))).Substring(0, 16);
+        Volatile.Write(ref clientColors, new ColorSnapshot(month, version, next));
         return true;
     }
 
@@ -123,13 +132,10 @@ public sealed class MapPalette
         AtomicFile.Replace(path, temp => File.WriteAllText(temp, json));
     }
 
-    public bool HasMapColor(int id) => Volatile.Read(ref clientColors) is { } colors && (uint)id < (uint)colors.Length && colors[id] is { Length: > 0 };
+    public bool HasMapColor(int id) => CaptureColors()?.HasColor(id) == true;
     public (byte R, byte G, byte B) MapColor(int id, int x, int y, int z)
     {
-        var colors = Volatile.Read(ref clientColors);
-        if (colors == null || (uint)id >= (uint)colors.Length || colors[id] is not { Length: > 0 } values) return (0, 0, 0);
-        var value = values[GameMath.MurmurHash3Mod(x, y, z, values.Length)];
-        return ((byte)(value >> 16), (byte)(value >> 8), (byte)value);
+        return CaptureColors()?.Color(id, x, y, z) ?? (0, 0, 0);
     }
     public (byte R, byte G, byte B) SepiaColor(int id) => ColorFor(Get(id).MapColorCode);
     public (byte R, byte G, byte B) BasicFallbackColor(int id)

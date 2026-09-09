@@ -21,6 +21,8 @@ public sealed class MapRenderer
     public bool Render2D(ChunkKey key, string renderer = "basic")
     {
         var colored = renderer.Equals("basic", StringComparison.OrdinalIgnoreCase);
+        var colors = materials.CaptureColors();
+        if (colored && colors == null) return false;
         const int size = 512; var pixels = new byte[size * size * 4]; var heights = new ushort[size * size]; var ids = new int[size * size]; var hasData = new bool[size * size];
         var topBlocks = new Dictionary<int, int>();
         var emptyPixels = 0;
@@ -138,20 +140,14 @@ public sealed class MapRenderer
             // LiveMap uses its explicit water-edge colour where a water/ice
             // column touches a non-water column.  Empty cells outside a region
             // count as water, matching BlockData.Get's null behaviour.
-            // Basic tiles must not bake the stable/fallback palette while the
-            // client colormap is still being collected.  Those provisional
-            // colours were previously persisted and remained visible until a
-            // manual full rescan.  Leave the pixel transparent; the
-            // colormap-applied event queues a redraw and the real game colour
-            // is then written in its place.
-            if (colored && !materials.HasClientColormap) continue;
+            if (colored && !colors!.HasColor(id)) continue;
             var mapColor = !colored && materials.IsMapWaterBlock(id) && IsWaterEdge(ids, hasData, pixelX, pixelZ, size)
                 ? (R: (byte)72, G: (byte)48, B: (byte)24)
                 : colored
                     // LiveMap hashes colour variants in region-local coordinates.
                     // Using absolute world coordinates changes the selected one
                     // of the 30 client colours and makes the same block look wrong.
-                    ? materials.HasMapColor(id) ? materials.MapColor(id, pixelX, heights[pixel], pixelZ) : materials.BasicFallbackColor(id)
+                    ? colors!.Color(id, pixelX, heights[pixel], pixelZ)
                     : materials.SepiaColor(id);
             var offset = pixel * 4;
             pixels[offset] = mapColor.R; pixels[offset + 1] = mapColor.G; pixels[offset + 2] = mapColor.B; pixels[offset + 3] = 255;
@@ -160,7 +156,9 @@ public sealed class MapRenderer
         reader.LogNotification("ServerMap 2D {0},{1}: stable-columns={2}; missing={3}; empty={4}; water={5}; colors={6}", key.X, key.Z, stableColumns, topBlocks.GetValueOrDefault(MapPalette.MissingBlockId), emptyPixels, ids.Count(materials.IsMapWaterBlock), colored && materials.HasClientColormap ? "client" : "stable");
         var path = Path.Combine(root, "2d", colored ? "basic" : "sepia", "0", $"{key.X}_{key.Z}.png");
         var png = PngEncoder.Encode(size, size, pixels);
+        if (colored) TileColorStamp.Invalidate(path);
         AtomicFile.Replace(path, temp => File.WriteAllBytes(temp, png));
+        if (colored) TileColorStamp.Complete(path, colors!.Version);
         return true;
     }
 

@@ -94,7 +94,7 @@
     const mobileMedia=matchMedia('(max-width: 700px), (pointer: coarse)'),isMobile=()=>mobileMedia.matches;
     let language=localStorage.getItem('servermap-language')||((navigator.language||'').startsWith('zh')?'zh':'en');const t=key=>key.split('.').reduce((value,part)=>value?.[part],messages[language])||key;
     let metadata, rendererName=localStorage.getItem('servermap-renderer')||'basic', nativeZoom=12, scale=1, activeLayer, players=[], layers={}, requests={}, authState={authenticated:false,admin:false}, editingPoi=null;const tileVersions=new Map();
-    let notebook;
+    let notebook, viewReady=false;
     const gameLatLng=(x,z)=>L.latLng(z*scale,x*scale), gamePoint=latlng=>({x:latlng.lng/scale,z:latlng.lat/scale});
     const relativePoint=point=>({x:point.x-(metadata?.spawn.x||0),z:point.z-(metadata?.spawn.z||0)});
     const localPoint=latlng=>relativePoint(gamePoint(latlng));
@@ -108,14 +108,14 @@
     }
     const measureButton=document.querySelector('#measure'),routeInfo=document.querySelector('#routeInfo'),routeLayer=L.layerGroup().addTo(map),measurePoints=[];
     const measurePreview=L.polyline([],{className:'measure-preview',color:'#ffd000',weight:2,opacity:.9,dashArray:'8 7',interactive:false}).addTo(routeLayer);
-    let measureActive=false,translocatorNetworkPromise,currentRouteResult=null;
+    let measureActive=false,translocatorNetworkPromise,translocatorNetworkExpires=0,currentRouteResult=null;
     function updateRouteInfo(content){routeInfo.hidden=!measureActive;if(measureActive)routeInfo.innerHTML=content||t('routeHelp');}
     function resetMeasurement(){measurePoints.length=0;currentRouteResult=null;routeLayer.clearLayers();measurePreview.addTo(routeLayer);updateRouteInfo();}
     function setMeasureActive(active){measureActive=active;measureButton.classList.toggle('active',active);measureButton.setAttribute('aria-pressed',String(active));map.getContainer().classList.toggle('measuring',active);active?map.doubleClickZoom.disable():map.doubleClickZoom.enable();if(!active){currentRouteResult=null;measurePoints.length=0;measurePreview.setLatLngs([]);routeLayer.clearLayers();routeInfo.hidden=true;}else updateRouteInfo();}
     function startMeasurement(){setMeasureActive(true);resetMeasurement();}
     function clearMeasurement(){setMeasureActive(false);}
     async function loadTranslocatorNetwork(){
-      if(!translocatorNetworkPromise)translocatorNetworkPromise=fetch(`${api}/layers/translocators`,{cache:'no-store'}).then(response=>{if(!response.ok)throw Error();return response.json();}).then(data=>data.features.filter(feature=>feature.geometry?.type==='LineString'&&feature.geometry.coordinates?.length>=2)).catch(()=>[]);
+      if(!translocatorNetworkPromise||Date.now()>=translocatorNetworkExpires){translocatorNetworkExpires=Date.now()+15000;translocatorNetworkPromise=fetch(`${api}/layers/translocators`,{cache:'no-store'}).then(response=>{if(!response.ok)throw Error();return response.json();}).then(data=>data.features.filter(feature=>feature.geometry?.type==='LineString'&&feature.geometry.coordinates?.length>=2)).catch(()=>{translocatorNetworkExpires=0;return [];});}
       return translocatorNetworkPromise;
     }
     function routeMarker(point,start){
@@ -161,7 +161,7 @@
     function setRenderer(next){
       if(next===rendererName&&activeLayer)return; rendererName=next;localStorage.setItem('servermap-renderer',next);document.querySelectorAll('#renderers li').forEach(row=>row.classList.toggle('active',row.dataset.renderer===next));
       if(!activeLayer){activeLayer=new LiveTileLayer(next).addTo(map);}else{const old=activeLayer,replacement=new LiveTileLayer(next);replacement.setOpacity(0);replacement.once('load',()=>{replacement.setOpacity(1);map.removeLayer(old);});replacement.addTo(map);activeLayer=replacement;}
-      status.textContent=next==='basic'?(metadata?.colormapReady?'彩色地图 · 客户端颜色':'彩色地图 · 固定色回退'):'无颜色地图 · LiveMap 分类色';
+      status.textContent=next==='basic'?(metadata?.colormapReady?'彩色地图 · 客户端颜色':'彩色地图 · 等待客户端颜色'):'无颜色地图 · LiveMap 分类色';
       if(metadata)updateUrl();
     }
     function bbox(){const b=map.getBounds(),nw=gamePoint(b.getNorthWest()),se=gamePoint(b.getSouthEast());return [nw.x,nw.z,se.x,se.z].join(',');}
@@ -239,9 +239,7 @@ function avatarImage(p){const labels=language==='zh'?{'waiting-client':'等待�
       const controller=requests[name]=new AbortController(),view=bbox(),locale=language,auth=authState;
       const timeout=setTimeout(()=>{if(state.visible)pendingLayers.add(name);controller.abort();},15000);
       try{
-        // Translocator links are sparse and each endpoint may lie outside
-        // the current viewport; fetch the complete indexed network so a
-        // restart cannot make previously discovered links disappear.
+        // Routing and the visible layer share the complete sparse network.
         const query=name==='players'||name==='translocators'?'':`?bbox=${encodeURIComponent(view)}`,response=await fetch(`${api}/layers/${name}${query}`,{signal:controller.signal});
         if(!response.ok)return;const data=await response.json();
         if(controller.signal.aborted||!state.visible)return;
@@ -300,20 +298,22 @@ function avatarImage(p){const labels=language==='zh'?{'waiting-client':'等待�
       fullTileRefresh=true;refreshLayers();scheduleTiles();
     });
     const refreshLayers=()=>Object.keys(layers).forEach(refreshLayer);
-    function updateUrl(){const p=localPoint(map.getCenter()),zoom=nativeZoom-map.getZoom(),query=new URLSearchParams(location.search);query.set('renderer',rendererName);query.set('zoom',zoom);query.set('x',Math.round(p.x));query.set('z',Math.round(p.z));history.replaceState(null,'',`${location.pathname}?${query}`);}
+    function updateUrl(){if(!viewReady)return;const p=localPoint(map.getCenter()),zoom=nativeZoom-map.getZoom(),query=new URLSearchParams(location.search);query.set('renderer',rendererName);query.set('zoom',zoom);query.set('x',Math.round(p.x));query.set('z',Math.round(p.z));history.replaceState(null,'',`${location.pathname}?${query}${location.hash}`);}
     function jump(x,z,zoom){if(metadata&&Number.isFinite(x)&&Number.isFinite(z))map.setView(gameLatLng(x+metadata.spawn.x,z+metadata.spawn.z),zoom??map.getZoom());}
     function jumpAbsolute(x,z,zoom){if(Number.isFinite(x)&&Number.isFinite(z))map.setView(gameLatLng(x,z),zoom??map.getZoom());}
     async function start(){
+      const query=new URLSearchParams(location.search);
       const response=await fetch(`${api}/map/metadata`);if(!response.ok)throw Error(`元数据请求失败 (${response.status})`);metadata=await response.json();
       document.querySelector('#go').disabled=false;
-      const query=new URLSearchParams(location.search),numberParam=name=>{const raw=query.get(name);return raw===null?NaN:Number(raw);},qx=numberParam('x'),qz=numberParam('z'),qzoom=numberParam('zoom');if(query.get('renderer')==='sepia')rendererName='sepia';
-      nativeZoom=metadata.maxZoom;scale=1/Math.pow(2,nativeZoom);const minimumZoom=nativeZoom-metadata.maxZoomOut;map.setMinZoom(minimumZoom);map.setMaxZoom(nativeZoom+3);
-      // A URL without coordinates must always open at the world spawn.  The
-      // metadata span/average is only a fallback for legacy worlds without a
-      // spawn and can otherwise place a fresh visit at the map's far edge.
+      const numberParam=name=>{const raw=query.get(name);return raw===null||raw.trim()===''?NaN:Number(raw);},qx=numberParam('x'),qz=numberParam('z'),qzoom=numberParam('zoom');if(['basic','sepia'].includes(query.get('renderer')))rendererName=query.get('renderer');
+      nativeZoom=metadata.maxZoom;scale=1/Math.pow(2,nativeZoom);const minimumZoom=nativeZoom-metadata.maxZoomOut;map.setMaxZoom(nativeZoom+3);
       const centerX=Number.isFinite(qx)?qx+metadata.spawn.x:(Number.isFinite(metadata.spawn?.x)?metadata.spawn.x:(metadata.center?.x||0));
       const centerZ=Number.isFinite(qz)?qz+metadata.spawn.z:(Number.isFinite(metadata.spawn?.z)?metadata.spawn.z:(metadata.center?.z||0));
-      map.invalidateSize();map.setView(gameLatLng(centerX,centerZ),Number.isFinite(qzoom)?Math.max(minimumZoom,nativeZoom-qzoom):nativeZoom);requestAnimationFrame(()=>{map.setView(gameLatLng(centerX,centerZ),Number.isFinite(qzoom)?Math.max(minimumZoom,nativeZoom-qzoom):nativeZoom);updateUrl();});updateOverlayScale();setRenderer(rendererName);updateUrl();
+      // Raising minZoom at the placeholder origin starts a Leaflet animation
+      // which can discard the following spawn setView. Initialize without an
+      // animation first, then enforce limits and enable URL synchronization.
+      map.setView(gameLatLng(centerX,centerZ),Number.isFinite(qzoom)?Math.max(minimumZoom,Math.min(nativeZoom+3,nativeZoom-qzoom)):nativeZoom,{animate:false,reset:true});
+      map.setMinZoom(minimumZoom);viewReady=true;updateOverlayScale();setRenderer(rendererName);updateUrl();
       const manifest=await fetch(`${api}/layers/manifest`).then(r=>r.json());manifest.layers.forEach(def=>{const group=L.layerGroup();layers[def.id]={group,visible:def.visible};if(def.visible)group.addTo(map);const row=document.createElement('li');row.className='layer-row';row.dataset.layer=def.id;row.innerHTML=`<input type="checkbox" ${def.visible?'checked':''}><label>${escapeHtml(t(`layer.${def.id}`))}</label>`;const [toggle,label]=row.children;label.onclick=()=>{toggle.checked=!toggle.checked;toggle.dispatchEvent(new Event('change'));};toggle.onchange=()=>{layers[def.id].visible=toggle.checked;toggle.checked?group.addTo(map):map.removeLayer(group);if(toggle.checked)refreshLayer(def.id);};document.querySelector('#layers').append(row);});
       document.querySelector('#serverWebsite').textContent=metadata.serverName||'Vintage Story Server';document.querySelector('#lastUpdated').textContent=`${t('updated')}: ${new Date(metadata.updatedAt).toLocaleString(language==='zh'?'zh-CN':'en-US')}`;document.querySelector('#webmapVersion').textContent=`ServerMap v${metadata.serverMapVersion} · ${String(metadata.tileVersion).slice(0,8)}`;
       applyLanguage();refreshLayers();updateZoomText();setInterval(()=>{if(!document.hidden)refreshLayer('players');},isMobile()?5000:2000);
@@ -366,6 +366,7 @@ function avatarImage(p){const labels=language==='zh'?{'waiting-client':'等待�
     mobileMedia.addEventListener('change',()=>{sidebar.inert=false;mobilePanel(null);for(const state of Object.values(layers)){state.group.clearLayers();state.features=undefined;}refreshLayers();map.invalidateSize();});
     map.on('moveend click',event=>{if(isMobile()){const point=localPoint(event.latlng||map.getCenter());document.querySelector('#coordsX').textContent=Math.round(point.x);document.querySelector('#coordsZ').textContent=Math.round(point.z);}});
     const events=new EventSource(`${api}/events`);
+    events.addEventListener('open',()=>{translocatorNetworkPromise=undefined;fullTileRefresh=true;refreshLayers();scheduleTiles();});
     events.addEventListener('colormap',event=>{try{const data=JSON.parse(event.data);if(!metadata)return;metadata.colorVersion=data.version;metadata.colormapReady=true;if(activeLayer?.renderer==='basic'){fullTileRefresh=true;scheduleTiles();}}catch{}});
     events.addEventListener('tile',event=>{try{queueTile(JSON.parse(event.data));}catch{}});
     events.addEventListener('layer',event=>{try{const name=JSON.parse(event.data).layer;if(name==='translocators')translocatorNetworkPromise=undefined;refreshLayer(name);}catch{}});

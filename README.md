@@ -31,7 +31,7 @@ LauncherGo 是面向 Vintage Story 服务器的图形化开服器。项目目标
 
 | 项目 | 当前情况 |
 | --- | --- |
-| 软件版本 | 当前版本 `2.7.0-pre.1`；Windows 打包和 Release 发布由 `.github/workflows/windows-packages.yml`、`.github/workflows/publish-release.yml` 的版本输入或 `v*` 标签覆盖 `Version` 与 `InformationalVersion` |
+| 软件版本 | 当前版本 `2.7.0`；Windows 打包和 Release 发布由 `.github/workflows/windows-packages.yml`、`.github/workflows/publish-release.yml` 的版本输入或 `v*` 标签覆盖 `Version` 与 `InformationalVersion` |
 | 产品阶段 | 第二代开服器，持续开发中 |
 | 目标框架 | `.NET net10.0` |
 | 桌面 UI | `Avalonia 12.0.1` 与 `Semi.Avalonia 12.0.1` |

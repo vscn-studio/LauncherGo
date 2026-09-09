@@ -23,10 +23,12 @@ public sealed class RenderQueue : IDisposable
         public int RetryAttempts;
         public int RetryGeneration;
         public bool Priority;
+        public int Ticket;
     }
 
-    private readonly BlockingCollection<ChunkKey> jobs = new();
-    private readonly BlockingCollection<ChunkKey> priorityJobs = new();
+    private readonly record struct Job(ChunkKey Key, JobState State, int Ticket);
+    private readonly BlockingCollection<Job> jobs = new();
+    private readonly BlockingCollection<Job> priorityJobs = new();
     private readonly Dictionary<ChunkKey, JobState> pending = [];
     private readonly object pendingGate = new();
     private readonly CancellationTokenSource stop = new();
@@ -88,8 +90,9 @@ public sealed class RenderQueue : IDisposable
         if (disposed) return;
         try
         {
-            if (state.Priority) { state.Priority = false; priorityJobs.Add(key); }
-            else jobs.Add(key);
+            var job = new Job(key, state, ++state.Ticket);
+            if (state.Priority) priorityJobs.Add(job);
+            else jobs.Add(job);
         }
         catch (InvalidOperationException)
         {
@@ -103,7 +106,7 @@ public sealed class RenderQueue : IDisposable
         lock (pendingGate)
         {
             if (disposed || !pending.TryGetValue(key, out var state)) return false;
-            if (state.IsRunning) return true;
+            if (state.IsRunning || state.RetryScheduled) return true;
             if (state.Priority) return true;
             state.Priority = true;
             AddJobLocked(key, state);
@@ -117,13 +120,14 @@ public sealed class RenderQueue : IDisposable
         {
             while (!stop.IsCancellationRequested)
             {
-                ChunkKey key;
-                if (!priorityJobs.TryTake(out key) && !jobs.TryTake(out key, 250, stop.Token)) continue;
+                if (!priorityJobs.TryTake(out var job) && !jobs.TryTake(out job, 250, stop.Token)) continue;
+                var key = job.Key;
                 JobState? state;
                 lock (pendingGate)
                 {
                     if (!pending.TryGetValue(key, out state)) continue;
-                    if (state.IsRunning) continue;
+                    if (!ReferenceEquals(state, job.State) || state.Ticket != job.Ticket || state.IsRunning) continue;
+                    state.Priority = false;
                     state.IsRunning = true;
                     state.RetryScheduled = false;
                 }

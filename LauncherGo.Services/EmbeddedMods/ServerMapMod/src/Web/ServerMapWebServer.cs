@@ -24,9 +24,11 @@ public sealed partial class ServerMapWebServer : IDisposable
     private readonly MapAuthStore auth; private readonly PoiStore pois; private readonly AnnouncementStore announcements;
     private readonly CancellationTokenSource stop = new(); private readonly LiveEventHub events = new();
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<(int X, int Z), byte>> baseTiles = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<(int X, int Z), byte> knownRegions = new();
     private readonly ConcurrentDictionary<string, long> layerVersions = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, IndexedPoint> translocators = new();
-    private readonly ConcurrentDictionary<string, byte> pendingParentBuilds = new(StringComparer.Ordinal);
+    private readonly TranslocatorIndex translocators;
+    private readonly ConcurrentDictionary<ChunkKey, byte> pendingObjectChunks = new();
+    private readonly ConcurrentDictionary<(string Renderer, int X, int Z), byte> pendingParentBuilds = new();
     private readonly object maintenanceGate = new();
     private Task maintenance = Task.CompletedTask;
     private bool maintenanceStarted;
@@ -38,11 +40,13 @@ public sealed partial class ServerMapWebServer : IDisposable
     public ServerMapWebServer(ICoreServerAPI api, ServerMapConfig config, string root, WorldDatabaseReader reader, MapPalette materials, MapAuthStore auth, PoiStore pois, AnnouncementStore announcements)
     {
         this.api = api; this.config = config; this.root = root; this.reader = reader; this.materials = materials; this.auth = auth; this.pois = pois; this.announcements = announcements;
+        translocators = new TranslocatorIndex(Path.Combine(root, "translocators.json"), message => api.Logger.Warning(message));
         notebook = new MapNotebookStore(Path.Combine(root, "web-notebook.json"));
         InitializeNotebook();
         InitializeAvatars();
         webRoot = ResolveWebRoot(api); renderer = new MapRenderer(reader, root, api.World.BlockAccessor.MapSizeY, materials); pyramid = new TilePyramidBuilder(root);
         foreach (var name in Renderers) { baseTiles[name] = LoadBaseTiles(name); layerVersions[name] = 1; }
+        foreach (var region in baseTiles.Values.SelectMany(tiles => tiles.Keys)) knownRegions.TryAdd(region, 0);
         foreach (var name in Layers) layerVersions.TryAdd(name, 1);
         api.Logger.Notification("ServerMap 2D web root: {0}", webRoot);
     }
@@ -120,15 +124,18 @@ public sealed partial class ServerMapWebServer : IDisposable
         var path = Path.Combine(root, "2d", rendererName.ToLowerInvariant(), zoom.ToString(CultureInfo.InvariantCulture), $"{x}_{z}.png");
         var exists = File.Exists(path);
         var bytes = exists ? File.ReadAllBytes(path) : TransparentTile;
-        if (!exists && RequestRender != null)
+        if (RequestRender != null)
         {
-            // Map zoom coordinates address a group of base tiles. Queue the
-            // nearest child first so the tile currently in the viewport starts
-            // rendering ahead of the background save scan.
-            var scale = 1 << Math.Clamp(zoom, 0, 20);
-            var baseX = checked(x * scale);
-            var baseZ = checked(z * scale);
-            RequestRender(new ChunkKey(baseX, 0, baseZ), true);
+            // Existing PNGs can still have old colors. Promote every known
+            // stale child covered by the requested parent, not its top-left
+            // (possibly unexplored) child only.
+            var span = 1L << zoom; var minX = x * span; var minZ = z * span;
+            foreach (var region in knownRegions.Keys)
+                if (region.X >= minX && region.X < minX + span && region.Z >= minZ && region.Z < minZ + span)
+                {
+                    var key = new ChunkKey(region.X, 0, region.Z);
+                    if (!HasBaseTile(rendererName, key) && (rendererName != "basic" || materials.HasClientColormap)) RequestRender(key, true);
+                }
         }
         if (MapVisibility.ShouldMaskTiles(Principal(context.Request)?.IsAdmin == true, context.Request.QueryString["hideRegions"]))
             bytes = MapVisibility.MaskTile(bytes, zoom, x, z, notebook.Regions);
@@ -274,7 +281,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             results.Add(new { kind = "player", name = player.PlayerName, hasLocation = visible && pos != null, x = visible ? pos?.X : null, z = visible ? pos?.Z : null });
         }
         foreach (var claim in api.WorldManager.LandClaims) if ((Match(claim.Description) || Match(claim.LastKnownOwnerName)) && CanView(principal, claim.Center.X, claim.Center.Z) && (principal?.IsAdmin == true || !claim.Areas.Any(a => notebook.Regions.Any(r => MapVisibility.Intersects(r, a.MinX, a.MinZ, a.MaxX + 1, a.MaxZ + 1))))) { var center = claim.Center; results.Add(new { kind = "claim", name = string.IsNullOrWhiteSpace(claim.Description) ? claim.LastKnownOwnerName : claim.Description, hasLocation = true, x = (double?)center.X, z = (double?)center.Z }); }
-        foreach (var point in translocators.Values) if (Match(point.Name) && CanView(principal, point.X, point.Z) && (principal?.IsAdmin == true || !notebook.Regions.Any(r => MapVisibility.Intersects(r, Math.Min(point.X, point.TargetX ?? point.X), Math.Min(point.Z, point.TargetZ ?? point.Z), Math.Max(point.X, point.TargetX ?? point.X), Math.Max(point.Z, point.TargetZ ?? point.Z))))) results.Add(new { kind = point.Kind, name = point.Name, hasLocation = true, x = (double?)point.X, z = (double?)point.Z });
+        foreach (var point in translocators.Values) if (Match(point.Name) && CanView(principal, point.X, point.Z) && (principal?.IsAdmin == true || !notebook.Regions.Any(r => MapVisibility.Intersects(r, Math.Min(point.X, point.TargetX), Math.Min(point.Z, point.TargetZ), Math.Max(point.X, point.TargetX), Math.Max(point.Z, point.TargetZ))))) results.Add(new { kind = point.Kind, name = point.Name, hasLocation = true, x = (double?)point.X, z = (double?)point.Z });
         foreach (var poi in pois.All) if ((Match(poi.Name) || Match(poi.Text)) && PoiVisible(principal, poi)) results.Add(new { kind = "poi", name = poi.Name, hasLocation = true, x = (double?)poi.X, z = (double?)poi.Z });
         return results.Take(50).ToArray();
     }
@@ -395,9 +402,9 @@ public sealed partial class ServerMapWebServer : IDisposable
         var emitted = new HashSet<string>(StringComparer.Ordinal);
         foreach (var point in translocators.Values)
         {
-            if (point.TargetX is not { } targetX || point.TargetZ is not { } targetZ) continue;
-            var sourceKey = FormattableString.Invariant($"{point.X:R},{point.Y:R},{point.Z:R}");
-            var targetKey = FormattableString.Invariant($"{targetX:R},{point.TargetY ?? 0:R},{targetZ:R}");
+            var targetX = point.TargetX; var targetZ = point.TargetZ;
+            var sourceKey = FormattableString.Invariant($"{point.X},{point.Y},{point.Z}");
+            var targetKey = FormattableString.Invariant($"{targetX},{point.TargetY},{targetZ}");
             var pairKey = string.CompareOrdinal(sourceKey, targetKey) <= 0 ? sourceKey + "|" + targetKey : targetKey + "|" + sourceKey;
             if (!emitted.Add(pairKey) || !Intersects(Math.Min(point.X, targetX), Math.Min(point.Z, targetZ), Math.Max(point.X, targetX), Math.Max(point.Z, targetZ), bounds)) continue;
             features.Add(new { type = "Feature", id = point.Id, geometry = new { type = "LineString", coordinates = new[] { new[] { point.X, point.Z }, new[] { targetX, targetZ } } }, properties = new { name = point.Name, y = point.Y, targetY = point.TargetY, kind = point.Kind } });
@@ -418,49 +425,90 @@ public sealed partial class ServerMapWebServer : IDisposable
 
     private async Task BuildObjectIndexAsync()
     {
-        try
+        var changed = false;
+        var scannedChunks = 0;
+        var lastPublish = Environment.TickCount64;
+        var lastLog = lastPublish;
+        void Publish()
+        {
+            if (changed)
+            {
+                translocators.Save();
+                var version = layerVersions.AddOrUpdate("translocators", 2, (_, old) => old + 1);
+                events.Publish("layer", new { layer = "translocators", version });
+                changed = false;
+            }
+            lastPublish = Environment.TickCount64;
+        }
+        async Task ReadChunk(ChunkKey key)
         {
             stop.Token.ThrowIfCancellationRequested();
-            api.Logger.Notification("ServerMap object index started (background, paged, throttled).");
-            var skippedChunks = 0;
-            var scannedChunks = 0;
-            var lastProgress = Environment.TickCount64;
-            foreach (var column in reader.MapColumns(stop.Token))
+            try
             {
-                if (stop.IsCancellationRequested) return;
-                foreach (var y in reader.ChunkYs(column.X, column.Z))
+                var points = reader.ReadTranslocators(key);
+                if (points != null) changed |= translocators.ReplaceChunk(key.X, key.Y, key.Z, points);
+                else pendingObjectChunks.TryAdd(key, 0);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                pendingObjectChunks.TryAdd(key, 0);
+                if (Environment.TickCount64 - lastLog >= 10000)
                 {
-                    stop.Token.ThrowIfCancellationRequested();
-                    if (++scannedChunks % 32 == 0) await Task.Delay(25, stop.Token).ConfigureAwait(false);
-                    if (Environment.TickCount64 - lastProgress >= 10000)
-                    {
-                        api.Logger.Notification("ServerMap object index progress: {0} chunks scanned.", scannedChunks);
-                        lastProgress = Environment.TickCount64;
-                    }
-                    var chunk = reader.LoadChunk(new ChunkKey(column.X, y, column.Z));
-                    if (chunk == null) continue;
-                    try
-                    {
-                        foreach (var blockEntity in chunk.BlockEntities.Values)
-                        {
-                            if (blockEntity is BlockEntityStaticTranslocator translocator && translocator.TargetLocation is { } target)
-                            {
-                                var pos = translocator.Pos; var id = $"translocator-{pos.X}-{pos.Y}-{pos.Z}";
-                                translocators[id] = new IndexedPoint(id, "Translocator", "translocator", pos.X, pos.Y, pos.Z, target.X, target.Y, target.Z);
-                            }
-                        }
-                    }
-                    catch { skippedChunks++; }
-                    finally { chunk.Dispose(); }
+                    api.Logger.Warning("ServerMap translocator chunk {0} will retry: {1}", key, ex.Message);
+                    lastLog = Environment.TickCount64;
                 }
             }
-            layerVersions.AddOrUpdate("translocators", 2, (_, old) => old + 1);
-            events.Publish("layer", new { layer = "translocators", version = layerVersions["translocators"] });
-            api.Logger.Notification("ServerMap object index ready: translocators={0}, skipped-chunks={1}.", translocators.Count, skippedChunks);
+            if (++scannedChunks % 32 == 0) await Task.Delay(25, stop.Token).ConfigureAwait(false);
+            if (Environment.TickCount64 - lastPublish >= 2000) Publish();
+        }
+        try
+        {
+            api.Logger.Notification("ServerMap object index restored: translocators={0}; validating saved chunks in background.", translocators.Count);
+            var scanned = false;
+            while (!scanned)
+            {
+                try
+                {
+                    foreach (var column in reader.MapColumns(stop.Token))
+                    {
+                        foreach (var y in reader.ChunkYs(column.X, column.Z))
+                            await ReadChunk(new ChunkKey(column.X, y, column.Z)).ConfigureAwait(false);
+                        if (Environment.TickCount64 - lastLog >= 10000)
+                        {
+                            api.Logger.Notification("ServerMap object index: chunks={0}, translocators={1}, retrying={2}.", scannedChunks, translocators.Count, pendingObjectChunks.Count);
+                            lastLog = Environment.TickCount64;
+                        }
+                    }
+                    scanned = true;
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    Publish();
+                    api.Logger.Warning("ServerMap object scan interrupted; preserving index and retrying: {0}", ex.Message);
+                    await Task.Delay(5000, stop.Token).ConfigureAwait(false);
+                }
+            }
+            Publish();
+            api.Logger.Notification("ServerMap object index ready: translocators={0}, retrying={1}.", translocators.Count, pendingObjectChunks.Count);
+            while (!stop.IsCancellationRequested)
+            {
+                await Task.Delay(2000, stop.Token).ConfigureAwait(false);
+                foreach (var key in pendingObjectChunks.Keys.Take(128).ToArray())
+                    if (pendingObjectChunks.TryRemove(key, out _)) await ReadChunk(key).ConfigureAwait(false);
+                Publish();
+            }
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
         catch (Exception ex) { api.Logger.Warning("ServerMap object index failed: {0}", ex); }
+        finally
+        {
+            try { translocators.Save(); }
+            catch (Exception ex) { api.Logger.Warning("ServerMap could not persist translocator index: {0}", ex.Message); }
+        }
     }
+    public void QueueObjectChunk(ChunkKey key) => pendingObjectChunks.TryAdd(key, 0);
     private static (double MinX, double MinZ, double MaxX, double MaxZ)? ParseBounds(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null; var values = value.Split(',');
@@ -500,42 +548,50 @@ public sealed partial class ServerMapWebServer : IDisposable
     }
     private void ScheduleParentBuild(string rendererName, ChunkKey key)
     {
-        // Coalesce requests arriving during a zoom/pan burst.  Multiple
-        // neighbouring base tiles often invalidate the same first parent;
-        // key the debounce by that parent instead of by the source tile.
-        var parentX = TilePyramidBuilder.FloorDiv(key.X, 2);
-        var parentZ = TilePyramidBuilder.FloorDiv(key.Z, 2);
-        var id = rendererName + ":1:" + parentX + ":" + parentZ;
-        if (!pendingParentBuilds.TryAdd(id, 0)) return;
-        _ = Task.Run(async () =>
+        pendingParentBuilds.TryAdd((rendererName, key.X, key.Z), 0);
+    }
+    private async Task UpdateParentsAsync()
+    {
+        try
         {
-            try
+            while (!stop.IsCancellationRequested)
             {
-                await Task.Delay(200, stop.Token).ConfigureAwait(false);
-                foreach (var parent in pyramid.BuildParents(rendererName, key)) events.Publish("tile", new { renderer = rendererName, zoom = parent.Zoom, x = parent.X, z = parent.Z });
+                await Task.Delay(250, stop.Token).ConfigureAwait(false);
+                var batch = pendingParentBuilds.Keys.Take(64).Where(key => pendingParentBuilds.TryRemove(key, out _)).ToArray();
+                foreach (var group in batch.GroupBy(key => key.Renderer))
+                {
+                    try
+                    {
+                        foreach (var parent in pyramid.BuildParentsBatch(group.Key, group.Select(key => (key.X, key.Z)), stop.Token))
+                            events.Publish("tile", new { renderer = group.Key, zoom = parent.Zoom, x = parent.X, z = parent.Z });
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex)
+                    {
+                        foreach (var key in group) pendingParentBuilds.TryAdd(key, 0);
+                        api.Logger.Warning("ServerMap parent tile update will retry: {0}", ex.Message);
+                    }
+                }
             }
-            catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
-            catch (Exception ex) { api.Logger.Warning("ServerMap parent tile update failed: {0}", ex.Message); }
-            finally { pendingParentBuilds.TryRemove(id, out _); }
-        }, stop.Token);
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
     }
     public void NotifyColormapApplied() => events.Publish("colormap", new { month = materials.ClientColormapMonth, version = materials.ClientColormapVersion });
-    public bool HasBaseTile(string rendererName, ChunkKey key) => baseTiles.TryGetValue(rendererName, out var tiles) && tiles.ContainsKey((key.X, key.Z));
+    public void NoteRegion(ChunkKey key) => knownRegions.TryAdd((key.X, key.Z), 0);
+    public IEnumerable<ChunkKey> StaleColorRegions() => knownRegions.Keys.Select(p => new ChunkKey(p.X, 0, p.Z)).Where(key => !HasBaseTile("basic", key));
+    public bool HasBaseTile(string rendererName, ChunkKey key) => baseTiles.TryGetValue(rendererName, out var tiles) && tiles.ContainsKey((key.X, key.Z))
+        && (rendererName != "basic" || TileColorStamp.IsCurrent(Path.Combine(root, "2d", "basic", "0", $"{key.X}_{key.Z}.png"), materials.ClientColormapVersion));
     public void StartBackgroundMaintenance()
     {
         lock (maintenanceGate)
         {
             if (maintenanceStarted || stop.IsCancellationRequested) return;
             maintenanceStarted = true;
-            maintenance = Task.WhenAll(Task.Run(BuildObjectIndexAsync), Task.Run(() =>
-            {
-                foreach (var rendererName in Renderers)
-                {
-                    try { pyramid.BuildAllParents(rendererName, baseTiles[rendererName].Keys, stop.Token); }
-                    catch (OperationCanceledException) when (stop.IsCancellationRequested) { return; }
-                    catch (Exception ex) { api.Logger.Warning("ServerMap could not backfill {0} parent tiles: {1}", rendererName, ex.Message); }
-                }
-            }));
+            foreach (var rendererName in Renderers)
+                foreach (var key in baseTiles[rendererName].Keys) pendingParentBuilds.TryAdd((rendererName, key.X, key.Z), 0);
+            // One writer owns every zoom level. Concurrent per-region tasks
+            // could overwrite a freshly colored parent with an older snapshot.
+            maintenance = Task.WhenAll(Task.Run(BuildObjectIndexAsync), Task.Run(UpdateParentsAsync));
         }
     }
     private static string ResolveWebRoot(ICoreServerAPI api)

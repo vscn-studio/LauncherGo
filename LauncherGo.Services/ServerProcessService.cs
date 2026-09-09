@@ -24,6 +24,7 @@ public sealed partial class ServerProcessService : IServerProcessService
     private readonly Dictionary<string, SingleServerProcessController> _controllers = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, InstanceProfile> _controllerProfiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ServerRuntimeStatus> _statuses = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, ServerRuntimeStatus> _logStatuses = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, BridgePlayerSnapshot> _bridgePlayers = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTimeOffset> _bridgePlayerRefreshAttempts = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _bridgePlayerRefreshes = new(StringComparer.OrdinalIgnoreCase);
@@ -94,6 +95,7 @@ public sealed partial class ServerProcessService : IServerProcessService
 
         lock (_gate)
         {
+            GetCurrentBridgePlayerSnapshotUnsafe(profileId.Trim());
             return _statuses.TryGetValue(profileId.Trim(), out var status)
                 ? status
                 : new ServerRuntimeStatus { ProfileId = profileId.Trim() };
@@ -144,6 +146,7 @@ public sealed partial class ServerProcessService : IServerProcessService
     {
         lock (_gate)
         {
+            ExpireCachedPlayerSnapshotsUnsafe();
             return _statuses.Values.FirstOrDefault(status => status.IsRunning)
                    ?? _statuses.Values.FirstOrDefault()
                    ?? new ServerRuntimeStatus();
@@ -154,6 +157,7 @@ public sealed partial class ServerProcessService : IServerProcessService
     {
         lock (_gate)
         {
+            ExpireCachedPlayerSnapshotsUnsafe();
             return _statuses.Values
                 .OrderByDescending(static status => status.IsRunning)
                 .ThenBy(status => ResolveStatusProfileName(status.ProfileId))
@@ -202,13 +206,19 @@ public sealed partial class ServerProcessService : IServerProcessService
             }
             if (server is null && players is null) return localStatus;
 
-            var parsedPlayers = players is null ? [] : ParseBridgePlayers(profile, players);
+            var parsedPlayers = players?["players"] is JsonArray ? ParseBridgePlayers(profile, players) : null;
             var receivedAt = DateTimeOffset.UtcNow;
-            var merged = MergeBridgePlayers(localStatus, parsedPlayers);
+            ServerRuntimeStatus merged;
             lock (_gate)
             {
-                if (players is not null)
+                // Keep the latest local status: a query can finish after a
+                // player leaves or the server stops. Missing player data must
+                // not override an existing valid bridge snapshot either.
+                var current = _logStatuses.GetValueOrDefault(profile.Id) ?? localStatus;
+                if (!current.IsRunning) return current;
+                if (parsedPlayers is not null)
                     _bridgePlayers[profile.Id] = new BridgePlayerSnapshot(receivedAt, parsedPlayers);
+                merged = MergeBridgePlayers(current, GetCurrentBridgePlayerSnapshotUnsafe(profile.Id)?.Players);
                 _statuses[profile.Id] = merged;
             }
             StatusChanged?.Invoke(this, merged);
@@ -226,14 +236,26 @@ public sealed partial class ServerProcessService : IServerProcessService
     {
         lock (_gate)
         {
-            var runningProfileIds = _statuses.Values
+            var runningStatuses = _statuses.Values
                 .Where(static status => status.IsRunning && !string.IsNullOrWhiteSpace(status.ProfileId))
-                .Select(static status => status.ProfileId!)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            return _bridgePlayers
-                .Where(pair => runningProfileIds.Contains(pair.Key) &&
-                               DateTimeOffset.UtcNow - pair.Value.ReceivedAtUtc <= BridgePlayerSnapshotLifetime)
-                .SelectMany(static pair => pair.Value.Players)
+                .ToArray();
+            return runningStatuses.SelectMany(status =>
+                {
+                    var profileId = status.ProfileId!;
+                    var snapshot = GetCurrentBridgePlayerSnapshotUnsafe(profileId);
+                    // An empty valid snapshot is authoritative; null means no
+                    // usable bridge data and must retain the log-derived roster.
+                    if (snapshot is not null) return snapshot.Players;
+                    var local = _logStatuses.GetValueOrDefault(profileId) ?? status;
+                    var profileName = ResolveStatusProfileName(profileId);
+                    return local.OnlinePlayerNames.Where(name => !string.IsNullOrWhiteSpace(name))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Select(name => new ServerOnlinePlayerInfo
+                        {
+                            PlayerName = name, ProfileId = profileId,
+                            ProfileName = string.IsNullOrWhiteSpace(profileName) ? profileId : profileName
+                        });
+                })
                 .OrderBy(static player => player.ProfileName, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(static player => player.PlayerName, StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -378,6 +400,7 @@ public sealed partial class ServerProcessService : IServerProcessService
         var refreshBridgePlayers = false;
         lock (_gate)
         {
+            _logStatuses[profileId] = status;
             if (!status.IsRunning)
             {
                 _bridgePlayers.Remove(profileId);
@@ -386,7 +409,7 @@ public sealed partial class ServerProcessService : IServerProcessService
             }
 
             var snapshot = GetCurrentBridgePlayerSnapshotUnsafe(profileId);
-            publishedStatus = MergeBridgePlayers(status, snapshot?.Players ?? []);
+            publishedStatus = MergeBridgePlayers(status, snapshot?.Players);
             _statuses[profileId] = publishedStatus;
             if (status.IsRunning)
             {
@@ -416,7 +439,7 @@ public sealed partial class ServerProcessService : IServerProcessService
                 return;
 
             var result = await _serverBridgeService.QueryAsync(profile, "players.list").ConfigureAwait(false);
-            if (!result.Success || result.Data is null)
+            if (!result.Success || result.Data?["players"] is not JsonArray)
             {
                 ExpireBridgePlayers(profile.Id);
                 return;
@@ -463,7 +486,7 @@ public sealed partial class ServerProcessService : IServerProcessService
             _bridgePlayers.Remove(profileId);
             if (_statuses.TryGetValue(profileId, out var current) && current.IsRunning)
             {
-                publishedStatus = MergeBridgePlayers(current, []);
+                publishedStatus = _logStatuses.GetValueOrDefault(profileId) ?? current;
                 _statuses[profileId] = publishedStatus;
             }
         }
@@ -479,13 +502,20 @@ public sealed partial class ServerProcessService : IServerProcessService
         if (DateTimeOffset.UtcNow - snapshot.ReceivedAtUtc <= BridgePlayerSnapshotLifetime)
             return snapshot;
         _bridgePlayers.Remove(profileId);
+        if (_logStatuses.TryGetValue(profileId, out var local)) _statuses[profileId] = local;
         return null;
+    }
+
+    private void ExpireCachedPlayerSnapshotsUnsafe()
+    {
+        foreach (var profileId in _bridgePlayers.Keys.ToArray()) GetCurrentBridgePlayerSnapshotUnsafe(profileId);
     }
 
     internal static ServerRuntimeStatus MergeBridgePlayers(
         ServerRuntimeStatus status,
-        IReadOnlyList<ServerOnlinePlayerInfo> players)
+        IReadOnlyList<ServerOnlinePlayerInfo>? players)
     {
+        if (players is null) return status;
         var names = players
             .Select(static player => player.PlayerName)
             .Where(static name => !string.IsNullOrWhiteSpace(name))
