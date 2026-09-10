@@ -143,8 +143,8 @@
     const localPoint=latlng=>relativePoint(gamePoint(latlng));
     const crs=L.Util.extend({},L.CRS.Simple,{transformation:new L.Transformation(1,0,1,0)});
     const map=L.map('map',{crs,center:[0,0],zoom:0,zoomSnap:1,zoomDelta:1,preferCanvas:true,attributionControl:false,zoomControl:false,fadeAnimation:!isMobile(),zoomAnimation:!isMobile(),markerZoomAnimation:!isMobile()}); L.control.zoom({position:'bottomright'}).addTo(map);
-    // Detail labels are visible only at UI zoom levels 14–15, including selected labels.
-    function updateOverlayScale(){const element=map.getContainer(),line=Math.max(.5,Math.min(1,Math.pow(2,(map.getZoom()-nativeZoom)/4)));element.classList.toggle('map-labels-distant',map.getZoom()<14||map.getZoom()>15);element.style.setProperty('--preview-width',`${2*line}px`);element.style.setProperty('--walk-width',`${2.5*line}px`);element.style.setProperty('--jump-casing-width',`${4.5*line}px`);element.style.setProperty('--jump-width',`${3*line}px`);element.style.setProperty('--thin-width',`${1.5*line}px`);}
+    // Detail labels are visible only at UI zoom levels 13–15, including selected labels.
+    function updateOverlayScale(){const element=map.getContainer(),line=Math.max(.5,Math.min(1,Math.pow(2,(map.getZoom()-nativeZoom)/4)));element.classList.toggle('map-labels-distant',map.getZoom()<13||map.getZoom()>15);element.style.setProperty('--preview-width',`${2*line}px`);element.style.setProperty('--walk-width',`${2.5*line}px`);element.style.setProperty('--jump-casing-width',`${4.5*line}px`);element.style.setProperty('--jump-width',`${3*line}px`);element.style.setProperty('--thin-width',`${1.5*line}px`);}
     function selectableMapLabel(layer){
       const sync=event=>{const selected=event.type!=='popupclose'&&!!layer.isPopupOpen();layer.getTooltip()?.getElement()?.classList.toggle('map-label-selected',selected);layer.getElement()?.querySelector('.poi-label')?.classList.toggle('map-label-selected',selected);};
       layer.on('popupopen popupclose tooltipopen add',sync);return layer;

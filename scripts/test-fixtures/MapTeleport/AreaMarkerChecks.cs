@@ -29,6 +29,9 @@ static class AreaMarkerChecks
             var web=(ServerMapWebServer)RuntimeHelpers.GetUninitializedObject(typeof(ServerMapWebServer));
             void Field(string name,object value)=>typeof(ServerMapWebServer).GetField(name,BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(web,value);
             Field("api",api);Field("auth",auth);Field("notebook",notebook);Field("areaMarkers",areas);Field("events",new LiveEventHub());
+            var versions=new System.Collections.Concurrent.ConcurrentDictionary<string,long>();foreach(var key in new[]{"players","mounts","spawn","claims","claim-areas","chunks","translocators","pois"})versions[key]=1;Field("layerVersions",versions);
+            var manifest=JsonSerializer.SerializeToElement(typeof(ServerMapWebServer).GetMethod("Manifest",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(web,null));
+            Require(manifest.GetProperty("layers").EnumerateArray().Where(l=>l.GetProperty("visible").GetBoolean()).Select(l=>l.GetProperty("id").GetString()).Order().SequenceEqual(new[]{"mounts","players","pois","spawn"}),"Unexpected default map layers");
             var handler=typeof(ServerMapWebServer).GetMethod("AreaMarkerRequest",BindingFlags.Instance|BindingFlags.NonPublic)!;
             async Task<(int Status,JsonElement Json)> Call(string method,object? body=null,bool login=true,bool header=true)
             {
@@ -56,6 +59,17 @@ static class AreaMarkerChecks
             admin=false;Require((await Call("DELETE",new{revision=2,id=saved.Markers[0].Id})).Status==403,"Player delete accepted");admin=true;
             Require((await Call("DELETE",new{revision=2,id=saved.Markers[0].Id})).Status==200,"Admin delete failed");Require(notebook.Regions.Length==1,"Area deletion changed fog");
             Require(new AreaMarkerStore(Path.Combine(root,"areas.json")).Read().Markers.Length==1,"Persistence failed");
+            var sourceA=areas.Save(3,null,"Fine","#abcdef",12,[new(100,100,110,110)]);
+            var sourceB=areas.Save(4,null,"Middle","#abcdef",10,[new(105,105,115,115)]);
+            object Merge(int band=7,double border=.45)=>new{revision=5,minZoom=band,name="Merged",color="#123456",sourceIds=new[]{sourceA.Id,sourceB.Id},rects=new[]{new[]{900,900,1000,1000}},borderOpacity=border,fillOpacity=.1,textOpacity=.8};
+            Require((await Call("POST",Merge(10))).Status==400,"Same-level merge accepted");
+            Require((await Call("POST",Merge(border:1.1))).Status==400,"Invalid opacity accepted");
+            admin=false;Require((await Call("POST",Merge())).Status==403,"Player merge accepted");admin=true;
+            Require((await Call("POST",Merge())).Status==200,"Higher-level merge failed");
+            var merged=areas.Read().Markers.Single(m=>m.Name=="Merged");Require(merged.Rects.All(r=>r.MaxX<=115)&&merged.Style.BorderOpacity==.45,"Merge trusted client geometry or lost opacity");
+            Require(areas.Read().Markers.Any(m=>m.Id==sourceA.Id)&&areas.Read().Markers.Any(m=>m.Id==sourceB.Id),"Merge removed sources");
+            var visibleStyle=(await Call("GET")).Json.GetProperty("markers").EnumerateArray().Single(m=>m.GetProperty("id").GetString()==merged.Id);
+            Require(visibleStyle.GetProperty("textOpacity").GetDouble()==.8,"HTTP style fields missing");
             Console.WriteLine("PASS area HTTP: guest/player/admin, live role revocation, CSRF, geometry validation, conflicts, neighbour clipping, fog and persistence");
         }
         finally { Directory.Delete(root,true); }

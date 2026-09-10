@@ -59,5 +59,31 @@ public sealed class AreaMarkerTests : IDisposable
         var marker=Store().Save(0,null,"Large region","#abcdef",4,[R(-1000000,-1000000,1000000,1000000)]);
         Assert.Single(marker.Rects); Assert.Equal(4_000_000_000_000L,Area(marker));
     }
+    [Fact] public void MergeMixedBandsOnlyCreatesHigherLevelsAndPreservesOriginals()
+    {
+        var store=Store();var a=store.Save(0,null,"Town","#abcdef",12,[R(0,0,10,10)]);
+        var b=store.Save(1,null,"District","#abcdef",10,[R(5,5,15,15)]);
+        var style=new AreaMarkerStore.Appearance(.4,.2,.7);
+        foreach(var invalid in new[]{10,12}) Assert.Throws<ArgumentException>(()=>store.Merge(2,[a.Id,b.Id],"Invalid","#abcdef",invalid));
+        Assert.Throws<ArgumentException>(()=>store.Merge(2,[a.Id,a.Id],"Duplicate","#abcdef",7));
+        Assert.Throws<KeyNotFoundException>(()=>store.Merge(2,[a.Id,"missing"],"Missing","#abcdef",7));
+        Assert.Throws<InvalidOperationException>(()=>store.Merge(0,[a.Id,b.Id],"Stale","#abcdef",7));
+        var merged=store.Merge(2,[a.Id,b.Id],"Province","#abcdef",7,style);
+        Assert.Equal(175,Area(merged));Assert.Equal(style,Store().Read().Markers.Single(m=>m.Id==merged.Id).Style);
+        Assert.Equal(a.Rects,store.Read().Markers.Single(m=>m.Id==a.Id).Rects);Assert.Equal(b.Rects,store.Read().Markers.Single(m=>m.Id==b.Id).Rects);
+        var top=store.Merge(3,[a.Id,b.Id,merged.Id],"Country","#abcdef",4);
+        Assert.Equal(175,Area(top));Assert.Throws<ArgumentException>(()=>store.Merge(4,[a.Id,top.Id],"No parent","#abcdef",4));
+    }
+    [Fact] public void OpacityDefaultsSurviveLegacyDataAndInvalidSettingsAreRejected()
+    {
+        Directory.CreateDirectory(root);var path=Path.Combine(root,"areas.json");
+        File.WriteAllText(path,System.Text.Json.JsonSerializer.Serialize(new{Revision=1,Markers=new[]{new{Id="legacy",Name="Old",Color="#abcdef",MinZoom=12,Rects=new[]{R(0,0,1,1)}}}}));
+        var store=Store();Assert.Equal(new AreaMarkerStore.Appearance(.25,.08,.58),store.Read().Markers.Single().Style);
+        var style=new AreaMarkerStore.Appearance(0,1,.45);store.Save(1,"legacy","Old","#abcdef",12,[R(0,0,1,1)],style);
+        store.Save(2,"legacy","Name only","#abcdef",12,[R(0,0,1,1)]);Assert.Equal(style,Store().Read().Markers.Single().Style);
+        foreach(var bad in new[]{new AreaMarkerStore.Appearance(-.1),new AreaMarkerStore.Appearance(1.1),new AreaMarkerStore.Appearance(.2,double.NaN),new AreaMarkerStore.Appearance(.2,.3,double.PositiveInfinity)})
+            Assert.Throws<ArgumentException>(()=>store.Save(3,"legacy","Invalid","#abcdef",12,[R(0,0,1,1)],bad));
+        Assert.Equal(3,store.Read().Revision);
+    }
     public void Dispose() { if (Directory.Exists(root)) Directory.Delete(root, true); }
 }

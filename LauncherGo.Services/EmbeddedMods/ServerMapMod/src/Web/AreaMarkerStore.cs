@@ -11,7 +11,11 @@ public sealed class AreaMarkerStore
 {
     public const int MaxMarkers = 256, MaxRects = 1024, MaxTotalRects = 8192;
     public sealed record Rect(int MinX, int MinZ, int MaxX, int MaxZ);
-    public sealed record Marker(string Id, string Name, string Color, int MinZoom, Rect[] Rects);
+    public sealed record Appearance(double BorderOpacity = .25, double FillOpacity = .08, double TextOpacity = .58);
+    public sealed record Marker(string Id, string Name, string Color, int MinZoom, Rect[] Rects)
+    {
+        public Appearance Style { get; init; } = new();
+    }
     public sealed record Snapshot(long Revision, Marker[] Markers);
     private readonly object gate = new();
     private readonly string path;
@@ -22,11 +26,11 @@ public sealed class AreaMarkerStore
         state = File.Exists(path) ? JsonSerializer.Deserialize<Snapshot>(File.ReadAllText(path)) ?? throw new InvalidDataException("Invalid area markers") : new(0, []);
         if (state.Revision < 0 || state.Markers == null || state.Markers.Length > MaxMarkers || state.Markers.Any(m => m == null || m.Rects == null) || state.Markers.Sum(m => m.Rects.Length) > MaxTotalRects)
             throw new InvalidDataException("Invalid area markers");
-        foreach (var marker in state.Markers) Validate(marker.Name, marker.Color, marker.MinZoom, marker.Rects);
+        foreach (var marker in state.Markers) { Validate(marker.Name, marker.Color, marker.MinZoom, marker.Rects); ValidateStyle(marker.Style); }
     }
     public Snapshot Read() { lock (gate) return new(state.Revision, state.Markers.Select(m => m with { Rects = m.Rects.ToArray() }).ToArray()); }
     public static int MaxZoom(int minZoom) => minZoom switch { 4 => 6, 7 => 9, 10 => 11, 12 => 13, _ => throw new ArgumentException("Invalid area zoom band") };
-    public Marker Save(long revision, string? id, string name, string color, int minZoom, Rect[] rects)
+    public Marker Save(long revision, string? id, string name, string color, int minZoom, Rect[] rects, Appearance? style = null)
     {
         Validate(name, color, minZoom, rects);
         lock (gate)
@@ -34,25 +38,52 @@ public sealed class AreaMarkerStore
             if (revision != state.Revision) throw new InvalidOperationException("Area markers changed; reload before saving");
             if (!string.IsNullOrEmpty(id) && !state.Markers.Any(m => m.Id == id)) throw new KeyNotFoundException();
             if (string.IsNullOrEmpty(id) && state.Markers.Length >= MaxMarkers) throw new InvalidOperationException("Area marker limit reached (256)");
+            style ??= state.Markers.FirstOrDefault(m => m.Id == id)?.Style ?? new();
+            ValidateStyle(style);
             var budget = 2_000_000;
-            var normalized = new List<Rect>();
-            // Union input rectangles without double-painted pixels.
-            foreach (var rect in rects)
-            {
-                var pieces = new List<Rect> { rect };
-                foreach (var occupied in normalized) pieces = Cut(pieces, occupied, ref budget);
-                normalized.AddRange(pieces); CheckCount(normalized.Count);
-            }
+            var normalized = Union(rects, ref budget);
             // Even stale/concurrent clients cannot overwrite neighbours in the same band.
             foreach (var occupied in state.Markers.Where(m => m.Id != id && m.MinZoom == minZoom).SelectMany(m => m.Rects))
                 normalized = Cut(normalized, occupied, ref budget);
             if (normalized.Count == 0) throw new ArgumentException("Select an unoccupied area");
             if (state.Markers.Where(m => m.Id != id).Sum(m => m.Rects.Length) + normalized.Count > MaxTotalRects)
                 throw new InvalidOperationException("Area geometry limit reached");
-            var marker = new Marker(string.IsNullOrEmpty(id) ? Guid.NewGuid().ToString("N") : id, name.Trim(), color.ToLowerInvariant(), minZoom, normalized.ToArray());
+            var marker = new Marker(string.IsNullOrEmpty(id) ? Guid.NewGuid().ToString("N") : id, name.Trim(), color.ToLowerInvariant(), minZoom, normalized.ToArray()) { Style = style };
             Commit(new(state.Revision + 1, state.Markers.Where(m => m.Id != marker.Id).Append(marker).ToArray()));
             return marker with { Rects = marker.Rects.ToArray() };
         }
+    }
+    public Marker Merge(long revision, string[] sourceIds, string name, string color, int minZoom, Appearance? style = null)
+    {
+        _ = MaxZoom(minZoom);
+        if (sourceIds == null || sourceIds.Length is < 2 or > MaxMarkers || sourceIds.Any(string.IsNullOrWhiteSpace) || sourceIds.Distinct(StringComparer.Ordinal).Count() != sourceIds.Length)
+            throw new ArgumentException("Select at least two distinct source areas");
+        lock (gate)
+        {
+            if (revision != state.Revision) throw new InvalidOperationException("Area markers changed; reload before merging");
+            var sources = sourceIds.Select(id => state.Markers.FirstOrDefault(m => m.Id == id) ?? throw new KeyNotFoundException()).ToArray();
+            if (sources.Any(m => minZoom >= m.MinZoom)) throw new ArgumentException("Merged area must be a higher level than every source");
+            var budget = 2_000_000;
+            var rects = Union(sources.SelectMany(m => m.Rects), ref budget).ToArray();
+            // Geometry comes only from the server-owned originals, never a client-supplied bounding box.
+            return Save(revision, null, name, color, minZoom, rects, style);
+        }
+    }
+    private static List<Rect> Union(IEnumerable<Rect> rects, ref int budget)
+    {
+        var normalized = new List<Rect>();
+        foreach (var rect in rects)
+        {
+            var pieces = new List<Rect> { rect };
+            foreach (var occupied in normalized) pieces = Cut(pieces, occupied, ref budget);
+            normalized.AddRange(pieces); CheckCount(normalized.Count);
+        }
+        return normalized;
+    }
+    private static void ValidateStyle(Appearance style)
+    {
+        if (style == null || new[] { style.BorderOpacity, style.FillOpacity, style.TextOpacity }.Any(v => !double.IsFinite(v) || v < 0 || v > 1))
+            throw new ArgumentException("Opacity must be between zero and one");
     }
     public bool Remove(long revision, string id)
     {

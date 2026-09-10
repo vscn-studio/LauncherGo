@@ -1,5 +1,5 @@
 .area-marker-overlay { pointer-events:none!important;overflow:hidden;clip-path:inset(0);background:transparent; }
-.area-marker-overlay text { font-family:var(--map-label-font);font-weight:600;letter-spacing:.08em;stroke-linejoin:round; }
+.area-marker-overlay text { font-family:var(--map-label-font);font-weight:600;letter-spacing:.08em;stroke-linejoin:round;text-rendering:geometricPrecision; }
 #areaMarkerToolbar { position:fixed;z-index:1005;bottom:52px;left:62px;max-width:calc(100vw - 332px);max-height:36dvh;overflow:auto;padding:10px 12px;border:var(--border);border-radius:6px;color:var(--text);background:var(--glass);box-shadow:var(--shadow); }
 #areaMarkerToolbar label { display:flex;align-items:center;gap:6px;font-size:12px; }
 #areaMarkerBand { color:var(--text);background:#20252b;border:var(--border);border-radius:4px;padding:6px; }
@@ -8,6 +8,13 @@
 .area-marker-drawing,.area-marker-drawing .leaflet-grab { cursor:crosshair!important;touch-action:none!important; }
 #areaMarkerModal .modal { max-height:calc(100dvh - 32px);overflow:auto; }
 #areaMarkerColor { height:40px; }
+#areaMergeBand { color:var(--text);background:#20252b;border:var(--border);padding:6px;border-radius:4px; }
+.area-selected-list { display:flex;flex-wrap:wrap;gap:5px;margin-top:6px; }
+.area-opacity-field { display:grid;grid-template-columns:minmax(0,1fr) 46px;gap:4px 8px;align-items:center; }
+.area-opacity-field label { grid-column:1 / -1; }
+.area-opacity-field input[type=range] { min-width:0;padding:0;accent-color:#8abdc5; }
+.area-opacity-field output { font-size:12px;text-align:right;font-variant-numeric:tabular-nums; }
+#areaMarkerSearch { position:sticky;top:0;z-index:1; }
 .area-manage { margin:0 10px 6px; }
 .area-manager-row { display:flex;gap:6px;align-items:center;margin:6px 0; }
 .area-manager-row span { flex:1;min-width:0;overflow-wrap:anywhere;font-size:12px; }

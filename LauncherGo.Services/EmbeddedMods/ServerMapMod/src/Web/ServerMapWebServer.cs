@@ -451,7 +451,7 @@ public sealed partial class ServerMapWebServer : IDisposable
         catch (UnauthorizedAccessException) { return 0; }
     }
     private object Settings() => new { version = 7, enable2d = config.Enable2D, colormapReady = materials.HasClientColormap, colormapMonth = materials.ClientColormapMonth, ranges = Metadata() };
-    private object Manifest() => new { version = layerVersions.Values.DefaultIfEmpty().Max(), layers = Layers.Select(name => new { id = name, version = layerVersions[name], visible = name is "players" or "mounts" or "spawn" or "claims" or "translocators" or "pois" }).ToArray() };
+    private object Manifest() => new { version = layerVersions.Values.DefaultIfEmpty().Max(), layers = Layers.Select(name => new { id = name, version = layerVersions[name], visible = name is "players" or "mounts" or "spawn" or "pois" }).ToArray() };
     private object Players(MapAuthStore.Principal? principal)
     {
         if (!config.PublicPlayers) return Array.Empty<object>();

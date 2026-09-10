@@ -15,7 +15,7 @@ public sealed partial class ServerMapWebServer
         {
             var snapshot = areaMarkers.Read(); var fog = notebook.Regions;
             var visible = principal?.IsAdmin == true ? snapshot.Markers : snapshot.Markers.Where(m => !m.Rects.Any(r => fog.Any(f => MapVisibility.Intersects(f, r.MinX, r.MinZ, r.MaxX, r.MaxZ))));
-            Json(context, new { revision = snapshot.Revision, markers = visible.Select(m => new { id = m.Id, name = m.Name, color = m.Color, minZoom = m.MinZoom, maxZoom = AreaMarkerStore.MaxZoom(m.MinZoom), rects = m.Rects.Select(r => new[] { r.MinX, r.MinZ, r.MaxX, r.MaxZ }) }) }, true);
+            Json(context, new { revision = snapshot.Revision, markers = visible.Select(m => new { id = m.Id, name = m.Name, color = m.Color, minZoom = m.MinZoom, maxZoom = AreaMarkerStore.MaxZoom(m.MinZoom), borderOpacity = m.Style.BorderOpacity, fillOpacity = m.Style.FillOpacity, textOpacity = m.Style.TextOpacity, rects = m.Rects.Select(r => new[] { r.MinX, r.MinZ, r.MaxX, r.MaxZ }) }) }, true);
             return true;
         }
         if (method is not ("POST" or "DELETE")) { Error(context, 405, "Method not allowed"); return true; }
@@ -41,14 +41,31 @@ public sealed partial class ServerMapWebServer
             }
             else
             {
-                if (!value.TryGetProperty("rects", out var rectangles) || rectangles.ValueKind != JsonValueKind.Array || rectangles.GetArrayLength() is < 1 or > AreaMarkerStore.MaxRects
-                    || !value.TryGetProperty("minZoom", out var zoom) || zoom.ValueKind != JsonValueKind.Number || !zoom.TryGetInt32(out var minZoom)) throw new ArgumentException();
-                var rects = rectangles.EnumerateArray().Select(r =>
+                if (!value.TryGetProperty("minZoom", out var zoom) || zoom.ValueKind != JsonValueKind.Number || !zoom.TryGetInt32(out var minZoom)) throw new ArgumentException();
+                var oldStyle = areaMarkers.Read().Markers.FirstOrDefault(m => m.Id == id)?.Style ?? new();
+                double Opacity(string key, double fallback)
                 {
-                    if (r.ValueKind != JsonValueKind.Array || r.GetArrayLength() != 4 || r.EnumerateArray().Any(v => v.ValueKind != JsonValueKind.Number || !v.TryGetInt32(out _))) throw new ArgumentException();
-                    return new AreaMarkerStore.Rect(r[0].GetInt32(), r[1].GetInt32(), r[2].GetInt32(), r[3].GetInt32());
-                }).ToArray();
-                areaMarkers.Save(revision, id, S("name", true)!, S("color", true)!, minZoom, rects);
+                    if (!value.TryGetProperty(key, out var p)) return fallback;
+                    if (p.ValueKind != JsonValueKind.Number || !p.TryGetDouble(out var v) || !double.IsFinite(v) || v < 0 || v > 1) throw new ArgumentException();
+                    return v;
+                }
+                var style = new AreaMarkerStore.Appearance(Opacity("borderOpacity", oldStyle.BorderOpacity), Opacity("fillOpacity", oldStyle.FillOpacity), Opacity("textOpacity", oldStyle.TextOpacity));
+                if (value.TryGetProperty("sourceIds", out var sources))
+                {
+                    if (!string.IsNullOrEmpty(id) || sources.ValueKind != JsonValueKind.Array || sources.GetArrayLength() is < 2 or > AreaMarkerStore.MaxMarkers
+                        || sources.EnumerateArray().Any(p => p.ValueKind != JsonValueKind.String)) throw new ArgumentException();
+                    areaMarkers.Merge(revision, sources.EnumerateArray().Select(p => p.GetString()!).ToArray(), S("name", true)!, S("color", true)!, minZoom, style);
+                }
+                else
+                {
+                    if (!value.TryGetProperty("rects", out var rectangles) || rectangles.ValueKind != JsonValueKind.Array || rectangles.GetArrayLength() is < 1 or > AreaMarkerStore.MaxRects) throw new ArgumentException();
+                    var rects = rectangles.EnumerateArray().Select(r =>
+                    {
+                        if (r.ValueKind != JsonValueKind.Array || r.GetArrayLength() != 4 || r.EnumerateArray().Any(v => v.ValueKind != JsonValueKind.Number || !v.TryGetInt32(out _))) throw new ArgumentException();
+                        return new AreaMarkerStore.Rect(r[0].GetInt32(), r[1].GetInt32(), r[2].GetInt32(), r[3].GetInt32());
+                    }).ToArray();
+                    areaMarkers.Save(revision, id, S("name", true)!, S("color", true)!, minZoom, rects, style);
+                }
             }
             events.Publish("area-markers", new { changed = true });
             Json(context, new { saved = true }, true);

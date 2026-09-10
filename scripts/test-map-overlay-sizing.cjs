@@ -81,7 +81,7 @@ async function main() {
                         await page.waitForFunction(selector=>getComputedStyle(document.querySelector(selector)).visibility==='hidden',selector);
                         assert.equal(await page.locator(selector).evaluate(e=>e.classList.contains('map-label-selected')),true);
                         await page.evaluate(()=>window.testMap.setZoom(8,{animate:false}));
-                        assert.equal(await page.locator(selector).isVisible(),false,'Selection must not bypass the 14–15 label band');
+                        assert.equal(await page.locator(selector).isVisible(),false,'Selection must not bypass the 13–15 label band');
                         await page.evaluate(()=>window.testMap.closePopup());
                         assert.equal(await page.locator(selector).isVisible(),false,'Deselected distant text hides again');
                         await page.evaluate(()=>window.testMap.setZoom(9,{animate:false}));
@@ -89,7 +89,7 @@ async function main() {
                     await page.evaluate(()=>{document.querySelector('#measure').click();window.testMap.fire('click',{latlng:window.testMap.getCenter()});});
                     const endpoint=page.locator('.route-marker-label');await endpoint.waitFor({state:'attached'});assert.equal(await endpoint.isVisible(),false);
                     await page.evaluate(()=>Object.values(window.testMap._layers).find(l=>l.options.routeEndpoint==='start').fire('click'));
-                    assert.equal(await endpoint.isVisible(),false,'Clicked route endpoint follows the same 14–15 label band');
+                    assert.equal(await endpoint.isVisible(),false,'Clicked route endpoint follows the same 13–15 label band');
                     await page.evaluate(()=>window.testMap.closePopup());assert.equal(await endpoint.isVisible(),false);
                     await page.evaluate(()=>document.querySelector('#measure').click());
                 }
@@ -150,7 +150,7 @@ async function main() {
                 await page.waitForFunction(expected => new URL(location.href).searchParams.get('zoom') === String(expected) && !document.querySelector('#map').classList.contains('leaflet-zoom-anim'), expectedZoom);
                 await checkSizes(page);
                 assert.deepEqual(errors, [], 'Browser errors');
-                console.log(`PASS ${viewport.width}x${viewport.height}: URL zoom ${zoom} -> ${expectedZoom}, detail labels restricted to levels 14–15`);
+                console.log(`PASS ${viewport.width}x${viewport.height}: URL zoom ${zoom} -> ${expectedZoom}, detail labels restricted to levels 13–15`);
                 await page.close();
             }
         }
