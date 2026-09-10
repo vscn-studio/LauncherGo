@@ -9,6 +9,7 @@ public sealed class AnnouncementStore
     {
         public WebPageMetadata Site { get; init; } = new();
         public bool PlayerGearTeleportEnabled { get; init; } = false;
+        public bool MountedTeleportEnabled { get; init; } = false;
         public bool PoiImagesEnabled { get; init; } = false;
         public PlayerTeleportSettings PlayerTeleport { get; init; } = new();
     }
@@ -26,7 +27,7 @@ public sealed class AnnouncementStore
 
     public Announcement Current { get { lock (gate) return current; } }
 
-    public Announcement Save(string html, string serverWebsite, string updatedBy, WebPageMetadata? site = null, bool? playerGearTeleportEnabled = null, PlayerTeleportSettings? playerTeleport = null, bool? poiImagesEnabled = null)
+    public Announcement Save(string html, string serverWebsite, string updatedBy, WebPageMetadata? site = null, bool? playerGearTeleportEnabled = null, PlayerTeleportSettings? playerTeleport = null, bool? poiImagesEnabled = null, bool? mountedTeleportEnabled = null)
     {
         if (html.Length > 50_000) html = html[..50_000];
         if (!Uri.TryCreate(serverWebsite, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")) serverWebsite = "https://vintagestory.at";
@@ -37,6 +38,7 @@ public sealed class AnnouncementStore
             {
                 Site = (site ?? current.Site ?? new()).Normalize(),
                 PlayerGearTeleportEnabled = playerGearTeleportEnabled ?? current.PlayerGearTeleportEnabled,
+                MountedTeleportEnabled = mountedTeleportEnabled ?? current.MountedTeleportEnabled,
                 PoiImagesEnabled = poiImagesEnabled ?? current.PoiImagesEnabled,
                 PlayerTeleport = (playerTeleport ?? current.PlayerTeleport ?? new()).Validate()
             };

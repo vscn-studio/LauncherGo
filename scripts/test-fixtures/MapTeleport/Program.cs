@@ -17,6 +17,7 @@ AppDomain.CurrentDomain.AssemblyResolve += (_, request) =>
     return null;
 };
 Checks.Run();
+MountedChecks.Run();
 static class Checks
 {
     static void Require(bool value, string message) { if (!value) throw new Exception(message); }

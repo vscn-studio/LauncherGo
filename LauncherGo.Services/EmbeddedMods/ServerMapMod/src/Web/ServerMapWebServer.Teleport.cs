@@ -34,6 +34,13 @@ public sealed partial class ServerMapWebServer
                 if (!double.IsFinite(x) || !double.IsFinite(z) || x < 0 || z < 0 || x >= accessor.MapSizeX || z >= accessor.MapSizeZ)
                     throw new TeleportError(400, "teleport_coordinates");
                 x = Math.Floor(x) + .5; z = Math.Floor(z) + .5;
+                teleportQuotes.TryRemove(principal.PlayerUid, out _);
+                mountedTeleportQuotes.TryRemove(principal.PlayerUid, out _);
+                if (OnGameThread(() => OnlineTeleportPlayer(principal.PlayerUid, true).Entity.MountedOn != null))
+                {
+                    Json(context, QuoteMountedTeleport(context, principal.PlayerUid, x, z), true);
+                    return;
+                }
                 var snapshot = OnGameThread(() => SnapshotTeleport(context, principal.PlayerUid, x, z));
                 var y = reader.SurfaceHeightAt(x, z) ?? throw new TeleportError(404, "teleport_surface");
                 var jumps = snapshot.Admin ? 0 : TeleportCost(snapshot.Position, x, y, z);
@@ -47,6 +54,12 @@ public sealed partial class ServerMapWebServer
             else
             {
                 var id = input.GetProperty("quoteId").GetString();
+                if (mountedTeleportQuotes.TryRemove(principal.PlayerUid, out var mountedQuote))
+                {
+                    if (mountedQuote.Id != id || mountedQuote.Expires < DateTimeOffset.UtcNow) throw new TeleportError(409, "teleport_expired");
+                    Json(context, ExecuteMountedTeleport(context, principal.PlayerUid, mountedQuote), true);
+                    return;
+                }
                 if (!teleportQuotes.TryRemove(principal.PlayerUid, out var quote) || quote.Id != id || quote.Expires < DateTimeOffset.UtcNow)
                     throw new TeleportError(409, "teleport_expired");
                 // Recompute on an HTTP worker using the player's current position.
@@ -84,6 +97,7 @@ public sealed partial class ServerMapWebServer
                 Json(context, result, true);
             }
         }
+        catch (MountedTeleportException ex) { Error(context, 409, ex.Message); }
         catch (TeleportError ex) { Error(context, ex.Status, ex.Message); }
         catch (TimeoutException) { Error(context, 503, "teleport_busy"); }
         catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException or FormatException or InvalidDataException or ArgumentException or OverflowException)
@@ -103,12 +117,12 @@ public sealed partial class ServerMapWebServer
         return new(new(pos.X, pos.Y, pos.Z), current.IsAdmin, TemporalGearPayment.Count(TeleportSlots(player), settings.ItemCode), settings,
             current.IsAdmin ? null : TeleportEffects.Prepare(player.Entity, settings).Error);
     }
-    private IServerPlayer OnlineTeleportPlayer(string uid)
+    private IServerPlayer OnlineTeleportPlayer(string uid, bool allowMounted = false)
     {
         var player = api.World.AllOnlinePlayers.OfType<IServerPlayer>().FirstOrDefault(p => p.PlayerUID == uid);
         if (player?.Entity == null) throw new TeleportError(409, "teleport_offline");
         if (!player.Entity.Alive || player.Entity.Teleporting) throw new TeleportError(409, "teleport_busy");
-        if (player.Entity.MountedOn != null) throw new TeleportError(409, "teleport_mounted");
+        if (!allowMounted && player.Entity.MountedOn != null) throw new TeleportError(409, "teleport_mounted");
         if (player.Entity.Pos.Dimension != 0) throw new TeleportError(409, "teleport_dimension");
         return player;
     }

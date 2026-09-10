@@ -24,5 +24,12 @@ public sealed record PlayerTeleportSettings
         return this;
     }
 
+    // Runtime multiplier, deliberately not Validate(): doubled stability loss may
+    // exceed 100%; effect application clamps to zero, not the admin input limit.
+    public PlayerTeleportSettings Multiply(int multiplier) => multiplier is < 0 or > 2
+        ? throw new ArgumentOutOfRangeException(nameof(multiplier))
+        : this with { ItemsPerJump = checked(ItemsPerJump * multiplier), StabilityLossPercent = StabilityLossPercent * multiplier,
+            HungerLoss = HungerLoss * multiplier, HealthLoss = HealthLoss * multiplier, EffectsEnabled = multiplier > 0 && EffectsEnabled };
+
     public int Cost(int jumps) => jumps < 0 ? throw new ArgumentOutOfRangeException(nameof(jumps)) : checked(jumps * ItemsPerJump);
 }

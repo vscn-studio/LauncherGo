@@ -5,6 +5,20 @@ namespace ServerMap.Web;
 
 public static class TeleportEffects
 {
+    public static (string? Error, Action Apply, Action Restore) PrepareReversible(Entity entity, PlayerTeleportSettings settings)
+    {
+        var prepared=Prepare(entity,settings);
+        if (!settings.EffectsEnabled) return (prepared.Error,prepared.Apply,()=>{});
+        var stability=entity.GetBehavior<EntityBehaviorTemporalStabilityAffected>();
+        var hunger=entity.GetBehavior<EntityBehaviorHunger>();
+        var health=entity.GetBehavior<EntityBehaviorHealth>();
+        var oldStability=stability?.OwnStability;var oldHunger=hunger?.Saturation;var oldHealth=health?.Health;
+        return (prepared.Error,prepared.Apply,()=>{
+            if(settings.StabilityLossPercent>0 && oldStability.HasValue)stability!.OwnStability=oldStability.Value;
+            if(settings.HungerLoss>0 && oldHunger.HasValue)hunger!.Saturation=oldHunger.Value;
+            if(settings.HealthLoss>0 && oldHealth.HasValue)health!.Health=oldHealth.Value;
+        });
+    }
     public static string? Check(PlayerTeleportSettings settings, bool stability, bool hunger, float? health)
     {
         if (!settings.EffectsEnabled) return null;

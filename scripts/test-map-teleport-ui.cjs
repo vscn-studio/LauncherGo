@@ -9,7 +9,7 @@ async function main() {
     for (const owner of ['', 'admin', 'player']) for (const width of [1280, 390]) {
       const page = await browser.newPage({viewport:{width,height:844},locale:'zh-CN'});
       const errors=[]; page.on('pageerror', e=>errors.push(e.message));
-      let cost=owner==='admin'?0:2, available=3, posts=0, failure=false, quoteBody, enabled=false;
+      let cost=owner==='admin'?0:2, available=3, posts=0, failure=false, quoteBody, enabled=false,mounted=false,mountedEnabled=false;
       const defaults={itemCode:'game:gear-temporal',itemsPerJump:1,effectsEnabled:false,stabilityLossPercent:0,hungerLoss:0,healthLoss:0};
       let policy={...defaults};
       await page.addInitScript(()=>{window.EventSource=class extends EventTarget{constructor(){super();window.testEvents=this;}close(){}};});
@@ -20,11 +20,11 @@ async function main() {
         if(name.endsWith('/map/metadata'))return json({maxZoom:12,maxZoomOut:8,spawn:{x:500000,z:500000},colormapReady:true,tileVersion:'test'});
         if(name.endsWith('/layers/manifest'))return json({layers:[{id:'players',visible:true}]});
         if(name.includes('/layers/'))return json({features:[]});
-        if(name.endsWith('/announcement')){if(route.request().method()==='POST'){assert.equal(owner,'admin');const body=route.request().postDataJSON();enabled=body.playerGearTeleportEnabled;policy=body.playerTeleport;}return json({html:'',playerGearTeleportEnabled:enabled,playerTeleport:policy});}
+        if(name.endsWith('/announcement')){if(route.request().method()==='POST'){assert.equal(owner,'admin');const body=route.request().postDataJSON();enabled=body.playerGearTeleportEnabled;policy=body.playerTeleport;mountedEnabled=body.mountedTeleportEnabled;}return json({html:'',mountedTeleportEnabled:mountedEnabled,playerGearTeleportEnabled:enabled,playerTeleport:policy});}
         if(name.endsWith('/teleport/quote')){
           quoteBody=route.request().postDataJSON();assert.equal(route.request().headers()['x-servermap-request'],'1');
           const reason=owner!=='admin'&&cost===0?'teleport_zero_jumps':cost>available?'teleport_gears':null;
-          return json({quoteId:'server-quote',x:quoteBody.x+.5,y:111,z:quoteBody.z+.5,cost,jumps:cost/policy.itemsPerJump,itemCode:policy.itemCode,settings:policy,available,admin:owner==='admin',allowed:!reason,reason});
+          return json({quoteId:'server-quote',x:quoteBody.x+.5,y:111,z:quoteBody.z+.5,cost,jumps:cost/policy.itemsPerJump,itemCode:policy.itemCode,settings:policy,available,admin:owner==='admin',allowed:!reason,reason,...(mounted?{mounted:true,participants:[{name:'driver',driver:true,multiplier:2,cost:4,settings:{...policy,effectsEnabled:true,healthLoss:4}},{name:'<img src=x onerror=alert(1)>',driver:false,multiplier:1,cost:2,settings:{...policy,effectsEnabled:true,healthLoss:2}}]}:{})});
         }
         if(name.endsWith('/teleport')){
           posts++;assert.deepEqual(route.request().postDataJSON(),{quoteId:'server-quote'});
@@ -75,10 +75,23 @@ async function main() {
       await page.locator('#teleportForm').evaluate(form=>form.dispatchEvent(new Event('submit',{cancelable:true})));
       await page.waitForFunction(()=>document.querySelector('#teleportDetails').textContent.includes('传送完成'));
       assert.equal(posts,before+1,'Duplicate submit sent a second payment request');assert.deepEqual(errors,[]);
+      mounted=true;mountedEnabled=true;
+      await page.evaluate(()=>window.testEvents.dispatchEvent(new MessageEvent('settings',{data:JSON.stringify({mountedTeleportEnabled:true,playerGearTeleportEnabled:true})})));
+      await page.locator('#teleportRefresh').click();await page.waitForFunction(()=>!document.querySelector('#teleportSubmit').disabled);
+      const partyText=await page.locator('#teleportDetails').textContent();
+      assert.match(partyText,/驾驶员.*本次消耗: 4/s);assert.match(partyText,/乘客.*本次消耗: 2/s);assert.match(partyText,/生命值扣减 4/);assert.match(partyText,/生命值扣减 2/);
+      assert.equal(await page.locator('#teleportDetails img').count(),0,'Passenger name must be text, never HTML');
+      await page.evaluate(()=>window.testEvents.dispatchEvent(new MessageEvent('settings',{data:JSON.stringify({mountedTeleportEnabled:false,playerGearTeleportEnabled:true})})));
+      assert.equal(await page.locator('#teleportSubmit').isEnabled(),false,'Mount setting must invalidate both admin/player quotes');
+      mounted=false;mountedEnabled=false;
+      console.log(`PASS mounted ${owner} ${width}: per-rider costs/effects, escaped names and live setting invalidation`);
       if(owner==='admin'){
         await page.locator('#teleportModal [data-close-modal]').click();
         if(width<700)await page.locator('#mobileMenu').click();
         await page.locator('#manageButton').click();
+        assert.equal(await page.locator('#mountedTeleportInput').isChecked(),false);
+        await page.locator('#mountedTeleportInput').check();
+        await page.locator('#playerGearTeleportInput').uncheck();
         assert.equal(await page.locator('#playerGearTeleportInput').isChecked(),false);
         assert.equal(await page.locator('#teleportItemCodeInput').inputValue(),'game:gear-temporal');
         assert.equal(await page.locator('#teleportItemsPerJumpInput').inputValue(),'1');
@@ -89,9 +102,9 @@ async function main() {
         await page.locator('#teleportEffectsInput').check();
         await page.locator('#teleportStabilityInput').fill('25');await page.locator('#teleportHungerInput').fill('100');await page.locator('#teleportHealthInput').fill('2');
         await page.locator('#playerGearTeleportInput').check();await page.locator('#manageForm button[type="submit"]').click();
-        await page.waitForFunction(()=>document.querySelector('#manageModal').hidden);assert.equal(enabled,true);
+        await page.waitForFunction(()=>document.querySelector('#manageModal').hidden);assert.equal(enabled,true);assert.equal(mountedEnabled,true);
         assert.deepEqual(policy,{itemCode:'game:gear-rusty',itemsPerJump:3,effectsEnabled:true,stabilityLossPercent:25,hungerLoss:100,healthLoss:2});
-        await page.locator('#manageButton').click();assert.equal(await page.locator('#playerGearTeleportInput').isChecked(),true);
+        await page.locator('#manageButton').click();assert.equal(await page.locator('#mountedTeleportInput').isChecked(),true);assert.equal(await page.locator('#playerGearTeleportInput').isChecked(),true);
         assert.equal(await page.locator('#teleportItemCodeInput').inputValue(),'game:gear-rusty');assert.equal(await page.locator('#teleportHealthInput').inputValue(),'2');
         await page.locator('#playerGearTeleportInput').uncheck();await page.locator('#manageForm button[type="submit"]').click();
         await page.waitForFunction(()=>document.querySelector('#manageModal').hidden);assert.equal(enabled,false);

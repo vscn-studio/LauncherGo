@@ -38,13 +38,15 @@ async function main() {
   assert.equal((await call('/teleport',cookies.admin,{quoteId:'forged',cost:0,admin:true})).status,409);
   const initialSettings=(await call('/announcement')).json();
   assert.equal(initialSettings.playerGearTeleportEnabled,false);
+  assert.equal(initialSettings.mountedTeleportEnabled,false);
   assert.deepEqual(initialSettings.playerTeleport,{itemCode:'game:gear-temporal',itemsPerJump:1,effectsEnabled:false,stabilityLossPercent:0,hungerLoss:0,healthLoss:0});
   const disabled=await call('/teleport/quote',cookies.alice,{x:64,z:72});
   assert.equal(disabled.status,403);assert.equal(disabled.json().error,'teleport_disabled');
-  const enableTeleport={html:initialSettings.html,serverWebsite:initialSettings.serverWebsite,playerGearTeleportEnabled:true};
+  const enableTeleport={html:initialSettings.html,serverWebsite:initialSettings.serverWebsite,playerGearTeleportEnabled:true,mountedTeleportEnabled:true};
   assert.equal((await call('/announcement',cookies.alice,enableTeleport)).status,403);
   assert.equal((await call('/announcement',cookies.admin,enableTeleport)).status,200);
   assert.equal((await call('/announcement')).json().playerGearTeleportEnabled,true);
+  assert.equal((await call('/announcement')).json().mountedTeleportEnabled,true);
   const teleportPolicy={itemCode:'game:gear-rusty',itemsPerJump:3,effectsEnabled:true,stabilityLossPercent:20,hungerLoss:100,healthLoss:2};
   assert.equal((await call('/announcement',cookies.alice,{...enableTeleport,playerTeleport:teleportPolicy})).status,403);
   assert.equal((await call('/announcement',cookies.admin,{...enableTeleport,playerTeleport:teleportPolicy})).status,200);
@@ -72,6 +74,7 @@ async function main() {
   assert.equal((await call('/announcement',cookies.admin,announcement)).status,200);
   assert.deepEqual((await call('/announcement')).json().site,site);
   assert.equal((await call('/announcement')).json().playerGearTeleportEnabled,true,'Older admin clients must preserve the toggle');
+  assert.equal((await call('/announcement')).json().mountedTeleportEnabled,true,'Legacy saves must preserve mounted teleport');
   assert.deepEqual((await call('/announcement')).json().playerTeleport,teleportPolicy,'Legacy saves must preserve the teleport policy');
   const homepage=await fetch(api.replace(/\/api\/v1\/?$/,'/'));
   const html=await homepage.text();assert.equal(homepage.status,200);

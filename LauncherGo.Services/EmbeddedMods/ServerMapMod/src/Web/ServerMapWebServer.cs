@@ -176,7 +176,7 @@ public sealed partial class ServerMapWebServer : IDisposable
 
     private void HandleAnnouncement(HttpListenerContext context)
     {
-        object Response(AnnouncementStore.Announcement value) => new { html = value.Html, serverWebsite = value.ServerWebsite, site = value.Site ?? new(), poiImagesEnabled = value.PoiImagesEnabled, playerGearTeleportEnabled = value.PlayerGearTeleportEnabled, playerTeleport = value.PlayerTeleport ?? new(), updatedBy = value.UpdatedBy, updatedAt = value.UpdatedAt };
+        object Response(AnnouncementStore.Announcement value) => new { html = value.Html, serverWebsite = value.ServerWebsite, site = value.Site ?? new(), mountedTeleportEnabled = value.MountedTeleportEnabled, poiImagesEnabled = value.PoiImagesEnabled, playerGearTeleportEnabled = value.PlayerGearTeleportEnabled, playerTeleport = value.PlayerTeleport ?? new(), updatedBy = value.UpdatedBy, updatedAt = value.UpdatedAt };
         if (context.Request.HttpMethod == "GET") { Json(context, Response(announcements.Current), true); return; }
         var principal = Principal(context.Request);
         if (context.Request.HttpMethod != "POST") { Error(context, 405, "Method not allowed"); return; }
@@ -189,6 +189,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             var website = document.RootElement.TryGetProperty("serverWebsite", out var websiteValue) ? websiteValue.GetString() ?? "" : announcements.Current.ServerWebsite;
             var site = document.RootElement.TryGetProperty("site", out var siteValue) ? siteValue.Deserialize<WebPageMetadata>() : null;
             bool? poiImagesEnabled = document.RootElement.TryGetProperty("poiImagesEnabled", out var imagesValue) ? imagesValue.GetBoolean() : null;
+            bool? mountedTeleport = document.RootElement.TryGetProperty("mountedTeleportEnabled", out var mountedValue) ? mountedValue.GetBoolean() : null;
             bool? playerTeleport = document.RootElement.TryGetProperty("playerGearTeleportEnabled", out var teleportValue) ? teleportValue.GetBoolean() : null;
             var teleportSettings = document.RootElement.TryGetProperty("playerTeleport", out var settingsValue)
                 ? settingsValue.Deserialize<PlayerTeleportSettings>(new JsonSerializerOptions { PropertyNameCaseInsensitive = true })?.Validate()
@@ -201,9 +202,9 @@ public sealed partial class ServerMapWebServer : IDisposable
                 if (teleportSettings != null && api.World.GetItem(new AssetLocation(teleportSettings.ItemCode)) == null
                     && api.World.GetBlock(new AssetLocation(teleportSettings.ItemCode)) == null)
                     throw new ArgumentException("Unknown teleport item code");
-                var value = announcements.Save(html, website, principal.PlayerName, site, playerTeleport, teleportSettings, poiImagesEnabled);
+                var value = announcements.Save(html, website, principal.PlayerName, site, playerTeleport, teleportSettings, poiImagesEnabled, mountedTeleport);
                 events.Publish("layer", new { layer = "pois", version = layerVersions.AddOrUpdate("pois", 2, (_, old) => old + 1) });
-                events.Publish("settings", new { poiImagesEnabled = value.PoiImagesEnabled, playerGearTeleportEnabled = value.PlayerGearTeleportEnabled, playerTeleport = value.PlayerTeleport });
+                events.Publish("settings", new { mountedTeleportEnabled = value.MountedTeleportEnabled, poiImagesEnabled = value.PoiImagesEnabled, playerGearTeleportEnabled = value.PlayerGearTeleportEnabled, playerTeleport = value.PlayerTeleport });
                 return value;
             });
             Json(context, Response(saved), true);
