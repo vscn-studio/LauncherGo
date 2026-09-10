@@ -46,8 +46,8 @@
     #poiImagePreviewFrame { position:relative;display:inline-block;max-width:100%;margin:8px 0;vertical-align:top; }
     #poiImagePreviewFrame[hidden] { display:none; }
     #poiImagePreview { display:block;width:auto;height:auto;max-width:100%;max-height:160px; }
-    .poi-image-button { display:block;width:fit-content;max-width:100%;padding:0!important;margin:8px 0;border:0;background:transparent;box-shadow:none;cursor:zoom-in;overflow:hidden;border-radius:4px; }
-    .poi-image-button img { display:block;width:auto;height:auto;max-width:min(240px,100%);max-height:240px; }
+    .poi-image-button { display:block;flex:0 0 100%;width:100%;max-width:100%;padding:0!important;margin:8px 0;border:0;background:transparent;box-shadow:none;cursor:zoom-in;overflow:hidden;border-radius:4px; }
+    .poi-image-button img { display:block;width:100%;height:auto;max-width:100%; }
     #poiImageViewer { padding:12px;max-width:95vw;max-height:95dvh;border:var(--border);border-radius:8px;color:var(--text);background:var(--panel,#252a31); }
     #poiImageViewer::backdrop { background:#000b; }
     #poiImageFull { display:block;max-width:85vw;max-height:78dvh;object-fit:contain;margin:10px auto; }

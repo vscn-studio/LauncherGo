@@ -13,15 +13,21 @@ async function checkRemovePosition(page){
   assert.ok(Math.abs(state.right)<1,JSON.stringify(state));assert.ok(Math.abs(state.top)<1,JSON.stringify(state));await checkIcon(page,'poiImageRemove');
 }
 async function checkThumbnailRatios(page){
-  for(const [width,height] of [[400,100],[100,400],[150,150]]){
+  const description=await page.locator('.notebook-popup').evaluate(popup=>{const p=popup.querySelector('.poi-image-button+p');return p?.textContent||'';});
+  for(const text of [description,'','你从漫长的沉睡中醒来，面对陌生的荒野，属于你的故事就此开始。']){
+  await page.locator('.notebook-popup').evaluate((popup,text)=>{let p=popup.querySelector('.poi-test-description')||popup.querySelector('.poi-image-button+p:not(.error)');if(p)p.remove();if(text){p=document.createElement('p');p.className='poi-test-description';p.textContent=text;popup.querySelector('.poi-image-button').after(p);}},text);
+  for(const [width,height] of [[400,100],[100,400],[150,150],[24,12]]){
     await page.locator('.poi-image-button img').evaluate((img,{width,height})=>{const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;canvas.getContext('2d').fillRect(0,0,width,height);img.src=canvas.toDataURL();},{width,height});
     await page.waitForFunction(width=>document.querySelector('.poi-image-button img').naturalWidth===width,width);
-    const state=await page.locator('.poi-image-button').evaluate(button=>{const img=button.querySelector('img'),image=img.getBoundingClientRect(),rect=button.getBoundingClientRect();return{ratio:image.width/image.height,width:rect.width-image.width,height:rect.height-image.height,background:getComputedStyle(button).backgroundColor};});
+    const state=await page.locator('.poi-image-button').evaluate(button=>{const img=button.querySelector('img'),image=img.getBoundingClientRect(),rect=button.getBoundingClientRect(),popup=button.parentElement.getBoundingClientRect();return{ratio:image.width/image.height,width:rect.width-image.width,height:rect.height-image.height,popupWidth:popup.width,imageWidth:image.width,expectedWidth:Math.min(270,innerWidth-64),background:getComputedStyle(button).backgroundColor};});
     assert.ok(Math.abs(state.ratio-width/height)<.01,JSON.stringify(state));assert.ok(Math.abs(state.width)<1);assert.ok(Math.abs(state.height)<1);assert.equal(state.background,'rgba(0, 0, 0, 0)');
+    assert.ok(Math.abs(state.popupWidth-state.expectedWidth)<1,JSON.stringify(state));assert.ok(Math.abs(state.imageWidth-state.popupWidth)<1,JSON.stringify(state));
+  }
   }
 }
-async function main(){const browser=await chromium.launch({headless:true});try{for(const mobile of [false,true]){
-  const page=await browser.newPage({viewport:mobile?{width:390,height:844}:{width:1280,height:800},hasTouch:mobile,isMobile:mobile,locale:'zh-CN'}),errors=[],saves=[];page.on('pageerror',e=>errors.push(e.message));
+async function main(){const browser=await chromium.launch({headless:true});try{for(const width of [1280,390,320]){
+  const mobile=width<700;
+  const page=await browser.newPage({viewport:{width,height:mobile?844:800},hasTouch:mobile,isMobile:mobile,locale:'zh-CN'}),errors=[],saves=[];page.on('pageerror',e=>errors.push(e.message));
   let enabled=false,features=[{id:'own',type:'Feature',geometry:{type:'Point',coordinates:[0,0]},properties:{name:'Own',text:'Photo description',color:'#123456',rotation:0,editable:true,imageKey:'a'.repeat(32)}}];
   await page.addInitScript(()=>{localStorage.setItem('servermap-pinned','pinned');window.EventSource=class extends EventTarget{constructor(){super();window.testEvents=this;}};});
   await page.route('http://servermap.test/**',async route=>{

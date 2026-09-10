@@ -29,6 +29,7 @@
 #notebookToolbar .notebook-help { font-size:12px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere; }
 .notebook-toolbar-actions { display:flex;flex-wrap:wrap;gap:6px; }
 .notebook-popup { display:flex;flex-wrap:wrap;gap:6px;max-width:270px; }
+.notebook-popup:has(>.poi-image-button) { width:min(270px,calc(100vw - 64px)); }
 .notebook-popup>b,.notebook-popup>p { flex:1 0 100%;margin:0;overflow-wrap:anywhere; }
 .notebook-popup>p { color:var(--muted);font-size:12px; }
 .notebook-popup-actions { display:flex;flex-wrap:nowrap;gap:6px; }
