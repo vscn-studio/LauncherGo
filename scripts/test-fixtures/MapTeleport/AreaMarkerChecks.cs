@@ -33,11 +33,11 @@ static class AreaMarkerChecks
             var manifest=JsonSerializer.SerializeToElement(typeof(ServerMapWebServer).GetMethod("Manifest",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(web,null));
             Require(manifest.GetProperty("layers").EnumerateArray().Where(l=>l.GetProperty("visible").GetBoolean()).Select(l=>l.GetProperty("id").GetString()).Order().SequenceEqual(new[]{"mounts","players","pois","spawn"}),"Unexpected default map layers");
             var handler=typeof(ServerMapWebServer).GetMethod("AreaMarkerRequest",BindingFlags.Instance|BindingFlags.NonPublic)!;
-            async Task<(int Status,JsonElement Json)> Call(string method,object? body=null,bool login=true,bool header=true)
+            async Task<(int Status,JsonElement Json)> Call(string method,object? body=null,bool login=true,bool header=true,bool poi=false)
             {
-                using var request=new HttpRequestMessage(new HttpMethod(method),"api/v1/area-markers");if(login)request.Headers.Add("Cookie",cookie);if(header)request.Headers.Add("X-ServerMap-Request","1");if(body!=null)request.Content=new StringContent(JsonSerializer.Serialize(body),Encoding.UTF8,"application/json");
+                using var request=new HttpRequestMessage(new HttpMethod(method),poi?"api/v1/pois":"api/v1/area-markers");if(login)request.Headers.Add("Cookie",cookie);if(header)request.Headers.Add("X-ServerMap-Request","1");if(body!=null)request.Content=new StringContent(JsonSerializer.Serialize(body),Encoding.UTF8,"application/json");
                 var task=http.SendAsync(request);var context=await listener.GetContextAsync();
-                try { handler.Invoke(web,[context,"api/v1/area-markers"]); } catch { context.Response.StatusCode=500;context.Response.Close();using var failure=await task;throw; }
+                try { if(poi)typeof(ServerMapWebServer).GetMethod("HandlePoiWrite",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(web,[context]);else handler.Invoke(web,[context,"api/v1/area-markers"]); } catch { context.Response.StatusCode=500;context.Response.Close();using var failure=await task;throw; }
                 using var response=await task;return ((int)response.StatusCode,JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync()));
             }
             object Body(long revision=0,int band=4,int[][]? rects=null)=>new{revision,name="Area",color="#abcdef",minZoom=band,rects=rects??[[0,0,10,10]]};
@@ -45,7 +45,7 @@ static class AreaMarkerChecks
             Require((await Call("POST",Body(),header:false)).Status==403,"CSRF header missing but accepted");
             admin=false;Require((await Call("POST",Body())).Status==403,"Revoked game admin can write");admin=true;
             Require((await Call("PUT",Body())).Status==405,"Unsupported method accepted");
-            Require((await Call("POST",Body(band:14))).Status==400,"Invalid zoom band accepted");
+            Require((await Call("POST",Body(band:16))).Status==400,"Invalid zoom range accepted");
             Require((await Call("POST",Body(rects:[[0,0,0,10]]))).Status==400,"Empty rect accepted");
             Require((await Call("POST",new{revision=0,name="Bad",color="#abcdef",minZoom=4,rects=new[]{new[]{0d,0d,1.5,10d}}})).Status==400,"Subpixel world coordinate accepted");
             Require((await Call("POST",Body())).Status==200,"Admin save failed");
@@ -70,6 +70,25 @@ static class AreaMarkerChecks
             Require(areas.Read().Markers.Any(m=>m.Id==sourceA.Id)&&areas.Read().Markers.Any(m=>m.Id==sourceB.Id),"Merge removed sources");
             var visibleStyle=(await Call("GET")).Json.GetProperty("markers").EnumerateArray().Single(m=>m.GetProperty("id").GetString()==merged.Id);
             Require(visibleStyle.GetProperty("textOpacity").GetDouble()==.8,"HTTP style fields missing");
+            object RangeBody(int min,int max,int x1,int x2)=>new{revision=areas.Read().Revision,name="Custom",color="#abcdef",minZoom=min,maxZoom=max,rects=new[]{new[]{x1,500,x2,510}}};
+            Require((await Call("POST",RangeBody(7,10,500,510))).Status==200,"Custom range rejected");
+            Require((await Call("POST",RangeBody(10,13,505,520))).Status==200,"Shared endpoint range rejected");
+            Require(areas.Read().Markers.Last().Rects.All(r=>r.MinX>=510),"Shared display level overlap was not clipped");
+            Require((await Call("POST",RangeBody(11,15,500,510))).Status==200,"Disjoint display ranges incorrectly clipped");
+            foreach(var (min,max) in new[]{(3,15),(4,16),(10,9)}) Require((await Call("POST",RangeBody(min,max,600,610))).Status==400,"Invalid range accepted");
+            Require((await Call("POST",new{revision=areas.Read().Revision,name="Bad",color="#abcdef",minZoom=4,maxZoom=5.5,rects=new[]{new[]{600,500,610,510}}})).Status==400,"Fractional zoom accepted");
+            var pointStore=new PoiStore(Path.Combine(root,"pois.json"));Field("pois",pointStore);Field("config",new ServerMap.Configuration.ServerMapConfig());
+            object PoiBody(string? id=null,int min=4,int max=8)=>new{id,name="Place",text="Description",x=800,z=800,minZoom=min,maxZoom=max};
+            Require((await Call("POST",PoiBody(),poi:true)).Status==200,"Admin POI range failed");
+            var point=pointStore.All.Single();Require(point.MinZoom==4&&point.MaxZoom==8,"POI range not persisted");
+            admin=false;Require((await Call("POST",PoiBody(point.Id),poi:true)).Status==403,"Ordinary owner changed display range");
+            Require((await Call("POST",new{id=point.Id,name="Renamed",x=800,z=800},poi:true)).Status==200,"Ordinary edit without zoom fields rejected");
+            Require(pointStore.All.Single().MaxZoom==8,"Ordinary edit reset administrator range");admin=true;
+            foreach(var (min,max) in new[]{(3,15),(4,16),(10,9)}) Require((await Call("POST",PoiBody(point.Id,min,max),poi:true)).Status==400,"Invalid POI range accepted");
+            Require((await Call("POST",new{id=point.Id,minZoom=5,maxZoom=5.5,x=800,z=800},poi:true)).Status==400,"Fractional POI range accepted");
+            Require((await Call("POST",new{id=point.Id,minZoom=5,x=800,z=800},poi:true)).Status==400,"Partial POI range accepted");
+            Require((await Call("POST",PoiBody(point.Id,5,5),poi:true)).Status==200,"Single-level POI range rejected");
+            Console.WriteLine("PASS display ranges: legacy/custom persistence, integer bounds, shared-level clipping, live-admin POI writes and ordinary-edit preservation");
             Console.WriteLine("PASS area HTTP: guest/player/admin, live role revocation, CSRF, geometry validation, conflicts, neighbour clipping, fog and persistence");
         }
         finally { Directory.Delete(root,true); }

@@ -9,19 +9,19 @@ async function main(){
   try{
     const page=await browser.newPage({viewport:{width:1280,height:800}}),errors=[],writes=[];
     page.on('pageerror',e=>errors.push(e.message));
-    let features=[point('Own',0,0,0,true),point('Other',0,100,30,false),point('Legacy',0,-100,150,true)];
+    let admin=false,zoomSupported=true;let features=[point('Own',0,0,0,true),point('Other',0,100,30,false),point('Legacy',0,-100,150,true)];
     await page.addInitScript(()=>{localStorage.setItem('servermap-pinned','unpinned');window.EventSource=class extends EventTarget{constructor(){super();window.testEvents=this;}};});
     await page.route('http://servermap.test/**',async route=>{
       const req=route.request(),url=new URL(req.url()),json=value=>route.fulfill({json:value});
-      if(url.pathname.endsWith('/map/metadata'))return json({maxZoom:12,maxZoomOut:12,spawn:{x:0,z:0},tileVersion:'test',colormapReady:true});
+      if(url.pathname.endsWith('/map/metadata'))return json({poiZoomRanges:zoomSupported,maxZoom:12,maxZoomOut:12,spawn:{x:0,z:0},tileVersion:'test',colormapReady:true});
       if(url.pathname.endsWith('/layers/manifest'))return json({layers:[{id:'pois',visible:true}]});
       if(url.pathname.endsWith('/layers/pois'))return json({features});
       if(url.pathname.endsWith('/pois')&&req.method()!=='GET'){
         const body=req.postDataJSON();writes.push({method:req.method(),body});
         if(req.method()!=='POST')return route.fulfill({status:405,json:{}});
-        const feature=features.find(f=>f.id===body.id);feature.properties.rotation=body.rotation;return json({Id:feature.id});
+        const feature=features.find(f=>f.id===body.id);feature.properties.rotation=body.rotation;if('minZoom' in body){feature.properties.minZoom=body.minZoom;feature.properties.maxZoom=body.maxZoom;}return json({Id:feature.id});
       }
-      if(url.pathname.endsWith('/auth/me'))return json({authenticated:true,playerName:'alice',admin:false});
+      if(url.pathname.endsWith('/auth/me'))return json({authenticated:true,playerName:'alice',admin});
       if(url.pathname.endsWith('/announcement'))return json({html:'<span></span>'});
       if(url.pathname.endsWith('/render-progress'))return json({phase:'idle'});
       if(url.pathname.includes('/tiles/'))return route.fulfill({path:path.join(webRoot,'assets/sky.png'),contentType:'image/png'});
@@ -32,7 +32,7 @@ async function main(){
     });
     const label=id=>page.locator(`.poi-label-anchor[title="${id}"] .poi-label`);
     const angle=async(id,expected)=>{await page.waitForFunction(({id,expected})=>document.querySelector(`.poi-label-anchor[title="${id}"] .poi-label`)?.style.transform.includes(`rotate(${expected}deg)`),{id,expected});};
-    await page.goto('http://servermap.test/');await label('Own').waitFor();await angle('Legacy',0);await angle('Other',30);
+    await page.goto('http://servermap.test/?zoom=-1');await label('Own').waitFor();await angle('Legacy',0);await angle('Other',30);
     assert.equal(await page.locator('#poiRotationInput').getAttribute('min'),'-60');assert.equal(await page.locator('#poiRotationInput').getAttribute('max'),'60');
     assert.equal(await page.locator('script[src="poi-rotation.js"],.poi-rotatable,.poi-rotation-hint').count(),0);
     const box=await label('Own').boundingBox(),x=box.x+box.width/2,y=box.y+box.height/2;
@@ -44,6 +44,23 @@ async function main(){
     await page.locator('#poiRotationInput').fill('-60');await page.locator('#poiForm button[type="submit"]').click();await page.locator('#poiModal').waitFor({state:'hidden'});await angle('Own',-60);
     assert.equal(writes.length,1);assert.equal(writes[0].method,'POST');assert.equal(writes[0].body.rotation,-60);
     await page.reload();await label('Own').waitFor();await angle('Own',-60);await angle('Legacy',0);
+    // Administrator-only custom display interval; old server capabilities are explicit.
+    admin=true;await page.reload();await label('Own').waitFor();await label('Own').click({button:'right'});
+    assert.equal(await page.locator('#poiZoomField').isVisible(),true);assert.equal(await page.locator('#poiMinZoomInput').inputValue(),'13');
+    await page.locator('#poiMinZoomInput').fill('10');await page.locator('#poiMaxZoomInput').fill('9');const before=writes.length;await page.locator('#poiForm button[type=submit]').click();assert.equal(writes.length,before);
+    await page.locator('#poiMinZoomInput').fill('5');await page.locator('#poiForm button[type=submit]').click();await page.locator('#poiModal').waitFor({state:'hidden'});
+    await page.waitForFunction(()=>document.querySelector('.poi-label-anchor[title="Own"]')?.classList.contains('poi-zoom-hidden'));
+    for(const [zoom,expected] of [[4,'hidden'],[5,'visible'],[9,'visible'],[10,'hidden'],[15,'hidden']]){
+      await page.evaluate(z=>window.testMap.setView([0,0],z,{animate:false}),zoom);
+      assert.equal(await label('Own').evaluate(n=>getComputedStyle(n).visibility),expected);
+    }
+    await page.evaluate(()=>document.querySelector('.poi-label-anchor[title="Own"] .poi-label').classList.add('map-label-selected'));assert.equal(await label('Own').evaluate(n=>getComputedStyle(n).visibility),'hidden');
+    await page.evaluate(()=>window.testMap.setView([0,0],9,{animate:false}));admin=false;await page.reload();await label('Own').waitFor();await label('Own').click({button:'right'});
+    assert.equal(await page.locator('#poiZoomField').isVisible(),false);assert.equal(await page.locator('#poiMinZoomInput').isDisabled(),true);
+    await page.locator('#poiForm button[type=submit]').click();await page.locator('#poiModal').waitFor({state:'hidden'});assert.ok(!('minZoom' in writes.at(-1).body));assert.equal(features[0].properties.minZoom,5);assert.equal(features[0].properties.maxZoom,9);
+    admin=true;zoomSupported=false;await page.reload();await label('Own').waitFor();await label('Own').click({button:'right'});
+    assert.equal(await page.locator('#poiZoomField').isVisible(),false);assert.equal(await page.locator('#poiZoomUnavailable').isVisible(),true);
+    await page.locator('#poiModal [data-close-modal]').click();
     assert.deepEqual(errors,[]);console.log('PASS POI editor rotation: no right-drag rotation or requests, right-click editor preserved, angle bounds, persistence and legacy fallback');
   }finally{await browser.close();}
 }

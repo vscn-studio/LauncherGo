@@ -22,7 +22,9 @@
     if(result.length>MAX_RECTS)throw Error('complex');return result;
   }
   function paint(rects,rect,erase,occupied=[]){return compact(erase?cut(rects,[rect]):rects.concat(cut(cut([rect],occupied),rects)));}
-  const higherBands=markers=>markers.length?BANDS.filter(([min])=>markers.every(m=>min<m.minZoom)):[];
+  const validRange=(min,max)=>Number.isInteger(min)&&Number.isInteger(max)&&min>=4&&max<=15&&max>=min;
+  const rangeOverlaps=(a,b)=>a.minZoom<=b.maxZoom&&a.maxZoom>=b.minZoom;
+  const higherLimit=markers=>markers.length?Math.min(...markers.map(m=>m.minZoom))-1:3;
   const appearance=m=>({borderOpacity:m?.borderOpacity??.25,fillOpacity:m?.fillOpacity??.08,textOpacity:m?.textOpacity??.58});
   const pixelRect=(a,b)=>{const x1=Math.floor(Math.min(a.x,b.x)),z1=Math.floor(Math.min(a.z,b.z));return [x1,z1,Math.max(x1+1,Math.ceil(Math.max(a.x,b.x))),Math.max(z1+1,Math.ceil(Math.max(a.z,b.z)))];};
   const contains=(r,p)=>p.x>=r[0]&&p.x<r[2]&&p.z>=r[1]&&p.z<r[3];
@@ -59,6 +61,8 @@
   function create({map,api,gameLatLng,gamePoint,getAuth,getLanguage,getMetadata,layerVisibility,cancelOtherTools}){
     Object.assign(words.zh,{merge:'合并添加新区域',clearSelection:'清除多选',selected:'已选区域',pick:'选择区域',unpick:'取消选择',multiHelp:'Ctrl＋左键切换多选；已选区域跨级别保持显示。只能合并为比所有来源更高的类别，原区域保留。',noHigher:'已选区域没有可用的更高类别。',borderTransparency:'边缘透明度',fillTransparency:'区域背景透明度',textTransparency:'文字透明度',transparencyHelp:'0% 不透明，100% 全透明。',search:'搜索区域名称或级别',noResults:'没有匹配的区域'});
     Object.assign(words.en,{merge:'Merge into new area',clearSelection:'Clear selection',selected:'Selected areas',pick:'Select area',unpick:'Deselect',multiHelp:'Ctrl-click to toggle selection. Selected areas stay visible across zooms. Merge only into a higher level than every source; originals are retained.',noHigher:'No higher band is available for this selection.',borderTransparency:'Border transparency',fillTransparency:'Fill transparency',textTransparency:'Text transparency',transparencyHelp:'0% opaque, 100% transparent.',search:'Search area name or zoom band',noResults:'No matching areas'});
+    Object.assign(words.zh,{empty:'请先选择未被相交显示区间的已有区域占用的范围。',type:'显示级别区间',applyRange:'应用区间',minLevel:'最低显示级别',maxLevel:'最高显示级别',invalidRange:'请输入 4～15 的整数区间，最高级别不得小于最低级别；合并区间须低于所有来源区间。',help:'按 1 方块精度框选或擦除。任何显示级别有交集的已有区域都会避让，擦除只修改当前草稿。',changedType:'修改区间后，点击“应用区间”预览避让结果。',multiHelp:'Ctrl＋左键跨区间多选；已选区域持续显示。合并新区间的最高级别须小于所有来源的最低级别，原区域保留。'});
+    Object.assign(words.en,{empty:'Select pixels not occupied by areas sharing a display level.',type:'Display level range',applyRange:'Apply range',minLevel:'Minimum display level',maxLevel:'Maximum display level',invalidRange:'Use integers 4–15 with maximum at least minimum; merged ranges must be below every source range.',help:'Select or erase at one-block precision. Existing areas sharing any display level are excluded. Erasing only changes the draft.',changedType:'After changing levels, apply the range to preview excluded overlaps.',multiHelp:'Ctrl-click across ranges; selections remain visible. The merged maximum must be below every source minimum. Originals are preserved.'});
     const t=key=>words[getLanguage()==='zh'?'zh':'en'][key]||key,el=(tag,props={})=>Object.assign(document.createElement(tag),props);
     const button=(key,action)=>{const b=el('button',{type:'button',className:'notebook-button',textContent:t(key)});b.dataset.areaAction=key;b.onclick=action;return b;};
     const svgEl=(name,attrs={})=>{const node=document.createElementNS('http://www.w3.org/2000/svg',name);for(const [key,value] of Object.entries(attrs))node.setAttribute(key,String(value));return node;};
@@ -74,7 +78,7 @@
     const edgeRenderer=L.svg({pane:'areaMarkerEdges'}),draftEdgeRenderer=L.svg({pane:'areaMarkerDraft'}),geometryCache=new WeakMap();
     function geometry(rects){let cached=geometryCache.get(rects);if(!cached){cached={edges:boundary(rects),labelRect:largestRectangle(rects)};geometryCache.set(rects,cached);}return cached;}
     let data={revision:0,markers:[]},loaded=false,ready=false,epoch=0,pending=false,controller,draft=null,contextMarker,tool='select',undo=[],redo=[],pointer=null,rubber,noticeTimer,busy=false,frame=0,savedHandlers;
-    const selected=new Set();let mergeBand=7;
+    const selected=new Set();let mergeMin=4,mergeMax=6;
     const selection=()=>data.markers.filter(m=>selected.has(m.id));
     function tell(key){notice.textContent=t(key);notice.hidden=false;clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>notice.hidden=true,6500);}
     async function request(body,method=body?'POST':'GET'){
@@ -85,6 +89,20 @@
       if(!ready||document.hidden||pending)return;pending=true;const captured=epoch;
       try{const next=await request();if(captured!==epoch)return;if(!Array.isArray(next.markers)||!Number.isSafeInteger(next.revision))throw Error('unavailable');loaded=true;if(JSON.stringify(next)!==JSON.stringify(data)){data=next;for(const id of selected)if(!data.markers.some(m=>m.id===id))selected.delete(id);render();renderToolbar();}}
       catch{if(captured===epoch&&!loaded){data={revision:0,markers:[]};render();}}finally{pending=false;}
+    }
+    function rangeInputs(prefix,min,max,limit=15){
+      const wrapper=el('div',{className:'zoom-range'}),low=el('input',{id:prefix+'Min',type:'number',min:'4',max:String(limit),step:'1',required:true,value:String(min)}),high=el('input',{id:prefix+'Max',type:'number',min:'4',max:String(limit),step:'1',required:true,value:String(max)});
+      low.setAttribute('aria-label',t('minLevel'));high.setAttribute('aria-label',t('maxLevel'));wrapper.append(low,el('span',{textContent:'～'}),high);
+      const read=()=>({minZoom:Number(low.value),maxZoom:Number(high.value)}),valid=()=>{const r=read();return low.value!==''&&high.value!==''&&validRange(r.minZoom,r.maxZoom)&&r.maxZoom<=limit;};
+      const validate=()=>high.setCustomValidity(valid()?'':t('invalidRange'));low.oninput=high.oninput=validate;validate();
+      return {wrapper,read,valid};
+    }
+    function applyRange(range){
+      if(!validRange(range.minZoom,range.maxZoom)||draft.sourceIds&&range.maxZoom>higherLimit(selection()))throw Error('invalidRange');
+      if(range.minZoom===draft.minZoom&&range.maxZoom===draft.maxZoom)return;
+      let source=draft.rects;if(draft.sourceIds){source=[];for(const r of selection().flatMap(m=>m.rects))source=paint(source,r,false);}
+      const rects=cut(source,data.markers.filter(m=>m.id!==draft.id&&rangeOverlaps(m,range)).flatMap(m=>m.rects));
+      undo.push({minZoom:draft.minZoom,maxZoom:draft.maxZoom,rects:draft.rects});if(undo.length>32)undo.shift();redo=[];draft={...draft,...range,rects};render();
     }
     function visible(marker){return map.getZoom()>=marker.minZoom&&map.getZoom()<=marker.maxZoom;}
     function overlay(marker,target,isDraft=false){
@@ -111,7 +129,7 @@
       L.svgOverlay(svg,[gameLatLng(b[0],b[1]),gameLatLng(b[2],b[3])],{pane:isDraft?'areaMarkerDraft':'areaMarkers',className:'area-marker-overlay',interactive:false}).addTo(target);
     }
     function render(){
-      group.clearLayers();for(const m of data.markers.slice().sort((a,b)=>Number(selected.has(a.id))-Number(selected.has(b.id))))if(m.id!==draft?.id&&(selected.has(m.id)||((toggle.checked||draft)&&(draft?m.minZoom===draft.minZoom:visible(m)))))overlay(m,group);
+      group.clearLayers();for(const m of data.markers.slice().sort((a,b)=>Number(selected.has(a.id))-Number(selected.has(b.id))))if(m.id!==draft?.id&&(selected.has(m.id)||((toggle.checked||draft)&&(draft?rangeOverlaps(m,draft):visible(m)))))overlay(m,group);
       renderDraft();
     }
     function renderDraft(){draftGroup.clearLayers();rubber=null;if(draft)overlay(draft,draftGroup,true);}
@@ -129,34 +147,31 @@
     }
     function renderSelectionToolbar(){
       toolbar.replaceChildren();if(!selected.size)return;
-      const chosen=selection(),bands=higherBands(chosen),actions=el('div',{className:'notebook-toolbar-actions'}),select=el('select',{id:'areaMergeBand'});
-      if(!bands.some(b=>b[0]===mergeBand))mergeBand=bands.at(-1)?.[0];
-      for(const [min,max] of bands)select.append(el('option',{value:String(min),textContent:`${min}–${max}`,selected:min===mergeBand}));
-      select.setAttribute('aria-label',t('type'));select.disabled=!bands.length;select.onchange=()=>mergeBand=Number(select.value);
-      const merge=button('merge',startMerge);merge.disabled=chosen.length<2||!bands.length;
-      actions.append(select,merge,button('clearSelection',()=>cancel()));toolbar.append(el('div',{textContent:`${t('selected')} (${chosen.length})`}),actions);
-      const list=el('div',{className:'area-selected-list'});for(const m of chosen){const b=button('unpick',()=>toggleSelected(m));b.textContent=`${m.name} · ${m.minZoom}–${m.maxZoom} ×`;list.append(b);}toolbar.append(list,el('div',{className:'area-help',textContent:t(bands.length?'multiHelp':'noHigher')}));
+      const chosen=selection(),limit=higherLimit(chosen),actions=el('div',{className:'notebook-toolbar-actions'});
+      mergeMax=Math.min(Math.max(4,mergeMax),Math.max(4,limit));mergeMin=Math.min(mergeMin,mergeMax);
+      const range=rangeInputs('areaMerge',mergeMin,mergeMax,Math.max(4,limit)),merge=button('merge',()=>{if(!range.valid()){tell('invalidRange');return;}const r=range.read();mergeMin=r.minZoom;mergeMax=r.maxZoom;void startMerge();});merge.disabled=chosen.length<2||limit<4;
+      actions.append(range.wrapper,merge,button('clearSelection',()=>cancel()));toolbar.append(el('div',{textContent:`${t('selected')} (${chosen.length}) · ${t('type')}`}),actions);
+      const list=el('div',{className:'area-selected-list'});for(const m of chosen){const b=button('unpick',()=>toggleSelected(m));b.textContent=`${m.name} · ${m.minZoom}–${m.maxZoom} ×`;list.append(b);}toolbar.append(list,el('div',{className:'area-help',textContent:t(limit>=4?'multiHelp':'noHigher')}));
     }
     async function startMerge(){
       if(!getAuth().admin||busy||draft)return;await refresh();
-      const sources=selection(),band=higherBands(sources).find(b=>b[0]===mergeBand);if(sources.length<2||!band){tell('noHigher');return;}
+      if(!data.zoomRanges){tell('unavailable');return;}
+      const sources=selection(),range={minZoom:mergeMin,maxZoom:mergeMax};if(sources.length<2||!validRange(mergeMin,mergeMax)||mergeMax>higherLimit(sources)){tell('noHigher');return;}
       try{
         let rects=[];for(const r of sources.flatMap(m=>m.rects))rects=paint(rects,r,false);
-        rects=cut(rects,data.markers.filter(m=>m.minZoom===band[0]).flatMap(m=>m.rects));if(!rects.length){tell('empty');return;}
+        rects=cut(rects,data.markers.filter(m=>rangeOverlaps(m,range)).flatMap(m=>m.rects));if(!rects.length){tell('empty');return;}
         const ids=sources.map(m=>m.id);cancelOtherTools();cancel();for(const id of ids)selected.add(id);
-        draft={...appearance(),id:'',name:'',color:'#9cbdc7',minZoom:band[0],maxZoom:band[1],sourceIds:ids,rects,revision:data.revision};
+        draft={...appearance(),id:'',name:'',color:'#9cbdc7',...range,sourceIds:ids,rects,revision:data.revision};
         savedHandlers=Object.fromEntries(['dragging','doubleClickZoom','boxZoom','touchZoom'].map(k=>[k,!!map[k]?.enabled()]));map.doubleClickZoom.disable();setTool('pan');render();finishDialog();
       }catch(e){tell(e.message);}
     }
     function setTool(value){tool=value;if(draft){map.dragging[value==='pan'?'enable':'disable']();map.getContainer().classList.toggle('area-marker-drawing',value!=='pan');}renderToolbar();}
     function renderToolbar(){
-      toolbar.hidden=!draft&&!selected.size;if(!draft){renderSelectionToolbar();return;}toolbar.replaceChildren();const actions=el('div',{className:'notebook-toolbar-actions'}),typeLabel=el('label',{textContent:t('type')}),select=el('select',{id:'areaMarkerBand'});
-      for(const [min,max] of (draft.sourceIds?higherBands(selection()):BANDS))select.append(el('option',{value:String(min),textContent:`${min}–${max}`,selected:min===draft.minZoom}));
-      select.onchange=()=>{try{const minZoom=Number(select.value);let source=draft.rects;if(draft.sourceIds){source=[];for(const r of selection().flatMap(m=>m.rects))source=paint(source,r,false);}const rects=cut(source,data.markers.filter(m=>m.id!==draft.id&&m.minZoom===minZoom).flatMap(m=>m.rects));undo.push({minZoom:draft.minZoom,rects:draft.rects});if(undo.length>32)undo.shift();redo=[];draft={...draft,minZoom,maxZoom:BANDS.find(b=>b[0]===minZoom)[1],rects};render();renderToolbar();}catch(e){select.value=String(draft.minZoom);tell(e.message);}};
-      typeLabel.append(select);actions.append(typeLabel);
+      toolbar.hidden=!draft&&!selected.size;if(!draft){renderSelectionToolbar();return;}toolbar.replaceChildren();const actions=el('div',{className:'notebook-toolbar-actions'}),typeLabel=el('label',{textContent:t('type')}),range=rangeInputs('areaMarker',draft.minZoom,draft.maxZoom,draft.sourceIds?higherLimit(selection()):15);
+      typeLabel.append(range.wrapper);actions.append(typeLabel,button('applyRange',()=>{if(!range.valid()){tell('invalidRange');return;}try{applyRange(range.read());renderToolbar();}catch(e){tell(e.message);}}));
       for(const key of (draft.sourceIds?['pan']:['select','erase','pan'])){const b=button(key,()=>setTool(key));b.setAttribute('aria-pressed',String(tool===key));actions.append(b);}
-      for(const [key,source,target] of [['undo',undo,redo],['redo',redo,undo]]){const b=button(key,()=>{const previous=source.pop();if(!previous)return;target.push({minZoom:draft.minZoom,rects:draft.rects});draft={...draft,...previous,maxZoom:BANDS.find(b=>b[0]===previous.minZoom)[1]};render();renderToolbar();});b.disabled=!source.length||!!draft.sourceIds;actions.append(b);}
-      const finish=button('finish',finishDialog);finish.disabled=!draft.rects.length;actions.append(finish,button('cancel',cancel));toolbar.append(actions,el('div',{className:'area-help',textContent:t('help')}),el('div',{className:'area-help',textContent:`${draft.rects.length} ${t('count')} · ${t('changedType')}`}));
+      for(const [key,source,target] of [['undo',undo,redo],['redo',redo,undo]]){const b=button(key,()=>{const previous=source.pop();if(!previous)return;target.push({minZoom:draft.minZoom,maxZoom:draft.maxZoom,rects:draft.rects});draft={...draft,...previous};render();renderToolbar();});b.disabled=!source.length||!!draft.sourceIds;actions.append(b);}
+      const finish=button('finish',()=>{if(!range.valid()){tell('invalidRange');return;}try{applyRange(range.read());finishDialog();}catch(e){tell(e.message);}});finish.disabled=!draft.rects.length;actions.append(finish,button('cancel',cancel));toolbar.append(actions,el('div',{className:'area-help',textContent:t('help')}),el('div',{className:'area-help',textContent:`${draft.rects.length} ${t('count')} · ${t('changedType')}`}));
     }
     function cancel(clearSelection=true){
       if(clearSelection)selected.clear();
@@ -165,9 +180,9 @@
       draft=null;undo=[];redo=[];toolbar.hidden=true;modal.hidden=true;map.getContainer().classList.remove('area-marker-drawing');render();
     }
     async function start(marker){
-      context.classList.remove('show');if(!getAuth().admin||busy)return;await refresh();if(!loaded){tell('unavailable');return;}if(!getAuth().admin)return;
+      context.classList.remove('show');if(!getAuth().admin||busy)return;await refresh();if(!loaded||!data.zoomRanges){tell('unavailable');return;}if(!getAuth().admin)return;
       cancelOtherTools();cancel();map.closePopup();marker=marker?data.markers.find(m=>m.id===marker.id):null;
-      const band=marker?BANDS.find(b=>b[0]===marker.minZoom):BANDS.find(b=>map.getZoom()>=b[0]&&map.getZoom()<=b[1])||BANDS[3];
+      const band=marker?[marker.minZoom,marker.maxZoom]:BANDS.find(b=>map.getZoom()>=b[0]&&map.getZoom()<=b[1])||BANDS[3];
       draft={...appearance(marker),id:marker?.id||'',name:marker?.name||'',color:marker?.color||'#9cbdc7',minZoom:band[0],maxZoom:band[1],rects:marker?.rects.map(r=>r.slice())||[],revision:data.revision};
       if(marker){const b=bounds(marker.rects);map.fitBounds([gameLatLng(b[0],b[1]),gameLatLng(b[2],b[3])],{padding:[50,100],maxZoom:15,animate:false});}
       savedHandlers=Object.fromEntries(['dragging','doubleClickZoom','boxZoom','touchZoom'].map(k=>[k,!!map[k]?.enabled()]));map.doubleClickZoom.disable();map.boxZoom.disable();map.touchZoom?.disable();setTool('select');render();
@@ -179,8 +194,9 @@
         const wrapper=el('div',{className:'area-opacity-field'}),input=el('input',{id:`area-${key}`,type:'range',min:'0',max:'100',step:'1',value:String(Math.round((1-appearance(draft)[key])*100))}),output=el('output',{textContent:input.value+'%'}),label=el('label',{textContent:t(word),htmlFor:input.id});
         input.oninput=()=>{output.textContent=input.value+'%';draft[key]=Math.round(100-Number(input.value))/100;};wrapper.append(label,input,output);form.insertBefore(wrapper,error);
       }
+      const range=rangeInputs('areaDialog',draft.minZoom,draft.maxZoom,draft.sourceIds?higherLimit(selection()):15);form.insertBefore(el('label',{textContent:t('type')}),error);form.insertBefore(range.wrapper,error);
       form.insertBefore(el('p',{className:'area-help',textContent:t('transparencyHelp')}),error);
-      form.onsubmit=async event=>{event.preventDefault();if(busy||!getAuth().admin||!draft)return;busy=true;save.disabled=true;const captured=epoch;try{await request({...draft,name:name.value.trim(),color:color.value});if(captured!==epoch)return;cancel();toggle.checked=true;layerVisibility.set('area-markers',true);await refresh();tell('saved');}catch(e){if(captured===epoch)error.textContent=t(e.message);}finally{busy=false;save.disabled=false;}};
+      form.onsubmit=async event=>{event.preventDefault();if(busy||!getAuth().admin||!draft)return;busy=true;save.disabled=true;const captured=epoch;try{if(!range.valid())throw Error('invalidRange');applyRange(range.read());if(!draft.rects.length)throw Error('empty');await request({...draft,name:name.value.trim(),color:color.value});if(captured!==epoch)return;cancel();toggle.checked=true;layerVisibility.set('area-markers',true);await refresh();tell('saved');}catch(e){if(captured===epoch)error.textContent=t(e.message);}finally{busy=false;save.disabled=false;}};
     }
     async function removeMarker(marker){
       context.classList.remove('show');if(!marker||!getAuth().admin||busy||!confirm(t('confirm')))return;busy=true;const captured=epoch;
@@ -202,7 +218,7 @@
     const rect=pixelRect;
     mapEl.addEventListener('pointerdown',e=>{if(!draft||tool==='pan'||e.button!==0||e.target.closest('.leaflet-control,.leaflet-popup')||!modal.hidden)return;stopEvent(e);if(pointer)return;pointer={id:e.pointerId,start:point(e)};mapEl.setPointerCapture(e.pointerId);},true);
     mapEl.addEventListener('pointermove',e=>{if(!pointer||e.pointerId!==pointer.id)return;stopEvent(e);const r=rect(pointer.start,point(e)),latLngs=[gameLatLng(r[0],r[1]),gameLatLng(r[2],r[3])];if(!rubber)rubber=L.rectangle(latLngs,{pane:'areaMarkerDraft',renderer:L.svg({pane:'areaMarkerDraft'}),color:tool==='erase'?'#ef8989':'#fff',weight:1,fillOpacity:.14,interactive:false}).addTo(draftGroup);else rubber.setBounds(latLngs);},true);
-    mapEl.addEventListener('pointerup',e=>{if(!pointer||e.pointerId!==pointer.id)return;stopEvent(e);const r=rect(pointer.start,point(e));pointer=null;try{mapEl.releasePointerCapture(e.pointerId);}catch{}try{if(r.some(v=>Math.abs(v)>32000000))throw Error('complex');const occupied=data.markers.filter(m=>m.id!==draft.id&&m.minZoom===draft.minZoom).flatMap(m=>m.rects),next=paint(draft.rects,r,tool==='erase',occupied);if(JSON.stringify(next)!==JSON.stringify(draft.rects)){undo.push({minZoom:draft.minZoom,rects:draft.rects});if(undo.length>32)undo.shift();redo=[];draft.rects=next;}}catch(error){tell(error.message);}renderDraft();renderToolbar();},true);
+    mapEl.addEventListener('pointerup',e=>{if(!pointer||e.pointerId!==pointer.id)return;stopEvent(e);const r=rect(pointer.start,point(e));pointer=null;try{mapEl.releasePointerCapture(e.pointerId);}catch{}try{if(r.some(v=>Math.abs(v)>32000000))throw Error('complex');const occupied=data.markers.filter(m=>m.id!==draft.id&&rangeOverlaps(m,draft)).flatMap(m=>m.rects),next=paint(draft.rects,r,tool==='erase',occupied);if(JSON.stringify(next)!==JSON.stringify(draft.rects)){undo.push({minZoom:draft.minZoom,maxZoom:draft.maxZoom,rects:draft.rects});if(undo.length>32)undo.shift();redo=[];draft.rects=next;}}catch(error){tell(error.message);}renderDraft();renderToolbar();},true);
     mapEl.addEventListener('pointercancel',()=>{pointer=null;renderDraft();});
     for(const event of ['click','dblclick','contextmenu'])mapEl.addEventListener(event,e=>{if(draft&&tool!=='pan'&&!e.target.closest('.leaflet-control,.leaflet-popup'))stopEvent(e);},true);
     map.on('moveend zoomend resize',schedule);
@@ -216,7 +232,7 @@
     document.addEventListener('visibilitychange',()=>{if(!document.hidden)void refresh();});setInterval(refresh,10000);lang();
     return {ready:async()=>{ready=true;await refresh();},authChanged,languageChanged:lang,refresh,privacyChanged:()=>{epoch++;controller?.abort();loaded=false;data={revision:0,markers:[]};cancel();void refresh();},cancel};
   }
-  const exports={create,geometry:{subtract,paint,cut,compact,boundary,overlaps,pixelRect,largestRectangle},higherBands,bands:BANDS};
+  const exports={create,geometry:{subtract,paint,cut,compact,boundary,overlaps,pixelRect,largestRectangle},validRange,rangeOverlaps,higherLimit,bands:BANDS};
   if(typeof window!=='undefined')window.ServerMapAreas=exports;
   if(typeof module!=='undefined')module.exports=exports;
 })();

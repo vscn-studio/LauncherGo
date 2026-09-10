@@ -240,11 +240,21 @@ public sealed partial class ServerMapWebServer : IDisposable
         try
         {
             using var document = ReadJson(context.Request, 7 * 1024 * 1024 + 65536); var rootElement = document.RootElement;
+            principal = Principal(context.Request);
+            if (principal == null) { Error(context, 403, "Login required"); return; }
             string S(string name, string fallback = "") => rootElement.TryGetProperty(name, out var value) ? value.GetString() ?? fallback : fallback;
             double D(string name, double fallback = 0) => rootElement.TryGetProperty(name, out var value) && value.TryGetDouble(out var number) && double.IsFinite(number) ? number : fallback;
             double? DN(string name) => rootElement.TryGetProperty(name, out var value) && value.TryGetDouble(out var number) ? number : null;
             var id = S("id"); var x = D("x"); var z = D("z");
             var existing = pois.All.FirstOrDefault(p => p.Id == id);
+            var replaceZoom = rootElement.TryGetProperty("minZoom", out var minZoomValue) | rootElement.TryGetProperty("maxZoom", out var maxZoomValue);
+            var minZoom = existing?.MinZoom ?? 13; var maxZoom = existing?.MaxZoom ?? 15;
+            if (replaceZoom)
+            {
+                if (!principal.IsAdmin) { Error(context, 403, "Only administrators may set display levels"); return; }
+                if (minZoomValue.ValueKind != JsonValueKind.Number || maxZoomValue.ValueKind != JsonValueKind.Number || !minZoomValue.TryGetInt32(out minZoom) || !maxZoomValue.TryGetInt32(out maxZoom) || !PoiStore.ValidZoomRange(minZoom, maxZoom))
+                { Error(context, 400, "Display range must satisfy 4 <= min <= max <= 15"); return; }
+            }
             if (!string.IsNullOrEmpty(id) && (existing == null || !PoiVisible(principal, existing) || existing.OwnerUid != principal.PlayerUid && !principal.IsAdmin)) { Error(context, 403, "Cannot edit this POI"); return; }
             if (existing == null && pois.All.Count(p => p.OwnerUid == principal.PlayerUid) >= Math.Max(0, config.MaxPoisPerPlayer)) { Error(context, 409, "POI limit reached"); return; }
             if (!CanView(principal, x, z)) { Error(context, 403, "Hidden region"); return; }
@@ -252,7 +262,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             var rotation = 0d;
             if (rootElement.TryGetProperty("rotation", out var rotationValue) && (rotationValue.ValueKind != JsonValueKind.Number || !rotationValue.TryGetDouble(out rotation) || !PoiStore.ValidRotation(rotation)))
             { Error(context, 400, "Rotation must be between -60 and 60 degrees"); return; }
-            var input = new PoiStore.Poi(id, S("type", "text"), S("name", "POI"), S("text"), S("color", "#e66c75"), rotation, x, z, DN("x2"), DN("z2"), principal.PlayerUid, DateTimeOffset.UtcNow);
+            var input = new PoiStore.Poi(id, S("type", "text"), S("name", "POI"), S("text"), S("color", "#e66c75"), rotation, x, z, DN("x2"), DN("z2"), principal.PlayerUid, DateTimeOffset.UtcNow) { MinZoom = minZoom, MaxZoom = maxZoom };
             if (!MapNotebookStore.ValidCoordinate(x) || !MapNotebookStore.ValidCoordinate(z) || input.X2 is { } x2 && !MapNotebookStore.ValidCoordinate(x2) || input.Z2 is { } z2 && !MapNotebookStore.ValidCoordinate(z2)) { Error(context, 400, "Invalid coordinates"); return; }
             if (!PoiVisible(principal, input)) { Error(context, 403, "Hidden region"); return; }
             var replaceImage = rootElement.TryGetProperty("imageData", out var imageValue);
@@ -272,7 +282,9 @@ public sealed partial class ServerMapWebServer : IDisposable
             try
             {
                 if (replaceImage && !announcements.Current.PoiImagesEnabled) throw new InvalidDataException("poi_images_disabled");
-                result = pois.TrySave(input, principal.PlayerUid, config.MaxPoisPerPlayer, principal.IsAdmin, out saved, replaceImage);
+                principal = Principal(context.Request);
+                if (principal == null || replaceZoom && !principal.IsAdmin) { poiImages.Delete(imageKey); Error(context, 403, "Permission changed; reopen the editor"); return; }
+                result = pois.TrySave(input, principal.PlayerUid, config.MaxPoisPerPlayer, principal.IsAdmin, out saved, replaceImage, replaceZoom);
             }
             catch { poiImages.Delete(imageKey); throw; }
             if (result != PoiStore.SaveResult.Saved) poiImages.Delete(imageKey);
@@ -398,7 +410,8 @@ public sealed partial class ServerMapWebServer : IDisposable
             version = 12,
             serverName = api.Server.Config.ServerName,
             updatedAt = startedAt,
-            serverMapVersion = "0.3.3",
+            serverMapVersion = "0.3.4",
+            poiZoomRanges = true,
             tileVersion = typeof(ServerMapWebServer).Assembly.ManifestModule.ModuleVersionId.ToString("N"),
             colorVersion = materials.ClientColormapVersion,
             tileSize = 512,
@@ -421,7 +434,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             // Flat aliases keep the metadata easy to consume for lightweight
             // custom web roots that do not understand the nested objects.
             serverVersion = GameVersion.LongGameVersion,
-            mapVersion = "0.3.3",
+            mapVersion = "0.3.4",
             mapSize = $"{mapSizeX} × {mapSizeZ} × {mapSizeY}",
             cacheSizeBytes = cacheBytes,
             renderTimeMs = RenderMilliseconds,
@@ -503,7 +516,7 @@ public sealed partial class ServerMapWebServer : IDisposable
         else if (name.Equals("mounts", StringComparison.OrdinalIgnoreCase)) AddMounts(features, bounds, principal);
         else if (name.Equals("pois", StringComparison.OrdinalIgnoreCase))
             foreach (var poi in pois.All)
-                if (InBounds(poi.X, poi.Z, bounds) && PoiVisible(principal, poi)) features.Add(PointFeature(poi.Id, poi.X, poi.Z, new { name = poi.Name, text = poi.Text, color = poi.Color, rotation = poi.Rotation, imageKey = announcements.Current.PoiImagesEnabled ? poi.ImageKey : null, poiType = poi.Type, kind = "poi", editable = principal != null && (principal.IsAdmin || principal.PlayerUid == poi.OwnerUid) }));
+                if (InBounds(poi.X, poi.Z, bounds) && PoiVisible(principal, poi)) features.Add(PointFeature(poi.Id, poi.X, poi.Z, new { name = poi.Name, text = poi.Text, color = poi.Color, rotation = poi.Rotation, minZoom = poi.MinZoom, maxZoom = poi.MaxZoom, imageKey = announcements.Current.PoiImagesEnabled ? poi.ImageKey : null, poiType = poi.Type, kind = "poi", editable = principal != null && (principal.IsAdmin || principal.PlayerUid == poi.OwnerUid) }));
         return new { type = "FeatureCollection", version = layerVersions[name], features = VisibleFeatures(features, principal) };
     }
     private static void AddIndexed(List<object> features, IEnumerable<IndexedPoint> points, (double MinX, double MinZ, double MaxX, double MaxZ)? bounds)

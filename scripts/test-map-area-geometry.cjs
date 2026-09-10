@@ -1,11 +1,14 @@
 const assert=require('node:assert/strict');
 const {geometry:g}=require('../LauncherGo.ServerMapHost/WebRoot/area-markers.js');
-const {higherBands}=require('../LauncherGo.ServerMapHost/WebRoot/area-markers.js');
+const {higherLimit,rangeOverlaps,validRange}=require('../LauncherGo.ServerMapHost/WebRoot/area-markers.js');
 assert.deepEqual(g.pixelRect({x:1.1,z:2.1},{x:1.2,z:2.2}),[1,2,2,3]);
 assert.deepEqual(g.pixelRect({x:-.2,z:-.2},{x:-.1,z:-.1}),[-1,-1,0,0]);
-assert.deepEqual(higherBands([{minZoom:10},{minZoom:12}]),[[4,6],[7,9]]);
-assert.deepEqual(higherBands([{minZoom:7},{minZoom:12}]),[[4,6]]);
-assert.deepEqual(higherBands([{minZoom:4},{minZoom:12}]),[]);
+assert.equal(higherLimit([{minZoom:10},{minZoom:12}]),9);
+assert.equal(higherLimit([{minZoom:7},{minZoom:12}]),6);
+assert.equal(higherLimit([{minZoom:4},{minZoom:12}]),3);
+assert.ok(rangeOverlaps({minZoom:7,maxZoom:10},{minZoom:10,maxZoom:13}));
+assert.ok(!rangeOverlaps({minZoom:7,maxZoom:10},{minZoom:11,maxZoom:13}));
+assert.ok(validRange(4,4)&&validRange(4,15)&&!validRange(10,9)&&!validRange(4.5,15));
 const pixels=rects=>{const result=new Set();for(const [a,b,c,d] of rects)for(let x=a;x<c;x++)for(let z=b;z<d;z++){const k=x+','+z;assert.ok(!result.has(k),'No double-painted pixel');result.add(k);}return result;};
 let seed=12345;const rnd=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed;};
 let rects=[],expected=new Set();const occupied=[[0,0,4,4]],old=pixels(occupied);

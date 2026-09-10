@@ -15,6 +15,8 @@ public sealed class AreaMarkerStore
     public sealed record Marker(string Id, string Name, string Color, int MinZoom, Rect[] Rects)
     {
         public Appearance Style { get; init; } = new();
+        // Legacy records stored only MinZoom; preserve their original four intervals.
+        public int MaxZoom { get; init; } = AreaMarkerStore.MaxZoom(MinZoom);
     }
     public sealed record Snapshot(long Revision, Marker[] Markers);
     private readonly object gate = new();
@@ -26,11 +28,15 @@ public sealed class AreaMarkerStore
         state = File.Exists(path) ? JsonSerializer.Deserialize<Snapshot>(File.ReadAllText(path)) ?? throw new InvalidDataException("Invalid area markers") : new(0, []);
         if (state.Revision < 0 || state.Markers == null || state.Markers.Length > MaxMarkers || state.Markers.Any(m => m == null || m.Rects == null) || state.Markers.Sum(m => m.Rects.Length) > MaxTotalRects)
             throw new InvalidDataException("Invalid area markers");
-        foreach (var marker in state.Markers) { Validate(marker.Name, marker.Color, marker.MinZoom, marker.Rects); ValidateStyle(marker.Style); }
+        foreach (var marker in state.Markers) { Validate(marker.Name, marker.Color, marker.MinZoom, marker.Rects); ValidateRange(marker.MinZoom, marker.MaxZoom); ValidateStyle(marker.Style); }
     }
     public Snapshot Read() { lock (gate) return new(state.Revision, state.Markers.Select(m => m with { Rects = m.Rects.ToArray() }).ToArray()); }
-    public static int MaxZoom(int minZoom) => minZoom switch { 4 => 6, 7 => 9, 10 => 11, 12 => 13, _ => throw new ArgumentException("Invalid area zoom band") };
-    public Marker Save(long revision, string? id, string name, string color, int minZoom, Rect[] rects, Appearance? style = null)
+    public static int MaxZoom(int minZoom) => minZoom switch { 4 => 6, 7 => 9, 10 => 11, 12 => 13, _ => minZoom };
+    public static void ValidateRange(int minZoom, int maxZoom)
+    {
+        if (minZoom < 4 || maxZoom > 15 || maxZoom < minZoom) throw new ArgumentException("Display range must satisfy 4 <= min <= max <= 15");
+    }
+    public Marker Save(long revision, string? id, string name, string color, int minZoom, Rect[] rects, Appearance? style = null, int? maxZoom = null)
     {
         Validate(name, color, minZoom, rects);
         lock (gate)
@@ -38,35 +44,39 @@ public sealed class AreaMarkerStore
             if (revision != state.Revision) throw new InvalidOperationException("Area markers changed; reload before saving");
             if (!string.IsNullOrEmpty(id) && !state.Markers.Any(m => m.Id == id)) throw new KeyNotFoundException();
             if (string.IsNullOrEmpty(id) && state.Markers.Length >= MaxMarkers) throw new InvalidOperationException("Area marker limit reached (256)");
+            var existing = state.Markers.FirstOrDefault(m => m.Id == id);
+            var endZoom = maxZoom ?? (existing?.MinZoom == minZoom ? existing.MaxZoom : MaxZoom(minZoom));
+            ValidateRange(minZoom, endZoom);
             style ??= state.Markers.FirstOrDefault(m => m.Id == id)?.Style ?? new();
             ValidateStyle(style);
             var budget = 2_000_000;
             var normalized = Union(rects, ref budget);
-            // Even stale/concurrent clients cannot overwrite neighbours in the same band.
-            foreach (var occupied in state.Markers.Where(m => m.Id != id && m.MinZoom == minZoom).SelectMany(m => m.Rects))
+            // Any shared zoom level would display both areas together: protect all such neighbours.
+            foreach (var occupied in state.Markers.Where(m => m.Id != id && m.MinZoom <= endZoom && m.MaxZoom >= minZoom).SelectMany(m => m.Rects))
                 normalized = Cut(normalized, occupied, ref budget);
             if (normalized.Count == 0) throw new ArgumentException("Select an unoccupied area");
             if (state.Markers.Where(m => m.Id != id).Sum(m => m.Rects.Length) + normalized.Count > MaxTotalRects)
                 throw new InvalidOperationException("Area geometry limit reached");
-            var marker = new Marker(string.IsNullOrEmpty(id) ? Guid.NewGuid().ToString("N") : id, name.Trim(), color.ToLowerInvariant(), minZoom, normalized.ToArray()) { Style = style };
+            var marker = new Marker(string.IsNullOrEmpty(id) ? Guid.NewGuid().ToString("N") : id, name.Trim(), color.ToLowerInvariant(), minZoom, normalized.ToArray()) { Style = style, MaxZoom = endZoom };
             Commit(new(state.Revision + 1, state.Markers.Where(m => m.Id != marker.Id).Append(marker).ToArray()));
             return marker with { Rects = marker.Rects.ToArray() };
         }
     }
-    public Marker Merge(long revision, string[] sourceIds, string name, string color, int minZoom, Appearance? style = null)
+    public Marker Merge(long revision, string[] sourceIds, string name, string color, int minZoom, Appearance? style = null, int? maxZoom = null)
     {
-        _ = MaxZoom(minZoom);
+        var endZoom = maxZoom ?? MaxZoom(minZoom);
+        ValidateRange(minZoom, endZoom);
         if (sourceIds == null || sourceIds.Length is < 2 or > MaxMarkers || sourceIds.Any(string.IsNullOrWhiteSpace) || sourceIds.Distinct(StringComparer.Ordinal).Count() != sourceIds.Length)
             throw new ArgumentException("Select at least two distinct source areas");
         lock (gate)
         {
             if (revision != state.Revision) throw new InvalidOperationException("Area markers changed; reload before merging");
             var sources = sourceIds.Select(id => state.Markers.FirstOrDefault(m => m.Id == id) ?? throw new KeyNotFoundException()).ToArray();
-            if (sources.Any(m => minZoom >= m.MinZoom)) throw new ArgumentException("Merged area must be a higher level than every source");
+            if (sources.Any(m => endZoom >= m.MinZoom)) throw new ArgumentException("Merged range must end before every source range begins");
             var budget = 2_000_000;
             var rects = Union(sources.SelectMany(m => m.Rects), ref budget).ToArray();
             // Geometry comes only from the server-owned originals, never a client-supplied bounding box.
-            return Save(revision, null, name, color, minZoom, rects, style);
+            return Save(revision, null, name, color, minZoom, rects, style, endZoom);
         }
     }
     private static List<Rect> Union(IEnumerable<Rect> rects, ref int budget)
@@ -118,7 +128,7 @@ public sealed class AreaMarkerStore
     private static void CheckCount(int count) { if (count > MaxRects) throw new ArgumentException("Area selection is too complex (1024 rectangles)"); }
     private static void Validate(string name, string color, int zoom, Rect[] rects)
     {
-        _ = MaxZoom(zoom);
+        ValidateRange(zoom, zoom);
         if (string.IsNullOrWhiteSpace(name) || name.Trim().Length > 80 || !Regex.IsMatch(color ?? "", "^#[0-9a-fA-F]{6}$") || rects == null || rects.Length is < 1 or > MaxRects)
             throw new ArgumentException("Invalid area marker");
         foreach (var r in rects)

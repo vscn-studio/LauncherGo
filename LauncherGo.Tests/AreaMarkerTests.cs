@@ -39,8 +39,33 @@ public sealed class AreaMarkerTests : IDisposable
     }
     [Theory] [InlineData(4,6)] [InlineData(7,9)] [InlineData(10,11)] [InlineData(12,13)]
     public void FourBandsHaveExactLimits(int min, int max) => Assert.Equal(max, AreaMarkerStore.MaxZoom(min));
-    [Theory] [InlineData(3)] [InlineData(5)] [InlineData(6)] [InlineData(8)] [InlineData(11)] [InlineData(13)] [InlineData(14)]
-    public void OtherBandsAreRejected(int min) => Assert.Throws<ArgumentException>(() => Store().Save(0, null, "Name", "#abcdef", min, [R(0, 0, 1, 1)]));
+    [Theory] [InlineData(3)] [InlineData(16)]
+    public void OutOfRangeLevelsAreRejected(int min) => Assert.Throws<ArgumentException>(() => Store().Save(0, null, "Name", "#abcdef", min, [R(0, 0, 1, 1)]));
+    [Fact] public void CustomIntervalsExcludeEveryNeighbourSharingAnyVisibleLevel()
+    {
+        var store=Store();var first=store.Save(0,null,"First","#abcdef",7,[R(0,0,10,10)],maxZoom:10);
+        var next=store.Save(1,null,"Next","#abcdef",10,[R(5,0,20,10)],maxZoom:13);
+        Assert.Equal(100,Area(next));Assert.All(next.Rects,r=>Assert.True(r.MinX>=10));
+        var separate=store.Save(2,null,"Separate","#abcdef",11,[R(0,0,10,10)],maxZoom:15);
+        Assert.Equal(100,Area(separate));
+        Assert.Throws<ArgumentException>(()=>store.Save(3,null,"Bad","#abcdef",8,[R(50,50,60,60)],maxZoom:7));
+        Assert.Throws<ArgumentException>(()=>store.Save(3,null,"Bad","#abcdef",4,[R(50,50,60,60)],maxZoom:16));
+        var single=store.Save(3,null,"Single","#abcdef",5,[R(0,0,10,10)],maxZoom:5);
+        Assert.Equal(5,Store().Read().Markers.Single(m=>m.Id==single.Id).MaxZoom);
+        store.Save(4,first.Id,"Old client edit","#abcdef",7,first.Rects);
+        Assert.Equal(10,Store().Read().Markers.Single(m=>m.Id==first.Id).MaxZoom);
+        Assert.Throws<ArgumentException>(()=>store.Merge(5,[first.Id,separate.Id],"Bad parent","#abcdef",4,maxZoom:7));
+        var merged=store.Merge(5,[first.Id,separate.Id],"Parent","#abcdef",6,maxZoom:6);
+        Assert.Equal(6,merged.MaxZoom);Assert.Equal(100,Area(merged));
+    }
+    [Theory] [InlineData(4,6)] [InlineData(7,9)] [InlineData(10,11)] [InlineData(12,13)]
+    public void LegacySerializedRangesArePreserved(int min,int max)
+    {
+        Directory.CreateDirectory(root);File.WriteAllText(Path.Combine(root,"areas.json"),System.Text.Json.JsonSerializer.Serialize(new{Revision=0,Markers=new[]{new{Id="old",Name="Old",Color="#abcdef",MinZoom=min,Rects=new[]{R(0,0,1,1)}}}}));
+        var store=Store();Assert.Equal(max,store.Read().Markers.Single().MaxZoom);
+        store.Save(0,"old","Rename","#abcdef",min,[R(0,0,1,1)]);
+        Assert.Equal(max,Store().Read().Markers.Single().MaxZoom);
+    }
     [Fact] public void InputsAndGeometryAreBoundedAndSnapshotsCannotMutateStore()
     {
         var store = Store();
