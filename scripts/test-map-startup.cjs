@@ -54,14 +54,14 @@ async function main() {
         const link = (id, coordinates) => ({ type: 'Feature', id, geometry: { type: 'LineString', coordinates }, properties: { name: 'Translocator', y: 60, targetY: 80 } });
         links = [link('near', [[511000, 512000], [511100, 512100]])];
         await page.evaluate(() => window.testEvents.dispatchEvent(new MessageEvent('layer', { data: JSON.stringify({ layer: 'translocators', version: 2 }) })));
-        await page.waitForFunction(() => document.querySelectorAll('img[src="assets/icons/spiral.svg"]').length === 2);
+        await page.waitForFunction(() => document.querySelectorAll('.translocator-icon').length === 2);
         // Missing an SSE event during restart must not cache a partial network forever.
         links.push(link('far', [[0, 0], [10000, 10000]]));
         await page.evaluate(() => window.testEvents.dispatchEvent(new Event('open')));
-        await page.waitForFunction(() => document.querySelectorAll('img[src="assets/icons/spiral.svg"]').length === 4);
+        await page.waitForFunction(() => document.querySelectorAll('.translocator-icon').length === 4);
         assert.equal(page.url(), beforeLinks, 'Receiving a remote translocator must not move the camera');
         await page.reload();
-        await page.waitForFunction(() => document.querySelectorAll('img[src="assets/icons/spiral.svg"]').length === 4);
+        await page.waitForFunction(() => document.querySelectorAll('.translocator-icon').length === 4);
         assert.equal(page.url(), beforeLinks, 'Reloading the recovered network must preserve the intended view');
         assert.deepEqual(errors, []);
         console.log(`PASS ${viewport.width}: ${query || 'spawn default'}, reload and translocator updates/reconnect`);

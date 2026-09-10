@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
   <ItemGroup>
+    <Reference Include="SkiaSharp" HintPath="$(VINTAGE_STORY)/Lib/SkiaSharp.dll" Private="false" />
     <Reference Include="VintagestoryAPI" HintPath="$(VINTAGE_STORY)/VintagestoryAPI.dll" Private="false" />
     <Reference Include="VintagestoryLib" HintPath="$(VINTAGE_STORY)/VintagestoryLib.dll" Private="false" />
     <Reference Include="VSEssentials" HintPath="$(VINTAGE_STORY)/Mods/VSEssentials.dll" Private="false" />

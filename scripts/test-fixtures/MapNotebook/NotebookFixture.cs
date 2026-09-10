@@ -18,6 +18,16 @@ public sealed class NotebookFixture : ModSystem
             object Field(string name) => typeof(ServerMapModSystem).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(mod)!;
             var auth = (MapAuthStore)Field("authStore");
             var web = (ServerMapWebServer)Field("web");
+            using (var bitmap = new SkiaSharp.SKBitmap(1600, 800))
+            {
+                bitmap.Erase(SkiaSharp.SKColors.CornflowerBlue);
+                using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+                foreach (var format in new[] { SkiaSharp.SKEncodedImageFormat.Jpeg, SkiaSharp.SKEncodedImageFormat.Png, SkiaSharp.SKEncodedImageFormat.Webp })
+                {
+                    using var encoded = image.Encode(format, 85);
+                    File.WriteAllBytes(Path.Combine((string)Field("dataRoot"), "poi-test." + format.ToString().ToLowerInvariant()), encoded.ToArray());
+                }
+            }
             // Synthetic PNGs exercise the real decoder, cache and HTTP endpoint.
             var avatarRoot = Path.Combine((string)Field("dataRoot"), "avatar-test-layers");
             var avatarPixels = new byte[256*256*4];

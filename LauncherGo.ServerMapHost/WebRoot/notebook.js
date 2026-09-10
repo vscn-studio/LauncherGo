@@ -17,7 +17,7 @@
   words.zh.captureEmpty='选区内没有可用地图图像，请等待该区域生成后重试，或选择其他区域。';
   words.en.captureEmpty='No map image is available in this selection. Wait for the area to generate or choose another area.';
   function create(options) {
-    const { map, api, gameLatLng, gamePoint, getAuth, getMetadata, getLanguage, cancelMeasurement, closePanels, invalidatePrivacy } = options;
+    const { map, api, gameLatLng, gamePoint, getAuth, getMetadata, getLanguage, cancelMeasurement, closePanels, invalidatePrivacy, layerVisibility } = options;
     const text = key => words[getLanguage() === 'zh' ? 'zh' : 'en'][key] || key;
     const el = (tag, props = {}) => Object.assign(document.createElement(tag), props);
     const button = (label, action) => { const b = el('button', { type:'button', className:'notebook-button', textContent:label }); b.onclick = action; return b; };
@@ -49,11 +49,12 @@
     const sections = {};
     for (const key of ['myMarkers','myRoutes','hiddenRegions']) {
       const section = el('section', { className:'notebook-section' }); section.id = `notebook-${key}`;
-      const heading = el('div', { className:'notebook-heading layer-row' }), label = el('label'), toggle = el('input', { type:'checkbox', checked:true, id:`notebook-toggle-${key}` }), title = el('span');
+      const heading = el('div', { className:'notebook-heading layer-row' }), label = el('label'), toggle = el('input', { type:'checkbox', checked:layerVisibility?.get(`notebook:${key}`)??true, id:`notebook-toggle-${key}` }), title = el('span');
       label.htmlFor=toggle.id;label.append(title);heading.append(toggle,label);section.append(heading);
       document.querySelector('#sidebar [data-i18n="onlinePlayers"]').before(section); sections[key] = { section, title, toggle, heading };
     }
     try {sections.hiddenRegions.toggle.checked=localStorage.getItem(fogPreferenceKey)!=='off';}catch{}
+    function showSection(key){sections[key].toggle.checked=true;layerVisibility?.set(`notebook:${key}`,true);}
     const tooltip=el('div',{id:'notebookTooltip',hidden:true});tooltip.setAttribute('role','tooltip');document.body.append(tooltip);let tooltipOwner;
     function closeTooltip(){tooltip.hidden=true;tooltipOwner?.setAttribute('aria-expanded','false');tooltipOwner?.removeAttribute('aria-describedby');tooltipOwner=null;}
     function positionTooltip(anchor){
@@ -154,7 +155,7 @@
     function importMarker(){
       if(!sharedMarkerId||!getAuth().authenticated||writing)return;
       writing=true;const epoch=authEpoch;
-      safe(async()=>{await request('/my-waypoints',{shareId:sharedMarkerId});if(epoch!==authEpoch)return;sharedMarker=null;sharedMarkerId=null;sharedMarkerGroup.clearLayers();const url=new URL(location.href);url.searchParams.delete('waypoint');history.replaceState(null,'',url);sections.myMarkers.toggle.checked=true;await refreshPrivate();toolbar.hidden=true;notice(text('markerSaved'));}).finally(()=>{writing=false;});
+      safe(async()=>{await request('/my-waypoints',{shareId:sharedMarkerId});if(epoch!==authEpoch)return;sharedMarker=null;sharedMarkerId=null;sharedMarkerGroup.clearLayers();const url=new URL(location.href);url.searchParams.delete('waypoint');history.replaceState(null,'',url);showSection('myMarkers');await refreshPrivate();toolbar.hidden=true;notice(text('markerSaved'));}).finally(()=>{writing=false;});
     }
     function markerDialog(marker){
       if(!getAuth().authenticated)return;
@@ -174,7 +175,7 @@
         ],'',async value=>{
           if(!value.name.trim())throw Error(text('markerName'));
           const epoch=authEpoch;await request('/my-waypoints',{id:marker?.id,name:value.name.trim(),text:value.text,icon,color:value.color,pinned:value.pinned,x:value.x+origin.x,y:value.y,z:value.z+origin.z});
-          if(epoch!==authEpoch)return;sections.myMarkers.toggle.checked=true;await refreshPrivate();notice(text('markerSaved'));map.closePopup();
+          if(epoch!==authEpoch)return;showSection('myMarkers');await refreshPrivate();notice(text('markerSaved'));map.closePopup();
         });
         const form=modal.querySelector('form'),nameInput=form.elements.name,colorInput=form.elements.color;
         const coordinates=el('div',{className:'notebook-coordinate-fields'});form.elements.x.parentElement.before(coordinates);for(const axis of ['x','y','z'])coordinates.append(form.elements[axis].parentElement);
@@ -213,13 +214,6 @@
     }
     function startRoute(route) {
       if (!getAuth().authenticated) { document.querySelector('#loginButton').click(); return; }
-      if (!route) {
-        dialog(text('plan'),[{name:'name',label:text('routeName'),value:''},{name:'color',label:text('color'),type:'color',value:'#ffd000'}],'',async value=>{
-          if (!value.name.trim()) throw new Error(text('routeName'));
-          beginRoute({name:value.name.trim(),color:value.color,points:[]});
-        },getLanguage()==='zh'?'开始规划':'Start planning');
-        return;
-      }
       beginRoute(route);
     }
     function beginRoute(route) {
@@ -236,7 +230,7 @@
       if(mode==='route') {
         const undo=button(text('undo'),()=>{if(!draft.length)return;redoDraft.push(draft.pop());renderDraft();renderToolbar();});undo.disabled=!draft.length;
         const redo=button(text('redo'),()=>{if(!redoDraft.length||draft.length>=512)return;draft.push(redoDraft.pop());renderDraft();renderToolbar();});redo.disabled=!redoDraft.length||draft.length>=512;
-        toolbar.append(el('div',{className:'notebook-help',textContent:`${selectedRoute?.name || text('plan')} · ${text('routeHelp')} (${draft.length}/512)`}),undo,redo,button(text('finish'),finishRoute),button(text('cancel'),cancelMode));
+        toolbar.append(el('div',{className:'notebook-help',textContent:`${selectedRoute?.name || text('plan')} · ${text('routeHelp')} (${draft.length}/512)`}),undo,redo,button(text('save'),finishRoute),button(text('cancel'),cancelMode));
       }
       else if(mode==='screenshot') toolbar.append(el('div',{className:'notebook-help',textContent:text('captureHelp')}),button(text('cancel'),cancelMode));
       else if(mode==='region') toolbar.append(el('div',{className:'notebook-help',textContent:text('regionHelp')}),button(text('cancel'),cancelMode));
@@ -255,13 +249,14 @@
       if(draft.length<2){notice(text('routeMin'));return;}
       const points=draft.map(p=>p.slice()),id=editingId;
       dialog(text('plan'),[{name:'name',label:text('routeName'),value:selectedRoute?.name||text('plan')},{name:'color',label:text('color'),type:'color',value:selectedRoute?.color||'#ffd000'}],text('shareWarning'),async value=>{
-        const epoch=authEpoch,route=await request('/routes',{...value,id,points});if(epoch!==authEpoch)return;cancelMode();selectedRoute=route;sections.myRoutes.toggle.checked=true;await refreshPrivate();renderRoutes();notice(text('routeSaved'));
+        value.name=value.name.trim();if(!value.name)throw new Error(text('routeName'));
+        const epoch=authEpoch,route=await request('/routes',{...value,id,points});if(epoch!==authEpoch)return;cancelMode();selectedRoute=route;showSection('myRoutes');await refreshPrivate();renderRoutes();notice(text('routeSaved'));
       });
     }
     function removeRoute(route) {if(!route||!confirm(text('confirmDelete')))return;safe(async()=>{await request(`/routes?id=${encodeURIComponent(route.id)}`,undefined,'DELETE');if(selectedRoute?.id===route.id)selectedRoute=null;await refreshPrivate();});}
     function importShared() {
       if(!sharedRoute||!sharedId||writing)return;if(!getAuth().authenticated){document.querySelector('#loginButton').click();return;}
-      writing=true;const epoch=authEpoch;safe(async()=>{const route=await request('/routes',{shareId:sharedId});if(epoch!==authEpoch)return;selectedRoute=route;sharedRoute=null;sharedId=null;sections.myRoutes.toggle.checked=true;const url=new URL(location.href);url.searchParams.delete('route');history.replaceState(null,'',url);toolbar.hidden=true;await refreshPrivate();renderRoutes();notice(text('routeSaved'));}).finally(()=>{writing=false;});
+      writing=true;const epoch=authEpoch;safe(async()=>{const route=await request('/routes',{shareId:sharedId});if(epoch!==authEpoch)return;selectedRoute=route;sharedRoute=null;sharedId=null;showSection('myRoutes');const url=new URL(location.href);url.searchParams.delete('route');history.replaceState(null,'',url);toolbar.hidden=true;await refreshPrivate();renderRoutes();notice(text('routeSaved'));}).finally(()=>{writing=false;});
     }
     function addRegionLabel(region) {
       const width=region.maxX-region.minX,height=region.maxZ-region.minZ;
@@ -435,11 +430,11 @@
       cancelMode();cancelMeasurement();closePanels();
       if(result.kind==='waypoint'){
         const marker=markers.find(m=>m.id===result.id);if(!marker)return true;
-        sections.myMarkers.toggle.checked=true;renderMarkers();map.setView(gameLatLng(marker.x,marker.z),getMetadata().maxZoom);
+        showSection('myMarkers');renderMarkers();map.setView(gameLatLng(marker.x,marker.z),getMetadata().maxZoom);
         markerGroup.getLayers().find(layer=>layer.options.notebookMarkerId===marker.id)?.openPopup();
       }else if(result.kind==='route'){
         const route=routes.find(r=>r.id===result.id);if(!route)return true;
-        sections.myRoutes.toggle.checked=true;renderRoutes();
+        showSection('myRoutes');renderRoutes();
         const layer=routeGroup.getLayers().find(layer=>layer.options.notebookRouteId===route.id);
         if(layer){map.fitBounds(layer.getBounds(),{padding:[40,40],maxZoom:getMetadata().maxZoom});layer.openPopup();}
       }else if(getAuth().admin){
@@ -456,7 +451,8 @@
       closeScreenshot();authEpoch++;closeTooltip();markers=[];routes=[];markersSignature='';fogSignature='';selectedRoute=null;sharedRoute=null;sharedMarker=null;sharedMarkerGroup.clearLayers();routeGroup.clearLayers();sharedGroup.clearLayers();modal.hidden=true;cancelMode();languageChanged();
       if(ready){invalidatePrivacy();safe(privacyChanged);}
     }
-    sections.myMarkers.toggle.onchange=renderMarkers;sections.myRoutes.toggle.onchange=renderRoutes;
+    sections.myMarkers.toggle.onchange=()=>{layerVisibility?.set('notebook:myMarkers',sections.myMarkers.toggle.checked);renderMarkers();};
+    sections.myRoutes.toggle.onchange=()=>{layerVisibility?.set('notebook:myRoutes',sections.myRoutes.toggle.checked);renderRoutes();};
     sections.hiddenRegions.toggle.onchange=()=>{if(!getAuth().admin)return;try{localStorage.setItem(fogPreferenceKey,sections.hiddenRegions.toggle.checked?'on':'off');}catch{}renderFog();invalidatePrivacy();};
     map.on('contextmenu',event=>{
       contextMarker=event.notebookMarker||null;contextPosition=gamePoint(event.latlng);contextRoute=event.notebookRoute||null;contextRegion=event.notebookRegion||(getAuth().admin?regions.find(r=>contextPosition.x>=r.minX&&contextPosition.x<=r.maxX&&contextPosition.z>=r.minZ&&contextPosition.z<=r.maxZ):null);

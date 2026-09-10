@@ -15,6 +15,22 @@ function pixel(png,x,y) {
 async function main() {
   const cookies={};
   for(const name of ['alice','bob','admin']) { const login=await call('/auth/login',null,{playerName:name,password:'notebook-test-password'});assert.equal(login.status,200);cookies[name]=login.headers.get('set-cookie').split(';')[0]; }
+  await require('./test-map-poi-images-api.cjs')(call,cookies);
+  const rotationInput={name:'Rotation test',text:'Keep description',type:'text',color:'#123456',rotation:30,x:300,z:300};
+  const rotationCreated=await call('/pois',cookies.alice,rotationInput);assert.equal(rotationCreated.status,200);const rotationPoi=rotationCreated.json(),rotationUrl='/pois?id='+rotationPoi.Id;
+  for(const [name,editable] of [['alice',true],['bob',false],['admin',true]]){
+    const feature=(await call('/layers/pois',cookies[name])).json().features.find(f=>f.id===rotationPoi.Id);assert.ok(feature);assert.equal(feature.properties.rotatable,undefined);assert.equal(feature.properties.editable,editable);
+  }
+  assert.equal((await call(rotationUrl,cookies.alice,{rotation:20},'PATCH')).status,405,'Drag-rotation endpoint removed');
+  assert.equal((await call('/pois',cookies.bob,{...rotationInput,id:rotationPoi.Id,rotation:20})).status,403);
+  for(const rotation of [-60.01,60.01,180,'30',null])
+    assert.equal((await call('/pois',cookies.alice,{...rotationInput,id:rotationPoi.Id,rotation})).status,400);
+  for(const rotation of [-60,60,0]){
+    const updated=await call('/pois',cookies.alice,{...rotationInput,id:rotationPoi.Id,rotation});assert.equal(updated.status,200);
+    const persisted=(await call('/pois',cookies.alice)).json().find(p=>p.Id===rotationPoi.Id);assert.deepEqual(persisted,{...rotationPoi,Rotation:rotation,UpdatedAt:persisted.UpdatedAt});
+  }
+  assert.equal((await call(rotationUrl,cookies.alice,undefined,'DELETE',{'X-ServerMap-Request':'1'})).status,200);
+  console.log('PASS real POI editor rotation: removed drag endpoint, ownership, angle bounds and preserved fields');
   assert.equal((await call('/teleport',cookies.admin)).status,405);
   assert.equal((await call('/teleport/quote',null,{x:64,z:72})).status,401);
   assert.equal((await call('/teleport/quote',cookies.alice,{x:64,z:72},'POST',{'X-ServerMap-Request':'0'})).status,403);

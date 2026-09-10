@@ -102,12 +102,24 @@ async function main(){
    assert.match(await assetNotice.textContent(),/不随 LauncherGo 安装包、携带版或模组 ZIP 分发/);
    await page.locator('#contributors .right').click();
    assert.equal(await assetNotice.isVisible(),false);
-   await page.locator('#contributors .contributors-notice summary').click();
+   // Shared-route toolbars can cover this disclosure on a narrow viewport.
+   await page.locator('#contributors .contributors-notice summary').focus();
+   await page.locator('#contributors .contributors-notice summary').press('Enter');
    assert.equal(await assetNotice.isVisible(),true);
    await page.locator('#contributors .right').click();
    return {page,errors};
   }
   const {page:alice,errors:aliceErrors}=await open('alice');
+  // A reload restores both ordinary map layers and personal notebook sections.
+  const savedToggles=['#layers [data-layer="players"] input','#notebook-toggle-myMarkers','#notebook-toggle-myRoutes'];
+  for(const selector of savedToggles){assert.equal(await alice.locator(selector).isChecked(),true);await alice.locator(selector).uncheck();}
+  await alice.locator('#layers [data-layer="spawn"] input').check();
+  await alice.reload();await alice.waitForFunction(()=>document.querySelector('#notebookProgress').dataset.phase==='rendering');
+  for(const selector of savedToggles)assert.equal(await alice.locator(selector).isChecked(),false,selector+' survived reload');
+  assert.equal(await alice.locator('#layers [data-layer="spawn"] input').isChecked(),true,'An enabled default-off layer survives reload');
+  assert.deepEqual(await ownRouteIds(alice),[]);assert.equal(await alice.locator('.notebook-waypoint').count(),0);
+  for(const selector of savedToggles)await alice.locator(selector).check();
+  await alice.locator('#layers [data-layer="spawn"] input').uncheck();
   await alice.waitForFunction(()=>document.querySelector('#playerList img')?.dataset.avatarState==='waiting-model');
   assert.match(await alice.locator('#playerList img').getAttribute('title'),/采集头部模型/);
   playerAvatarState='capture-failed';
@@ -160,11 +172,10 @@ async function main(){
   await alice.waitForFunction(()=>document.querySelector('#notebookProgress').dataset.phase==='rendering');
   assert.equal(await alice.locator('#notebookTooltip').isVisible(),false);
   await alice.locator('#planRoute').click();
-  await alice.locator('#notebookModal').waitFor();
-  assert.equal(await alice.locator('#notebookToolbar').isVisible(),false);
-  await alice.locator('#notebookModal input[name="name"]').fill('Mine trip');
-  await alice.locator('#notebookModal').getByRole('button',{name:'开始规划'}).click();
-  await alice.locator('#notebookModal').waitFor({state:'hidden'});
+  assert.equal(await alice.locator('#notebookModal').isVisible(),false,'Planning starts without a name dialog');
+  assert.equal(await alice.locator('#notebookToolbar').isVisible(),true);
+  await alice.locator('#notebookToolbar').getByRole('button',{name:'保存',exact:true}).click();
+  assert.equal(await alice.locator('#notebookModal').isVisible(),false,'An empty draft cannot be saved');
   await checkToolbarWidth(alice);
   assert.equal(await alice.locator('#notebookToolbar').getByRole('button',{name:'撤销',exact:true}).isDisabled(),true);
   assert.equal(await alice.locator('#notebookToolbar').getByRole('button',{name:'恢复',exact:true}).isDisabled(),true);
@@ -182,8 +193,13 @@ async function main(){
   await alice.evaluate(()=>window.testMap.fire('click',{latlng:L.latLng(80/4096,90/4096)}));
   assert.equal(await alice.locator('#notebookToolbar').getByRole('button',{name:'恢复',exact:true}).isDisabled(),true,'Adding a new point must discard redo history');
   await alice.locator('#notebookToolbar').getByRole('button',{name:'撤销',exact:true}).click();assert.match(await alice.locator('#notebookToolbar').textContent(),/\(2\/512\)/);
-  await alice.locator('#notebookToolbar').getByRole('button',{name:'完成',exact:true}).click();
-  assert.equal(await alice.locator('#notebookModal input[name="name"]').inputValue(),'Mine trip');
+  assert.equal(await alice.locator('#notebookModal').isVisible(),false,'Drawing points does not open the save dialog');
+  await alice.locator('#notebookToolbar').getByRole('button',{name:'保存',exact:true}).click();
+  assert.equal(await alice.locator('#notebookModal input[name="name"]').inputValue(),'规划路线');
+  await alice.locator('#notebookModal').getByRole('button',{name:'取消',exact:true}).click();
+  assert.match(await alice.locator('#notebookToolbar').textContent(),/\(2\/512\)/,'Canceling save retains the draft');
+  await alice.locator('#notebookToolbar').getByRole('button',{name:'保存',exact:true}).click();
+  await alice.locator('#notebookModal input[name="name"]').fill('Mine trip');
   await alice.locator('#notebookModal button[type="submit"]').click();await alice.locator('#notebookModal').waitFor({state:'hidden'});
   const original=[...routes.values()].find(r=>r.owner==='alice'&&r.name==='Mine trip');assert.deepEqual(original.points,[[-90,0],[0,50]]);
   assert.deepEqual(await ownRouteIds(alice),[original.id,'saved-a','saved-b'].sort());
@@ -225,7 +241,7 @@ async function main(){
   progress={phase:'idle',completed:11,failed:0,queued:0,active:0,retrying:0,awaitingSave:0};
   await bob.waitForFunction(()=>document.querySelector('#notebookProgress').dataset.phase==='idle');
   for(const key of ['failed','pending'])assert.equal(await bob.locator('.notebook-progress-segment.'+key).evaluate(el=>el.getBoundingClientRect().width),0,'Mobile minimum touch width must not expose zero segments');
-  await bob.locator('.notebook-progress-segment.completed').tap();assert.match(await bob.locator('#notebookTooltip').textContent(),/已完成: 11/);
+  await bob.locator('.notebook-progress-segment.completed').tap();assert.match(await bob.locator('#notebookTooltip').textContent(),/已完成\s*:?\s*11/);
   await bob.keyboard.press('Escape');progress={phase:'rendering',queued:12,completed:24};
   assert.equal(await bob.locator('#notebook-hiddenRegions').isVisible(),false);
   const {page:admin,errors:adminErrors}=await open('admin');

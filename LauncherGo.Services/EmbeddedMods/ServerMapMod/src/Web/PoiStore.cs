@@ -7,11 +7,32 @@ namespace ServerMap.Web;
 public sealed class PoiStore
 {
     public enum SaveResult { Saved, QuotaExceeded, Forbidden }
-    public sealed record Poi(string Id, string Type, string Name, string Text, string Color, double Rotation, double X, double Z, double? X2, double? Z2, string OwnerUid, DateTimeOffset UpdatedAt);
+    public sealed record Poi(string Id, string Type, string Name, string Text, string Color, double Rotation, double X, double Z, double? X2, double? Z2, string OwnerUid, DateTimeOffset UpdatedAt)
+    {
+        public string? ImageKey { get; init; }
+    }
     private readonly string path; private readonly object gate = new(); private readonly ConcurrentDictionary<string, Poi> points = new();
-    public PoiStore(string path) { this.path = path; try { if (File.Exists(path)) foreach (var point in JsonSerializer.Deserialize<Poi[]>(File.ReadAllText(path)) ?? []) points[point.Id] = point; } catch { } }
+    public PoiStore(string path)
+    {
+        this.path = path;
+        try
+        {
+            if (!File.Exists(path)) return;
+            var changed = false;
+            foreach (var point in JsonSerializer.Deserialize<Poi[]>(File.ReadAllText(path)) ?? [])
+            {
+                var rotation = NormalizeRotation(point.Rotation);
+                changed |= rotation != point.Rotation;
+                points[point.Id] = point with { Rotation = rotation };
+            }
+            if (changed) PersistLocked();
+        }
+        catch { }
+    }
+    public static bool ValidRotation(double rotation) => double.IsFinite(rotation) && rotation >= -60 && rotation <= 60;
+    public static double NormalizeRotation(double rotation) => ValidRotation(rotation) ? rotation : 0;
     public IReadOnlyCollection<Poi> All => points.Values.ToArray();
-    public SaveResult TrySave(Poi input, string ownerUid, int maxPerOwner, bool canManageAll, out Poi? saved)
+    public SaveResult TrySave(Poi input, string ownerUid, int maxPerOwner, bool canManageAll, out Poi? saved, bool replaceImage = false)
     {
         lock (gate)
         {
@@ -22,12 +43,14 @@ public sealed class PoiStore
             var type = input.Type is "rectangle" or "text" ? input.Type : "point";
             var inputColor = input.Color ?? "";
             var color = System.Text.RegularExpressions.Regex.IsMatch(inputColor, "^#[0-9a-fA-F]{6}$") ? inputColor : "#e66c75";
-            var rotation = double.IsFinite(input.Rotation) ? (input.Rotation % 360 + 360) % 360 : 0;
-            if (rotation > 180) rotation -= 360;
+            var rotation = NormalizeRotation(input.Rotation);
             var id = updating ? existing!.Id : Guid.NewGuid().ToString("N");
             var persistedOwner = updating ? existing!.OwnerUid : ownerUid;
-            saved = new Poi(id, type, Limit(input.Name, 80, "POI"), Limit(input.Text, 500, ""), color, rotation, input.X, input.Z, input.X2, input.Z2, persistedOwner, DateTimeOffset.UtcNow);
-            points[id] = saved; PersistLocked(); return SaveResult.Saved;
+            saved = new Poi(id, type, Limit(input.Name, 80, "POI"), Limit(input.Text, 500, ""), color, rotation, input.X, input.Z, input.X2, input.Z2, persistedOwner, DateTimeOffset.UtcNow) { ImageKey = replaceImage ? input.ImageKey : existing?.ImageKey };
+            points[id] = saved;
+            try { PersistLocked(); }
+            catch { if (existing != null) points[id] = existing; else points.TryRemove(id, out _); throw; }
+            return SaveResult.Saved;
         }
     }
     public bool Remove(string id, string ownerUid, bool canManageAll)
@@ -36,7 +59,8 @@ public sealed class PoiStore
         {
             if (!points.TryGetValue(id, out var point) || point.OwnerUid != ownerUid && !canManageAll) return false;
             if (!points.TryRemove(id, out _)) return false;
-            PersistLocked(); return true;
+            try { PersistLocked(); } catch { points[id] = point; throw; }
+            return true;
         }
     }
     private void PersistLocked() => AtomicFile.Replace(path, temp => File.WriteAllText(temp, JsonSerializer.Serialize(points.Values.OrderBy(p => p.Name), new JsonSerializerOptions { WriteIndented = true })));

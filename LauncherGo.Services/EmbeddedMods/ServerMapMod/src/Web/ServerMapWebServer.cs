@@ -25,6 +25,8 @@ public sealed partial class ServerMapWebServer : IDisposable
     private readonly ICoreServerAPI api; private readonly ServerMapConfig config; private readonly string root; private readonly string webRoot;
     private readonly WorldDatabaseReader reader; private readonly MapPalette materials; private readonly MapRenderer renderer; private readonly TilePyramidBuilder pyramid;
     private readonly MapAuthStore auth; private readonly PoiStore pois; private readonly AnnouncementStore announcements;
+    private readonly SemaphoreSlim poiWrites = new(1, 1);
+    private readonly PoiImageStore poiImages;
     private readonly CancellationTokenSource stop = new(); private readonly LiveEventHub events = new();
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<(int X, int Z), byte>> baseTiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<(int X, int Z), byte> knownRegions = new();
@@ -39,6 +41,7 @@ public sealed partial class ServerMapWebServer : IDisposable
     public ServerMapWebServer(ICoreServerAPI api, ServerMapConfig config, string root, WorldDatabaseReader reader, MapPalette materials, MapAuthStore auth, PoiStore pois, AnnouncementStore announcements)
     {
         this.api = api; this.config = config; this.root = root; this.reader = reader; this.materials = materials; this.auth = auth; this.pois = pois; this.announcements = announcements;
+        poiImages = new PoiImageStore(Path.Combine(root, "poi-images"));
         translocators = new TranslocatorIndex(Path.Combine(root, "translocators.json"), message => api.Logger.Warning(message));
         notebook = new MapNotebookStore(Path.Combine(root, "web-notebook.json"));
         InitializeNotebook();
@@ -83,7 +86,7 @@ public sealed partial class ServerMapWebServer : IDisposable
                 ServeBytes(context, image, "image/png", "public, max-age=86400, immutable"); return;
             }
             if (path is "" or "servermap" or "index.html") { ServeBytes(context, Encoding.UTF8.GetBytes((announcements.Current.Site ?? new()).ApplyToHtml(File.ReadAllText(Path.Combine(webRoot, "index.html")))), "text/html; charset=utf-8", "no-store"); return; }
-            if (path.StartsWith("vendor/", StringComparison.OrdinalIgnoreCase) || path.StartsWith("assets/", StringComparison.OrdinalIgnoreCase) || path is "mobile.css" or "notebook.css" or "notebook.js" or "screenshot.js") { ServeWebAsset(context, path); return; }
+            if (path.StartsWith("vendor/", StringComparison.OrdinalIgnoreCase) || path.StartsWith("assets/", StringComparison.OrdinalIgnoreCase) || path is "mobile.css" or "notebook.css" or "notebook.js" or "screenshot.js" or "poi-images.js") { ServeWebAsset(context, path); return; }
             if (path == "api/v1/events") { events.Subscribe(context, stop.Token).GetAwaiter().GetResult(); return; }
             if (path == "api/v1/auth/login" && context.Request.HttpMethod == "POST") { Login(context); return; }
             if (path == "api/v1/auth/logout" && context.Request.HttpMethod == "POST") { auth.Logout(context.Request.Cookies["servermap_auth"]?.Value); context.Response.Headers["Set-Cookie"] = "servermap_auth=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict"; Json(context, new { authenticated = false }, true); return; }
@@ -92,6 +95,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             if (path == "api/v1/status") { Json(context, Status(), true); return; }
             if (path == "api/v1/search") { Json(context, Search(context.Request.QueryString["q"], Principal(context.Request)), true); return; }
             if (path == "api/v1/pois") { HandlePois(context); return; }
+            if (path == "api/v1/poi-image") { HandlePoiImage(context); return; }
             if (path is "api/v1/teleport" or "api/v1/teleport/quote") { HandleTeleport(context, path.EndsWith("/quote", StringComparison.Ordinal)); return; }
             if (path == "api/v1/height") { Height(context); return; }
             if (path == "api/v1/map/metadata") { Json(context, Metadata(), true); return; }
@@ -171,7 +175,7 @@ public sealed partial class ServerMapWebServer : IDisposable
 
     private void HandleAnnouncement(HttpListenerContext context)
     {
-        object Response(AnnouncementStore.Announcement value) => new { html = value.Html, serverWebsite = value.ServerWebsite, site = value.Site ?? new(), playerGearTeleportEnabled = value.PlayerGearTeleportEnabled, playerTeleport = value.PlayerTeleport ?? new(), updatedBy = value.UpdatedBy, updatedAt = value.UpdatedAt };
+        object Response(AnnouncementStore.Announcement value) => new { html = value.Html, serverWebsite = value.ServerWebsite, site = value.Site ?? new(), poiImagesEnabled = value.PoiImagesEnabled, playerGearTeleportEnabled = value.PlayerGearTeleportEnabled, playerTeleport = value.PlayerTeleport ?? new(), updatedBy = value.UpdatedBy, updatedAt = value.UpdatedAt };
         if (context.Request.HttpMethod == "GET") { Json(context, Response(announcements.Current), true); return; }
         var principal = Principal(context.Request);
         if (context.Request.HttpMethod != "POST") { Error(context, 405, "Method not allowed"); return; }
@@ -183,6 +187,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             var html = document.RootElement.GetProperty("html").GetString() ?? "";
             var website = document.RootElement.TryGetProperty("serverWebsite", out var websiteValue) ? websiteValue.GetString() ?? "" : announcements.Current.ServerWebsite;
             var site = document.RootElement.TryGetProperty("site", out var siteValue) ? siteValue.Deserialize<WebPageMetadata>() : null;
+            bool? poiImagesEnabled = document.RootElement.TryGetProperty("poiImagesEnabled", out var imagesValue) ? imagesValue.GetBoolean() : null;
             bool? playerTeleport = document.RootElement.TryGetProperty("playerGearTeleportEnabled", out var teleportValue) ? teleportValue.GetBoolean() : null;
             var teleportSettings = document.RootElement.TryGetProperty("playerTeleport", out var settingsValue)
                 ? settingsValue.Deserialize<PlayerTeleportSettings>(new JsonSerializerOptions { PropertyNameCaseInsensitive = true })?.Validate()
@@ -195,8 +200,9 @@ public sealed partial class ServerMapWebServer : IDisposable
                 if (teleportSettings != null && api.World.GetItem(new AssetLocation(teleportSettings.ItemCode)) == null
                     && api.World.GetBlock(new AssetLocation(teleportSettings.ItemCode)) == null)
                     throw new ArgumentException("Unknown teleport item code");
-                var value = announcements.Save(html, website, principal.PlayerName, site, playerTeleport, teleportSettings);
-                events.Publish("settings", new { playerGearTeleportEnabled = value.PlayerGearTeleportEnabled, playerTeleport = value.PlayerTeleport });
+                var value = announcements.Save(html, website, principal.PlayerName, site, playerTeleport, teleportSettings, poiImagesEnabled);
+                events.Publish("layer", new { layer = "pois", version = layerVersions.AddOrUpdate("pois", 2, (_, old) => old + 1) });
+                events.Publish("settings", new { poiImagesEnabled = value.PoiImagesEnabled, playerGearTeleportEnabled = value.PlayerGearTeleportEnabled, playerTeleport = value.PlayerTeleport });
                 return value;
             });
             Json(context, Response(saved), true);
@@ -208,6 +214,12 @@ public sealed partial class ServerMapWebServer : IDisposable
 
     private void HandlePois(HttpListenerContext context)
     {
+        if (context.Request.HttpMethod == "GET") { HandlePoiWrite(context); return; }
+        if (!poiWrites.Wait(0)) { Error(context, 429, "POI save busy; please retry"); return; }
+        try { HandlePoiWrite(context); } finally { poiWrites.Release(); }
+    }
+    private void HandlePoiWrite(HttpListenerContext context)
+    {
         var principal = Principal(context.Request);
         if (context.Request.HttpMethod == "GET") { Json(context, pois.All.Where(p => PoiVisible(principal, p)), true); return; }
         if (principal == null) { Error(context, 403, "Login required"); return; }
@@ -215,27 +227,57 @@ public sealed partial class ServerMapWebServer : IDisposable
         if (context.Request.HttpMethod == "DELETE")
         {
             var id = context.Request.QueryString["id"];
+            var removed = pois.All.FirstOrDefault(p => p.Id == id);
             if (string.IsNullOrWhiteSpace(id) || !pois.Remove(id, principal.PlayerUid, principal.IsAdmin)) { NotFound(context); return; }
+            poiImages.Delete(removed?.ImageKey);
             events.Publish("layer", new { layer = "pois", version = layerVersions.AddOrUpdate("pois", 2, (_, old) => old + 1) }); Json(context, new { removed = true }, true); return;
         }
         if (context.Request.HttpMethod != "POST") { Error(context, 405, "Method not allowed"); return; }
         try
         {
-            using var document = ReadJson(context.Request); var rootElement = document.RootElement;
+            using var document = ReadJson(context.Request, 7 * 1024 * 1024 + 65536); var rootElement = document.RootElement;
             string S(string name, string fallback = "") => rootElement.TryGetProperty(name, out var value) ? value.GetString() ?? fallback : fallback;
             double D(string name, double fallback = 0) => rootElement.TryGetProperty(name, out var value) && value.TryGetDouble(out var number) && double.IsFinite(number) ? number : fallback;
             double? DN(string name) => rootElement.TryGetProperty(name, out var value) && value.TryGetDouble(out var number) ? number : null;
             var id = S("id"); var x = D("x"); var z = D("z");
+            var existing = pois.All.FirstOrDefault(p => p.Id == id);
+            if (!string.IsNullOrEmpty(id) && (existing == null || !PoiVisible(principal, existing) || existing.OwnerUid != principal.PlayerUid && !principal.IsAdmin)) { Error(context, 403, "Cannot edit this POI"); return; }
+            if (existing == null && pois.All.Count(p => p.OwnerUid == principal.PlayerUid) >= Math.Max(0, config.MaxPoisPerPlayer)) { Error(context, 409, "POI limit reached"); return; }
             if (!CanView(principal, x, z)) { Error(context, 403, "Hidden region"); return; }
             if (string.IsNullOrWhiteSpace(id) && !CanCreatePoiAt(principal, x, z)) { Error(context, 403, "Cannot create a POI inside another player's claim"); return; }
-            var input = new PoiStore.Poi(id, S("type", "text"), S("name", "POI"), S("text"), S("color", "#e66c75"), D("rotation"), x, z, DN("x2"), DN("z2"), principal.PlayerUid, DateTimeOffset.UtcNow);
+            var rotation = 0d;
+            if (rootElement.TryGetProperty("rotation", out var rotationValue) && (rotationValue.ValueKind != JsonValueKind.Number || !rotationValue.TryGetDouble(out rotation) || !PoiStore.ValidRotation(rotation)))
+            { Error(context, 400, "Rotation must be between -60 and 60 degrees"); return; }
+            var input = new PoiStore.Poi(id, S("type", "text"), S("name", "POI"), S("text"), S("color", "#e66c75"), rotation, x, z, DN("x2"), DN("z2"), principal.PlayerUid, DateTimeOffset.UtcNow);
             if (!MapNotebookStore.ValidCoordinate(x) || !MapNotebookStore.ValidCoordinate(z) || input.X2 is { } x2 && !MapNotebookStore.ValidCoordinate(x2) || input.Z2 is { } z2 && !MapNotebookStore.ValidCoordinate(z2)) { Error(context, 400, "Invalid coordinates"); return; }
             if (!PoiVisible(principal, input)) { Error(context, 403, "Hidden region"); return; }
-            var result = pois.TrySave(input, principal.PlayerUid, config.MaxPoisPerPlayer, principal.IsAdmin, out var saved);
+            var replaceImage = rootElement.TryGetProperty("imageData", out var imageValue);
+            string? imageKey = null;
+            if (replaceImage)
+            {
+                if (!announcements.Current.PoiImagesEnabled) { Error(context, 403, "poi_images_disabled"); return; }
+                if (imageValue.ValueKind != JsonValueKind.Null)
+                {
+                    var base64 = imageValue.GetString() ?? throw new InvalidDataException("poi_image_format");
+                    if (base64.Length > ((PoiImageStore.MaxBytes + 2) / 3) * 4) throw new InvalidDataException("poi_image_size");
+                    imageKey = poiImages.Save(Convert.FromBase64String(base64));
+                }
+                input = input with { ImageKey = imageKey };
+            }
+            PoiStore.SaveResult result; PoiStore.Poi? saved;
+            try
+            {
+                if (replaceImage && !announcements.Current.PoiImagesEnabled) throw new InvalidDataException("poi_images_disabled");
+                result = pois.TrySave(input, principal.PlayerUid, config.MaxPoisPerPlayer, principal.IsAdmin, out saved, replaceImage);
+            }
+            catch { poiImages.Delete(imageKey); throw; }
+            if (result != PoiStore.SaveResult.Saved) poiImages.Delete(imageKey);
+            else if (replaceImage) poiImages.Delete(existing?.ImageKey);
             if (result == PoiStore.SaveResult.QuotaExceeded) { Error(context, 409, $"POI limit reached ({Math.Max(0, config.MaxPoisPerPlayer)})"); return; }
             if (result == PoiStore.SaveResult.Forbidden) { Error(context, 403, "Cannot edit another player's POI"); return; }
             events.Publish("layer", new { layer = "pois", version = layerVersions.AddOrUpdate("pois", 2, (_, old) => old + 1) }); Json(context, saved!, true);
         }
+        catch (InvalidDataException error) { Error(context, 400, error.Message.StartsWith("poi_image", StringComparison.Ordinal) ? error.Message : "Invalid POI"); }
         catch { Error(context, 400, "Invalid POI"); }
     }
 
@@ -291,9 +333,8 @@ public sealed partial class ServerMapWebServer : IDisposable
         return results.Take(50).ToArray();
     }
 
-    private static JsonDocument ReadJson(HttpListenerRequest request)
+    private static JsonDocument ReadJson(HttpListenerRequest request, int limit = 1024 * 1024)
     {
-        const int limit = 1024 * 1024;
         if (request.ContentLength64 > limit) throw new InvalidDataException();
         using var buffer = new MemoryStream(); var chunk = new byte[8192]; int count;
         while ((count = request.InputStream.Read(chunk)) > 0) { if (buffer.Length + count > limit) throw new InvalidDataException(); buffer.Write(chunk, 0, count); }
@@ -353,7 +394,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             version = 12,
             serverName = api.Server.Config.ServerName,
             updatedAt = startedAt,
-            serverMapVersion = "0.3.2",
+            serverMapVersion = "0.3.3",
             tileVersion = typeof(ServerMapWebServer).Assembly.ManifestModule.ModuleVersionId.ToString("N"),
             colorVersion = materials.ClientColormapVersion,
             tileSize = 512,
@@ -376,7 +417,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             // Flat aliases keep the metadata easy to consume for lightweight
             // custom web roots that do not understand the nested objects.
             serverVersion = GameVersion.LongGameVersion,
-            mapVersion = "0.3.2",
+            mapVersion = "0.3.3",
             mapSize = $"{mapSizeX} × {mapSizeZ} × {mapSizeY}",
             cacheSizeBytes = cacheBytes,
             renderTimeMs = RenderMilliseconds,
@@ -457,7 +498,7 @@ public sealed partial class ServerMapWebServer : IDisposable
         else if (name.Equals("translocators", StringComparison.OrdinalIgnoreCase)) AddTranslocators(features, bounds, principal);
         else if (name.Equals("pois", StringComparison.OrdinalIgnoreCase))
             foreach (var poi in pois.All)
-                if (InBounds(poi.X, poi.Z, bounds) && PoiVisible(principal, poi)) features.Add(PointFeature(poi.Id, poi.X, poi.Z, new { name = poi.Name, text = poi.Text, color = poi.Color, rotation = poi.Rotation, poiType = poi.Type, kind = "poi", editable = principal != null && (principal.IsAdmin || principal.PlayerUid == poi.OwnerUid) }));
+                if (InBounds(poi.X, poi.Z, bounds) && PoiVisible(principal, poi)) features.Add(PointFeature(poi.Id, poi.X, poi.Z, new { name = poi.Name, text = poi.Text, color = poi.Color, rotation = poi.Rotation, imageKey = announcements.Current.PoiImagesEnabled ? poi.ImageKey : null, poiType = poi.Type, kind = "poi", editable = principal != null && (principal.IsAdmin || principal.PlayerUid == poi.OwnerUid) }));
         return new { type = "FeatureCollection", version = layerVersions[name], features = VisibleFeatures(features, principal) };
     }
     private static void AddIndexed(List<object> features, IEnumerable<IndexedPoint> points, (double MinX, double MinZ, double MaxX, double MaxZ)? bounds)

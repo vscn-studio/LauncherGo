@@ -11,10 +11,10 @@ const collection = features => ({ type: 'FeatureCollection', features });
 async function checkSizes(page) {
     await page.waitForFunction(() => {
         const images = [...document.querySelectorAll('#map img.map-marker')];
-        return images.length === 4 && images.every(image => image.complete && image.naturalWidth > 0);
+        return images.length === 2 && document.querySelectorAll('.translocator-icon').length===2 && images.every(image => image.complete && image.naturalWidth > 0);
     });
-    for (const [icon, size] of [['spawn.png', 20], ['player.svg', 20], ['spiral.svg', 19]]) {
-        const boxes = await page.locator(`#map img.map-marker[src="assets/icons/${icon}"]`).evaluateAll(images =>
+    for (const [icon, size] of [['#map img.map-marker[src="assets/icons/spawn.png"]', 20], ['#map img.map-marker[src="assets/icons/player.svg"]', 20], ['#map .translocator-icon', 19]]) {
+        const boxes = await page.locator(icon).evaluateAll(images =>
             images.map(image => ({ width: image.getBoundingClientRect().width, height: image.getBoundingClientRect().height })));
         assert.ok(boxes.length > 0, `Missing ${icon}`);
         // Transformed Leaflet coordinates can introduce subpixel rounding.
@@ -98,7 +98,7 @@ async function main() {
                     await page.evaluate(()=>Object.values(window.testMap._layers).find(l=>l.getElement?.()?.querySelector('.poi-label')).openPopup());
                     const popup=page.locator('.leaflet-popup .notebook-popup');
                     const buttons=await popup.locator('button').evaluateAll(bs=>bs.map(b=>({label:b.getAttribute('aria-label'),title:b.title,text:b.textContent,icons:b.querySelectorAll('svg').length,y:b.getBoundingClientRect().y,width:b.getBoundingClientRect().width})));
-                    assert.deepEqual(buttons.map(b=>b.label),['复制地点链接','编辑地点标记']);
+                    assert.deepEqual(buttons.map(b=>b.label),['复制地点链接','编辑地点标记','删除地点标记']);
                     assert.equal(new Set(buttons.map(b=>b.y)).size,1);
                     for(const b of buttons){assert.equal(b.text,'');assert.equal(b.icons,1);assert.equal(b.title,b.label);assert.ok(b.width>=(viewport.width<700?44:34));}
                     await popup.getByRole('button',{name:'复制地点链接'}).click();
@@ -109,8 +109,10 @@ async function main() {
                     assert.equal(await page.locator('#poiNameInput').inputValue(),'地点标记');
                     await page.locator('[data-close-modal="poiModal"]').click();
                     for(const [endpoint,x] of [[0,-65],[1,65]]){
-                        await page.evaluate(endpoint=>Object.values(window.testMap._layers).filter(l=>l.getElement?.()?.querySelector('img[src="assets/icons/spiral.svg"]'))[endpoint].openPopup(),endpoint);
+                        await page.evaluate(endpoint=>Object.values(window.testMap._layers).find(l=>l.options.translocatorEndpoint===endpoint).openPopup(),endpoint);
                         await page.waitForFunction(()=>document.querySelectorAll('.leaflet-popup .notebook-popup').length===1);
+                        assert.equal(await page.evaluate(()=>Object.values(window.testMap._layers).find(l=>l.options.className==='translocator-line').options.weight),4,'Selected translocator connection is thicker');
+                        assert.equal(await page.locator('.translocator-marker.translocator-active').count(),2,'Both connected endpoints are recolored');
                         assert.equal(await popup.locator('button').count(),1);
                         assert.equal(await popup.locator('button svg').count(),1);
                         await popup.getByRole('button',{name:'复制传送器链接'}).click();
@@ -118,6 +120,13 @@ async function main() {
                         const url=new URL(await page.evaluate(()=>window.copied.at(-1)));
                         assert.equal(url.searchParams.get('x'),String(x));assert.equal(url.searchParams.get('z'),'115');assert.equal(url.searchParams.get('point'),'1');
                     }
+                    await page.evaluate(()=>window.testMap.closePopup());
+                    await page.mouse.move(5,200);
+                    await page.waitForFunction(()=>Object.values(window.testMap._layers).find(l=>l.options.className==='translocator-line').options.weight===1.5);
+                    assert.equal(await page.evaluate(()=>Object.values(window.testMap._layers).find(l=>l.options.className==='translocator-line').options.weight),1.5,'Closing details away from the connection restores it');
+                    assert.equal(await page.locator('.translocator-marker.translocator-active').count(),0);
+                    await page.evaluate(()=>Object.values(window.testMap._layers).find(l=>l.options.className==='translocator-line').openPopup());
+                    assert.equal(await page.locator('.translocator-marker.translocator-active').count(),2,'Selecting the connection recolors its endpoints');
                     await page.evaluate(()=>window.testMap.closePopup());
                     const poi=page.locator('.poi-label');
                     assert.equal(await poi.evaluate(e=>getComputedStyle(e).webkitTextStrokeColor),'rgb(32, 37, 43)');
