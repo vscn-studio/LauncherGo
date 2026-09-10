@@ -38,6 +38,7 @@
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\World\SavedWorldQueries.cs" Link="ServerMap\SavedWorldQueries.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Util\AtomicFile.cs" Link="ServerMap\AtomicFile.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\MapNotebookStore.cs" Link="ServerMap\MapNotebookStore.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\AreaMarkerStore.cs" Link="ServerMap\AreaMarkerStore.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\PoiStore.cs" Link="ServerMap\PoiStore.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\MapVisibility.cs" Link="ServerMap\MapVisibility.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\GameWaypointSnapshot.cs" Link="ServerMap\GameWaypointSnapshot.cs" />

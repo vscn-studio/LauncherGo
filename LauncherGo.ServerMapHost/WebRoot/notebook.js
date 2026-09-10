@@ -208,6 +208,7 @@
       if(sharedRoute)addRoute(sharedRoute,sharedGroup,true);
     }
     function cancelMode() {
+      document.dispatchEvent(new Event('servermap-notebook-cancel'));
       mode=null;draft=[];redoDraft=[];editingId=null;selectionStart=null;draftGroup.clearLayers();selectionRect=null;preview=null;planButton.classList.remove('active');toolbar.hidden=true;
       map.dragging.enable();map.doubleClickZoom.enable();map.getContainer().style.cursor='';
       renderRoutes();
@@ -479,7 +480,7 @@
     document.querySelector('#measure').addEventListener('click',()=>{if(mode)cancelMode();});
     document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});
     setInterval(poll,5000);languageChanged();
-    return { isSelectingScreenshot:()=>mode==='screenshot', iconButton:routeIconButton,copyPointLink:sharePoint,hideRegions:()=>!getAuth().admin||sections.hiddenRegions.toggle.checked,focusSearchResult,authChanged,languageChanged,privacyChanged,ready:async()=>{ready=true;await poll();await loadShared();await loadSharedMarker();if(new URL(location.href).searchParams.get('point')==='1'){const p=gamePoint(map.getCenter()),origin=getMetadata().spawn;L.circleMarker(map.getCenter(),{radius:7,color:'#fff',fillColor:'#e66c75',fillOpacity:1}).bindPopup(`X ${Math.round(p.x-origin.x)}, Z ${Math.round(p.z-origin.z)}`).addTo(map).openPopup();}} };
+    return { cancelMode, isSelectingScreenshot:()=>mode==='screenshot', iconButton:routeIconButton,copyPointLink:sharePoint,hideRegions:()=>!getAuth().admin||sections.hiddenRegions.toggle.checked,focusSearchResult,authChanged,languageChanged,privacyChanged,ready:async()=>{ready=true;await poll();await loadShared();await loadSharedMarker();if(new URL(location.href).searchParams.get('point')==='1'){const p=gamePoint(map.getCenter()),origin=getMetadata().spawn;L.circleMarker(map.getCenter(),{radius:7,color:'#fff',fillColor:'#e66c75',fillOpacity:1}).bindPopup(`X ${Math.round(p.x-origin.x)}, Z ${Math.round(p.z-origin.z)}`).addTo(map).openPopup();}} };
   }
   window.ServerMapNotebook={create};
 })();

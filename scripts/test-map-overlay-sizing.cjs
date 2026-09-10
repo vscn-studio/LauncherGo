@@ -61,6 +61,7 @@ async function main() {
                     if (url.pathname === '/api/v1/auth/me') return json({ authenticated: true, admin: true });
                     if (url.pathname === '/api/v1/announcement') return json({ html: '<span></span>' });
                     if (['/api/v1/my-waypoints','/api/v1/routes','/api/v1/hidden-regions'].includes(url.pathname)) return json([]);
+                    if (url.pathname === '/api/v1/area-markers') return json({revision:0,markers:[]});
                     if (url.pathname === '/api/v1/render-progress') return json({phase:'idle',queued:0});
                     if (url.pathname === '/api/v1/events') return route.fulfill({ contentType: 'text/event-stream', body: ': test\n\n' });
                     if (url.pathname.startsWith('/api/v1/tiles/')) return route.fulfill({ path: path.join(webRoot, 'assets/sky.png'), contentType: 'image/png' });
@@ -77,10 +78,10 @@ async function main() {
                 if(zoom===3){
                     for(const selector of ['.poi-label','.claim-text']){
                         await page.evaluate(selector=>{const layers=Object.values(window.testMap._layers),layer=layers.find(l=>selector==='.poi-label'?l.getElement?.()?.querySelector('.poi-label'):l.getTooltip?.()?.getElement()?.matches(selector));layer.openPopup();},selector);
-                        await page.waitForFunction(selector=>getComputedStyle(document.querySelector(selector)).visibility==='visible',selector);
+                        await page.waitForFunction(selector=>getComputedStyle(document.querySelector(selector)).visibility==='hidden',selector);
                         assert.equal(await page.locator(selector).evaluate(e=>e.classList.contains('map-label-selected')),true);
                         await page.evaluate(()=>window.testMap.setZoom(8,{animate:false}));
-                        assert.equal(await page.locator(selector).isVisible(),true,'Selection survives zoom out');
+                        assert.equal(await page.locator(selector).isVisible(),false,'Selection must not bypass the 14–15 label band');
                         await page.evaluate(()=>window.testMap.closePopup());
                         assert.equal(await page.locator(selector).isVisible(),false,'Deselected distant text hides again');
                         await page.evaluate(()=>window.testMap.setZoom(9,{animate:false}));
@@ -88,7 +89,7 @@ async function main() {
                     await page.evaluate(()=>{document.querySelector('#measure').click();window.testMap.fire('click',{latlng:window.testMap.getCenter()});});
                     const endpoint=page.locator('.route-marker-label');await endpoint.waitFor({state:'attached'});assert.equal(await endpoint.isVisible(),false);
                     await page.evaluate(()=>Object.values(window.testMap._layers).find(l=>l.options.routeEndpoint==='start').fire('click'));
-                    assert.equal(await endpoint.isVisible(),true,'Clicked route endpoint remains labeled');
+                    assert.equal(await endpoint.isVisible(),false,'Clicked route endpoint follows the same 14–15 label band');
                     await page.evaluate(()=>window.testMap.closePopup());assert.equal(await endpoint.isVisible(),false);
                     await page.evaluate(()=>document.querySelector('#measure').click());
                 }
@@ -111,7 +112,7 @@ async function main() {
                     for(const [endpoint,x] of [[0,-65],[1,65]]){
                         await page.evaluate(endpoint=>Object.values(window.testMap._layers).find(l=>l.options.translocatorEndpoint===endpoint).openPopup(),endpoint);
                         await page.waitForFunction(()=>document.querySelectorAll('.leaflet-popup .notebook-popup').length===1);
-                        assert.equal(await page.evaluate(()=>Object.values(window.testMap._layers).find(l=>l.options.className==='translocator-line').options.weight),4,'Selected translocator connection is thicker');
+                        assert.equal(await page.evaluate(()=>Object.values(window.testMap._layers).find(l=>l.options.className==='translocator-line').options.weight),1.5,'Selection changes color, not connection width');
                         assert.equal(await page.locator('.translocator-marker.translocator-active').count(),2,'Both connected endpoints are recolored');
                         assert.equal(await popup.locator('button').count(),1);
                         assert.equal(await popup.locator('button svg').count(),1);
@@ -149,7 +150,7 @@ async function main() {
                 await page.waitForFunction(expected => new URL(location.href).searchParams.get('zoom') === String(expected) && !document.querySelector('#map').classList.contains('leaflet-zoom-anim'), expectedZoom);
                 await checkSizes(page);
                 assert.deepEqual(errors, [], 'Browser errors');
-                console.log(`PASS ${viewport.width}x${viewport.height}: zoom ${zoom} -> ${expectedZoom}, distant labels hidden except selection`);
+                console.log(`PASS ${viewport.width}x${viewport.height}: URL zoom ${zoom} -> ${expectedZoom}, detail labels restricted to levels 14–15`);
                 await page.close();
             }
         }

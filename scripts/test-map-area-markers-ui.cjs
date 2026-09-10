@@ -1,0 +1,65 @@
+const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path');
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
+const {geometry:g,bands}=require('../LauncherGo.ServerMapHost/WebRoot/area-markers.js');
+const webRoot=path.resolve(__dirname,'../LauncherGo.ServerMapHost/WebRoot');
+const area=rects=>rects.reduce((a,r)=>a+(r[2]-r[0])*(r[3]-r[1]),0);
+async function run(){
+ const browser=await chromium.launch({headless:true});
+ try{for(const viewport of [{width:1280,height:800},{width:390,height:844}]){
+  let admin=true,revision=0,markers=bands.map(([minZoom,maxZoom],i)=>({id:'band'+i,name:'测试区域 '+i,color:'#94b9ce',minZoom,maxZoom,rects:[[-8000,-4000,8000,4000]]})),writes=[];
+  const page=await browser.newPage({viewport,hasTouch:viewport.width<700,isMobile:viewport.width<700,locale:'zh-CN'}),errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
+  await page.addInitScript(()=>{window.EventSource=class extends EventTarget{constructor(){super();window.testEvents=this;}};localStorage.setItem('servermap-language','zh');});
+  await page.route('http://areas.test/**',async route=>{
+   const url=new URL(route.request().url()),name=url.pathname,method=route.request().method(),data=route.request().postDataJSON(),json=(value,status=200)=>route.fulfill({json:value,status});
+   if(name.endsWith('/area-markers')){
+    if(method==='GET')return json({revision,markers});if(!admin)return json({},403);if(data.revision!==revision)return json({},409);writes.push(data);
+    if(method==='DELETE')markers=markers.filter(m=>m.id!==data.id);else{let rects=[];for(const r of data.rects)rects=g.paint(rects,r,false,markers.filter(m=>m.id!==data.id&&m.minZoom===data.minZoom).flatMap(m=>m.rects));markers=markers.filter(m=>m.id!==data.id).concat({...data,id:data.id||'new'+writes.length,rects,maxZoom:bands.find(b=>b[0]===data.minZoom)[1]});}revision++;return json({saved:true});
+   }
+   if(name.endsWith('/map/metadata'))return json({maxZoom:12,maxZoomOut:4,spawn:{x:0,z:0},center:{x:0,z:0},colormapReady:true});
+   if(name.endsWith('/layers/manifest'))return json({layers:[{id:'pois',visible:true},{id:'claims',visible:true}]});
+   if(name.endsWith('/layers/pois'))return json({features:[{type:'Feature',id:'poi',geometry:{type:'Point',coordinates:[0,0]},properties:{name:'地点文字',color:'#abcdef'}}]});
+   if(name.endsWith('/layers/claims'))return json({features:[{type:'Feature',id:'claim',geometry:{type:'Polygon',coordinates:[[[10,0],[20,0],[20,10],[10,10],[10,0]]]},properties:{name:'领地文字'}}]});
+   if(name.endsWith('/auth/me'))return json({authenticated:true,admin,name:admin?'admin':'player'});
+   if(name.endsWith('/announcement'))return json({html:''});if(name.endsWith('/render-progress'))return json({phase:'idle'});
+   if(['/hidden-regions','/my-waypoints','/routes'].some(p=>name.endsWith(p)))return json([]);
+   if(name.includes('/tiles/'))return route.fulfill({path:path.join(webRoot,'assets/sky.png'),contentType:'image/png'});
+   if(name.startsWith('/api/'))return json({});
+   const file=path.resolve(webRoot,name==='/'?'index.html':name.slice(1));assert.ok(file.startsWith(webRoot+path.sep));let body=await fs.readFile(file);
+   if(name==='/')body=body.toString().replace('  (() => {','  const originalMap=L.map;L.map=(...args)=>(window.testMap=originalMap(...args));\n  (() => {').replace('areas=ServerMapAreas.create','areas=window.testAreas=ServerMapAreas.create');
+   return route.fulfill({body,contentType:{'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.svg':'image/svg+xml'}[path.extname(file)]||'text/plain'});
+  });
+  await page.goto('http://areas.test/');await page.waitForSelector('.area-marker-overlay');
+  const zoom=async n=>{await page.evaluate(n=>window.testMap.setView([0,0],n,{animate:false}),n);await page.waitForTimeout(80);};
+  for(let z=4;z<=15;z++){
+   await zoom(z);const ids=await page.locator('.area-marker-overlay').evaluateAll(nodes=>nodes.map(n=>n.dataset.areaId));const band=bands.findIndex(b=>z>=b[0]&&z<=b[1]);assert.deepEqual(ids,band>=0?['band'+band]:[],'Only the matching zoom band is visible');
+   await page.waitForFunction(()=>document.querySelectorAll('.poi-label,.claim-text').length>=2,null,{timeout:5000});const labels=await page.locator('.poi-label,.claim-text').evaluateAll(nodes=>nodes.map(n=>getComputedStyle(n).visibility));assert.ok(labels.length>=2,JSON.stringify({z,labels,errors}));assert.ok(labels.every(s=>s===(z>=14?'visible':'hidden')),JSON.stringify({z,labels}));
+  }
+  await zoom(12);await page.evaluate(()=>document.querySelector('.poi-label').classList.add('map-label-selected'));assert.equal(await page.locator('.poi-label').evaluate(n=>getComputedStyle(n).visibility),'hidden');
+  // SVG remains translucent and text fits even at the largest band zoom.
+  const style=await page.locator('.area-marker-overlay').first().evaluate(s=>({opacity:Number(s.querySelector('path').getAttribute('fill-opacity')),textOpacity:Number(s.querySelector('text').getAttribute('opacity')),background:getComputedStyle(s).backgroundColor}));assert.ok(style.opacity<.2&&style.textOpacity<.8);assert.equal(style.background,'rgba(0, 0, 0, 0)');
+  await zoom(4);await page.reload();await page.waitForSelector('.area-marker-overlay');assert.equal(await page.evaluate(()=>window.testMap.getZoom()),4,'Reload preserves low zoom even on a small explored map');await zoom(12);
+  await page.evaluate(()=>{const c=document.querySelector('#areaMarkerToggle');c.checked=false;c.dispatchEvent(new Event('change'));});assert.equal(await page.locator('.area-marker-overlay').count(),0);await page.reload();await page.waitForFunction(()=>window.testAreas&&document.querySelector('#zoom').textContent.includes('12'));assert.equal(await page.locator('#areaMarkerToggle').isChecked(),false);
+  markers=[];revision++;await page.evaluate(()=>window.testAreas.refresh());await zoom(14);
+  async function start(){await page.evaluate(()=>window.testMap.fire('contextmenu',{latlng:window.testMap.getCenter()}));await page.locator('#contextMenu [data-area-action=add]').click();await page.locator('#areaMarkerToolbar').waitFor();assert.equal(await page.locator('#areaMarkerModal').isVisible(),false,'Naming happens only after Finish');}
+  async function drag(x1,z1,x2,z2){const coords=await page.evaluate(([x1,z1,x2,z2])=>{const m=window.testMap,r=m.getContainer().getBoundingClientRect();return [[x1,z1],[x2,z2]].map(([x,z])=>{const p=m.latLngToContainerPoint([z/4096,x/4096]);return {x:r.left+p.x,y:r.top+p.y};});},[x1,z1,x2,z2]);
+   if(viewport.width<700){const session=await page.context().newCDPSession(page);await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[coords[0]]});await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[coords[1]]});await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await session.detach();}
+   else{await page.mouse.move(coords[0].x,coords[0].y);await page.mouse.down();await page.mouse.move(coords[1].x,coords[1].y,{steps:4});await page.mouse.up();}
+  }
+  await start();await drag(-20,-20,20,20);await page.locator('#areaMarkerToolbar [data-area-action=erase]').click();await drag(-5,-5,5,5);await page.locator('#areaMarkerToolbar [data-area-action=undo]').click();await page.locator('#areaMarkerToolbar [data-area-action=redo]').click();
+  await page.locator('#areaMarkerToolbar [data-area-action=finish]').click();await page.locator('#areaMarkerName').fill('像素区域 <b>安全</b>');await page.locator('#areaMarkerColor').fill('#99aabb');await page.locator('#areaMarkerModal [data-area-action=save]').click();await page.locator('#areaMarkerToolbar').waitFor({state:'hidden'});assert.equal(area(markers[0].rects),1500);assert.ok(!markers[0].rects.some(r=>g.overlaps(r,[-5,-5,5,5])));assert.equal(markers[0].minZoom,12);
+  const existing=structuredClone(markers[0]);await start();await drag(10,-20,30,20);await page.locator('#areaMarkerToolbar [data-area-action=finish]').click();await page.locator('#areaMarkerName').fill('相邻区域');await page.locator('#areaMarkerModal [data-area-action=save]').click();await page.locator('#areaMarkerToolbar').waitFor({state:'hidden'});assert.deepEqual(markers[0],existing);assert.equal(area(markers[1].rects),400);
+  // API conflict leaves the draft intact; cancellation restores map interaction.
+  await start();await drag(-30,-30,-25,-25);await page.locator('#areaMarkerToolbar [data-area-action=finish]').click();await page.locator('#areaMarkerName').fill('冲突');revision++;await page.locator('#areaMarkerModal [data-area-action=save]').click();await page.waitForFunction(()=>document.querySelector('#areaMarkerModal .error').textContent.includes('其他管理员'));await page.keyboard.press('Escape');await page.keyboard.press('Escape');assert.equal(await page.evaluate(()=>window.testMap.dragging.enabled()),true);
+  await zoom(13);assert.equal(await page.locator('.area-marker-overlay').count(),2);assert.equal(await page.locator('.area-marker-overlay b').count(),0,'Names are text, not HTML');
+  // Export the actual visible SVGs, not just a mocked image response.
+  const exported=await page.evaluate(async()=>{
+   const map=window.testMap,tileLayer=Object.values(map._layers).find(l=>l instanceof L.TileLayer),bounds=L.latLngBounds([-40/4096,-40/4096],[40/4096,40/4096]);
+   async function capture(){const result=await ServerMapScreenshot.capture({map,bounds,tileLayer,nativeZoom:12,signal:new AbortController().signal}),bitmap=await createImageBitmap(result.blob),canvas=document.createElement('canvas');canvas.width=bitmap.width;canvas.height=bitmap.height;const ctx=canvas.getContext('2d');ctx.drawImage(bitmap,0,0);const pixels=ctx.getImageData(0,0,canvas.width,canvas.height).data;let hash=2166136261;for(const p of pixels)hash=Math.imul(hash^p,16777619);bitmap.close();return{hash,type:result.blob.type,width:result.width,height:result.height};}
+   const on=await capture(),toggle=document.querySelector('#areaMarkerToggle');toggle.checked=false;toggle.dispatchEvent(new Event('change'));const off=await capture();toggle.checked=true;toggle.dispatchEvent(new Event('change'));return {on,off};
+  });assert.equal(exported.on.type,'image/png');assert.equal(exported.on.width,exported.off.width);assert.notEqual(exported.on.hash,exported.off.hash,'Visible areas must appear in PNG export');
+  if(process.env.MAP_SCREENSHOTS){await fs.mkdir(process.env.MAP_SCREENSHOTS,{recursive:true});await page.screenshot({path:path.join(process.env.MAP_SCREENSHOTS,`area-markers-${viewport.width}.png`)});}
+  admin=false;await page.reload();await page.waitForSelector('.area-marker-overlay');await page.evaluate(()=>window.testMap.fire('contextmenu',{latlng:window.testMap.getCenter()}));assert.equal(await page.locator('#contextMenu [data-area-action=add]').isVisible(),false);assert.equal(await page.locator('.area-manage').isVisible(),false);assert.equal(await page.locator('#areaMarkerToggle').isVisible(),viewport.width>=700);
+  assert.deepEqual(errors,[]);await page.close();console.log(`Area markers UI: ${viewport.width}px zoom bands, labels, drawing, erase, undo/redo, neighbours, conflicts and roles passed.`);
+ }}finally{await browser.close();}
+}
+run().catch(e=>{console.error(e);process.exitCode=1;});
