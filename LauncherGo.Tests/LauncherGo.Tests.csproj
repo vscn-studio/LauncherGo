@@ -48,6 +48,9 @@
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\LocalAvatarCache.cs" Link="ServerMap\LocalAvatarCache.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\ClientAvatarStore.cs" Link="ServerMap\ClientAvatarStore.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Render\AvatarScene.cs" Link="ServerMap\AvatarScene.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Render\TopDownMountRenderer.cs" Link="ServerMap\TopDownMountRenderer.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\MountSnapshotStore.cs" Link="ServerMap\MountSnapshotStore.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\MountVisibility.cs" Link="ServerMap\MountVisibility.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Render\AvatarTexturePacking.cs" Link="ServerMap\AvatarTexturePacking.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\WaypointIconStore.cs" Link="ServerMap\WaypointIconStore.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Render\PngEncoder.cs" Link="ServerMap\PngEncoder.cs" />

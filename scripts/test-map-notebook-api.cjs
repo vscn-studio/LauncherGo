@@ -16,6 +16,7 @@ async function main() {
   const cookies={};
   for(const name of ['alice','bob','admin']) { const login=await call('/auth/login',null,{playerName:name,password:'notebook-test-password'});assert.equal(login.status,200);cookies[name]=login.headers.get('set-cookie').split(';')[0]; }
   await require('./test-map-poi-images-api.cjs')(call,cookies);
+  await require('./test-map-mounts-api.cjs')(call,cookies);
   const rotationInput={name:'Rotation test',text:'Keep description',type:'text',color:'#123456',rotation:30,x:300,z:300};
   const rotationCreated=await call('/pois',cookies.alice,rotationInput);assert.equal(rotationCreated.status,200);const rotationPoi=rotationCreated.json(),rotationUrl='/pois?id='+rotationPoi.Id;
   for(const [name,editable] of [['alice',true],['bob',false],['admin',true]]){

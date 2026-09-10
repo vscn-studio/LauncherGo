@@ -18,6 +18,26 @@ public sealed class NotebookFixture : ModSystem
             object Field(string name) => typeof(ServerMapModSystem).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(mod)!;
             var auth = (MapAuthStore)Field("authStore");
             var web = (ServerMapWebServer)Field("web");
+            // Isolated HTTP fixture: freeze the real mount sync and submit bounded synthetic
+            // rider-owned PNGs through the same store/decoder used by network uploads.
+            api.ModLoader.GetModSystem<MountMapSyncSystem>().Dispose();
+            var mountStore = web.Mounts;
+            var mountNow = Environment.TickCount64;
+            mountStore.Replace([
+                new(9001,"fixture:boat","Shared boat",2000,100,2000,(float)(Math.PI/2),[new("alice","Alice",2000,2000),new("bob","Bob",2000,2000)]),
+                new(9002,"fixture:elk","Bob elk",2100,100,2000,0,[new("bob","Bob",2100,2000)]),
+                new(9003,"fixture:bad","Invalid image",2200,100,2000,0,[new("alice","Alice",2200,2000)])
+            ],mountNow);
+            var mountPixels = new byte[1024*1024*4];
+            for(var i=0;i<mountPixels.Length;i+=4){mountPixels[i]=120;mountPixels[i+1]=200;mountPixels[i+3]=255;}
+            var mountPng = ServerMap.Render.PngEncoder.Encode(1024,1024,mountPixels);
+            foreach(var (id,uid) in new[]{(9001L,"alice"),(9002L,"bob"),(9003L,"alice")})
+            {
+                var mountToken=mountStore.Request(uid,id,mountNow)!;
+                mountStore.Receive(uid,id,mountToken,0,1,id==9003?[1,2,3]:mountPng,8,0,-1,mountNow,id==9001?4:12);
+            }
+            var mountControl=Path.Combine((string)Field("dataRoot"),"dismount.test");
+            api.Event.RegisterGameTickListener(_=>{if(File.Exists(mountControl))mountStore.Replace([],Environment.TickCount64);},250);
             using (var bitmap = new SkiaSharp.SKBitmap(1600, 800))
             {
                 bitmap.Erase(SkiaSharp.SKColors.CornflowerBlue);

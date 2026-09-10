@@ -8,10 +8,10 @@ public static class AvatarTexturePacking
     private sealed class Page { public List<Row> Rows = []; public int Width, Height; }
     private sealed record Placement(int Page, int X, int Y);
 
-    public static AvatarScene Pack(IReadOnlyList<AvatarScene.Texture> sources, IReadOnlyList<AvatarScene.Vertex> vertices)
+    public static AvatarScene Pack(IReadOnlyList<AvatarScene.Texture> sources, IReadOnlyList<AvatarScene.Vertex> vertices, int maxVertices = AvatarScene.MaxVertices, int maxPixels = AvatarScene.MaxPixels)
     {
-        if (sources.Count is < 1 or > AvatarScene.MaxVertices || vertices.Count > AvatarScene.MaxVertices ||
-            sources.Sum(t => (long)t.Width * t.Height) > AvatarScene.MaxPixels)
+        if (sources.Count < 1 || sources.Count > maxVertices || vertices.Count > maxVertices ||
+            sources.Sum(t => (long)t.Width * t.Height) > maxPixels)
             throw new InvalidDataException("Head texture pixel budget exceeded");
         var pages = new List<Page>();
         var placements = new Placement[sources.Count];
@@ -35,7 +35,7 @@ public static class AvatarTexturePacking
                 break;
             }
         }
-        if (pages.Count > 128 || pages.Sum(p => (long)p.Width * p.Height) > AvatarScene.MaxPixels)
+        if (pages.Count > 128 || pages.Sum(p => (long)p.Width * p.Height) > maxPixels)
             throw new InvalidDataException("Packed head textures exceed pixel budget");
         var packed = pages.Select(p => new AvatarScene.Texture(p.Width, p.Height, new byte[p.Width * p.Height * 4])).ToArray();
         for (var i = 0; i < sources.Count; i++)
@@ -52,6 +52,6 @@ public static class AvatarTexturePacking
                 U = (at.X + Math.Clamp(v.U * source.Width, .5f, source.Width - .5f)) / target.Width,
                 V = (at.Y + Math.Clamp(v.V * source.Height, .5f, source.Height - .5f)) / target.Height };
         }).ToArray();
-        var scene = new AvatarScene { Textures = packed, Vertices = remapped }; scene.Validate(); return scene;
+        var scene = new AvatarScene { Textures = packed, Vertices = remapped }; scene.Validate(maxVertices, maxPixels); return scene;
     }
 }

@@ -78,8 +78,9 @@ public static class ClientHeadCapture
         api.Logger.Notification("ServerMap head textures packed: {0} faces into {1} pages, {2} pixels.", cachedMesh!.IndicesCount / 6, scene.Textures.Length, scene.Textures.Sum(t => t.Width * t.Height));
         return scene;
     }
-    public static AvatarScene CaptureMesh(MeshData mesh, IReadOnlyList<LoadedTexture> atlases)
+    public static AvatarScene CaptureMesh(MeshData mesh, IReadOnlyList<LoadedTexture> atlases, int maxVertices = AvatarScene.MaxVertices, int maxPixels = AvatarScene.MaxPixels)
     {
+        if (mesh.IndicesPerFace != 6 || mesh.VerticesPerFace != 4 || mesh.IndicesCount < 6 || mesh.IndicesCount > maxVertices || mesh.IndicesCount % 6 != 0) throw new InvalidDataException("Unsupported capture mesh");
         var textures = new List<AvatarScene.Texture>(); var vertices = new List<AvatarScene.Vertex>();
         var crops = new Dictionary<(int Id, int X, int Y, int W, int H), int>(); var pixelCount = 0;
         for (var face = 0; face < mesh.IndicesCount / 6; face++)
@@ -96,14 +97,14 @@ public static class ClientHeadCapture
             if (!crops.TryGetValue(crop, out var textureIndex))
             {
                 if (width > 512 || height > 512) throw new InvalidDataException($"Head texture rectangle exceeds 512 pixels: {width}x{height}");
-                if ((pixelCount += width * height) > AvatarScene.MaxPixels) throw new InvalidDataException($"Head texture pixel budget exceeded: {pixelCount}/{AvatarScene.MaxPixels}");
+                if ((pixelCount += width * height) > maxPixels) throw new InvalidDataException($"Head texture pixel budget exceeded: {pixelCount}/{AvatarScene.MaxPixels}");
                 textureIndex = textures.Count;
                 textures.Add(new(width, height, TextureReadback.Read(textureId, x, y, width, height))); crops.Add(crop, textureIndex);
             }
             foreach (var index in indices) vertices.Add(new(mesh.xyz[index * 3], mesh.xyz[index * 3 + 1], mesh.xyz[index * 3 + 2],
                 Math.Clamp((mesh.Uv[index * 2] * atlas.Width - x) / width, 0, 1), Math.Clamp((mesh.Uv[index * 2 + 1] * atlas.Height - y) / height, 0, 1), textureIndex));
         }
-        return AvatarTexturePacking.Pack(textures, vertices);
+        return AvatarTexturePacking.Pack(textures, vertices, maxVertices, maxPixels);
     }
 
     /// <summary>Read just the used atlas rectangle. GL bindings/packing are restored in finally.</summary>

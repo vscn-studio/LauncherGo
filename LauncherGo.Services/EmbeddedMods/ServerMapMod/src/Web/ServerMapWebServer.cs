@@ -21,7 +21,7 @@ public sealed partial class ServerMapWebServer : IDisposable
 {
     private static readonly byte[] TransparentTile = PngEncoder.Encode(TilePyramidBuilder.TileSize, TilePyramidBuilder.TileSize, new byte[TilePyramidBuilder.TileSize * TilePyramidBuilder.TileSize * 4]);
     private static readonly string[] Renderers = ["basic", "sepia"];
-    private static readonly string[] Layers = ["players", "spawn", "claims", "claim-areas", "chunks", "translocators", "pois"];
+    private static readonly string[] Layers = ["players", "mounts", "spawn", "claims", "claim-areas", "chunks", "translocators", "pois"];
     private readonly ICoreServerAPI api; private readonly ServerMapConfig config; private readonly string root; private readonly string webRoot;
     private readonly WorldDatabaseReader reader; private readonly MapPalette materials; private readonly MapRenderer renderer; private readonly TilePyramidBuilder pyramid;
     private readonly MapAuthStore auth; private readonly PoiStore pois; private readonly AnnouncementStore announcements;
@@ -86,7 +86,7 @@ public sealed partial class ServerMapWebServer : IDisposable
                 ServeBytes(context, image, "image/png", "public, max-age=86400, immutable"); return;
             }
             if (path is "" or "servermap" or "index.html") { ServeBytes(context, Encoding.UTF8.GetBytes((announcements.Current.Site ?? new()).ApplyToHtml(File.ReadAllText(Path.Combine(webRoot, "index.html")))), "text/html; charset=utf-8", "no-store"); return; }
-            if (path.StartsWith("vendor/", StringComparison.OrdinalIgnoreCase) || path.StartsWith("assets/", StringComparison.OrdinalIgnoreCase) || path is "mobile.css" or "notebook.css" or "notebook.js" or "screenshot.js" or "poi-images.js") { ServeWebAsset(context, path); return; }
+            if (path.StartsWith("vendor/", StringComparison.OrdinalIgnoreCase) || path.StartsWith("assets/", StringComparison.OrdinalIgnoreCase) || path is "mobile.css" or "notebook.css" or "notebook.js" or "screenshot.js" or "poi-images.js" or "mounts.js") { ServeWebAsset(context, path); return; }
             if (path == "api/v1/events") { events.Subscribe(context, stop.Token).GetAwaiter().GetResult(); return; }
             if (path == "api/v1/auth/login" && context.Request.HttpMethod == "POST") { Login(context); return; }
             if (path == "api/v1/auth/logout" && context.Request.HttpMethod == "POST") { auth.Logout(context.Request.Cookies["servermap_auth"]?.Value); context.Response.Headers["Set-Cookie"] = "servermap_auth=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict"; Json(context, new { authenticated = false }, true); return; }
@@ -96,6 +96,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             if (path == "api/v1/search") { Json(context, Search(context.Request.QueryString["q"], Principal(context.Request)), true); return; }
             if (path == "api/v1/pois") { HandlePois(context); return; }
             if (path == "api/v1/poi-image") { HandlePoiImage(context); return; }
+            if (path == "api/v1/mount-image") { HandleMountImage(context); return; }
             if (path is "api/v1/teleport" or "api/v1/teleport/quote") { HandleTeleport(context, path.EndsWith("/quote", StringComparison.Ordinal)); return; }
             if (path == "api/v1/height") { Height(context); return; }
             if (path == "api/v1/map/metadata") { Json(context, Metadata(), true); return; }
@@ -447,7 +448,7 @@ public sealed partial class ServerMapWebServer : IDisposable
         catch (UnauthorizedAccessException) { return 0; }
     }
     private object Settings() => new { version = 7, enable2d = config.Enable2D, colormapReady = materials.HasClientColormap, colormapMonth = materials.ClientColormapMonth, ranges = Metadata() };
-    private object Manifest() => new { version = layerVersions.Values.DefaultIfEmpty().Max(), layers = Layers.Select(name => new { id = name, version = layerVersions[name], visible = name is "players" or "spawn" or "claims" or "translocators" or "pois" }).ToArray() };
+    private object Manifest() => new { version = layerVersions.Values.DefaultIfEmpty().Max(), layers = Layers.Select(name => new { id = name, version = layerVersions[name], visible = name is "players" or "mounts" or "spawn" or "claims" or "translocators" or "pois" }).ToArray() };
     private object Players(MapAuthStore.Principal? principal)
     {
         if (!config.PublicPlayers) return Array.Empty<object>();
@@ -496,6 +497,7 @@ public sealed partial class ServerMapWebServer : IDisposable
         }
         else if (name.Equals("chunks", StringComparison.OrdinalIgnoreCase)) foreach (var region in baseTiles["sepia"].Keys) { var minX = region.X * 512d; var minZ = region.Z * 512d; var maxX = minX + 512; var maxZ = minZ + 512; if (Intersects(minX, minZ, maxX, maxZ, bounds)) features.Add(new { type = "Feature", id = $"region-{region.X}-{region.Z}", geometry = new { type = "Polygon", coordinates = new[] { new[] { new[] { minX, minZ }, new[] { maxX, minZ }, new[] { maxX, maxZ }, new[] { minX, maxZ }, new[] { minX, minZ } } } }, properties = new { state = "generated", kind = "chunk" } }); }
         else if (name.Equals("translocators", StringComparison.OrdinalIgnoreCase)) AddTranslocators(features, bounds, principal);
+        else if (name.Equals("mounts", StringComparison.OrdinalIgnoreCase)) AddMounts(features, bounds, principal);
         else if (name.Equals("pois", StringComparison.OrdinalIgnoreCase))
             foreach (var poi in pois.All)
                 if (InBounds(poi.X, poi.Z, bounds) && PoiVisible(principal, poi)) features.Add(PointFeature(poi.Id, poi.X, poi.Z, new { name = poi.Name, text = poi.Text, color = poi.Color, rotation = poi.Rotation, imageKey = announcements.Current.PoiImagesEnabled ? poi.ImageKey : null, poiType = poi.Type, kind = "poi", editable = principal != null && (principal.IsAdmin || principal.PlayerUid == poi.OwnerUid) }));
@@ -762,7 +764,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             if (!stop.IsCancellationRequested)
             {
                 if (waypointListener != 0) { api.Event.UnregisterGameTickListener(waypointListener); waypointListener = 0; }
-                stop.Cancel(); events.Dispose(); avatars?.Dispose(); ClientAvatars?.Dispose();
+                stop.Cancel(); events.Dispose(); avatars?.Dispose(); ClientAvatars?.Dispose(); Mounts.Dispose();
                 try { listener?.Stop(); listener?.Close(); } catch { }
             }
             return maintenance;

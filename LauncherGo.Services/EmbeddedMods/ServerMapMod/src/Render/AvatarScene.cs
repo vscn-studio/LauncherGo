@@ -56,10 +56,10 @@ public sealed class AvatarScene
         var scene = new AvatarScene { Textures = textures, Vertices = vertices }; scene.Validate(); return scene;
     }
     private static int Bound(int n, int min, int max) => n >= min && n <= max ? n : throw new InvalidDataException("Avatar bounds");
-    public void Validate()
+    public void Validate(int maxVertices = MaxVertices, int maxPixels = MaxPixels)
     {
-        Bound(Textures.Length, 1, 128); Bound(Vertices.Length, 3, MaxVertices);
-        if (Vertices.Length % 3 != 0 || Textures.Sum(t => (long)t.Width * t.Height) > MaxPixels) throw new InvalidDataException("Avatar limits");
+        Bound(Textures.Length, 1, 128); Bound(Vertices.Length, 3, maxVertices);
+        if (Vertices.Length % 3 != 0 || Textures.Sum(t => (long)t.Width * t.Height) > maxPixels) throw new InvalidDataException("Avatar limits");
         foreach (var t in Textures) { Bound(t.Width, 1, 512); Bound(t.Height, 1, 512); if (t.Rgba.Length != t.Width * t.Height * 4) throw new InvalidDataException("Avatar pixels"); }
         foreach (var v in Vertices)
             if (!float.IsFinite(v.X + v.Y + v.Z + v.U + v.V) || Math.Max(Math.Abs(v.X), Math.Max(Math.Abs(v.Y), Math.Abs(v.Z))) > 100 || v.U < 0 || v.U > 1 || v.V < 0 || v.V > 1 || v.Texture < 0 || v.Texture >= Textures.Length)
