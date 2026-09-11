@@ -6,6 +6,8 @@
     zh: { myMarkers:'游戏标记', myRoutes:'我的轨迹', hiddenRegions:'隐藏区域', plan:'规划路线', login:'登录后可查看和保存', emptyMarkers:'暂无游戏内标记', emptyRoutes:'暂无已保存轨迹', emptyRegions:'暂无隐藏区域', progress:'地图渲染进度', waiting:'等待游戏就绪', starting:'正在启动', scanning:'正在扫描存档', rendering:'正在渲染', retrying:'等待重试', idle:'当前队列已完成', queued:'排队', active:'处理中', completed:'已完成', failed:'失败', regions:'发现区域', pendingSave:'等待游戏保存', noProgress:'渲染进度暂不可用', sharePoint:'复制坐标链接', shareRoute:'复制轨迹链接', editRoute:'编辑轨迹', deleteRoute:'删除轨迹', hideRegion:'框选隐藏区域', editRegion:'编辑隐藏区域', removeRegion:'移除隐藏区域', undo:'撤销', redo:'恢复', finish:'完成', cancel:'取消', save:'保存', routeName:'轨迹名称', color:'颜色', routeHelp:'左键依次添加折线顶点；支持撤销与恢复。完成后保存。', regionHelp:'左键点击对角位置确定隐藏区域，Esc 取消。', routeMin:'至少需要两个点', routeMax:'最多支持 512 个点', copied:'链接已复制', copyFailed:'复制失败，请允许剪贴板访问后重试', error:'操作失败', routeSaved:'已保存到我的轨迹', sharedRoute:'分享的轨迹', saveShared:'保存到我的轨迹', close:'关闭', confirmDelete:'删除此轨迹？它的分享链接也将失效。', confirmRemove:'解除这个区域对所有玩家的隐藏？', confirmFog:'保存后将向普通玩家隐藏此区域。', unavailableShare:'分享不存在、已撤销，或轨迹经过隐藏区域', loading:'加载中…', waypointUnavailable:'游戏图标未在服务器加载', latest:'最近完成', points:'点', shareWarning:'拥有链接的人可以预览这条轨迹；不会分享你的其他标记。', manageRoute:'轨迹操作', fogName:'区域名称', fogDisabled:'管理员预览：区域文字已关闭，其他玩家仍受隐藏限制' },
     en: { myMarkers:'Game markers', myRoutes:'My routes', hiddenRegions:'Hidden regions', plan:'Plan route', login:'Log in to view and save', emptyMarkers:'No game waypoints', emptyRoutes:'No saved routes', emptyRegions:'No hidden regions', progress:'Map rendering', waiting:'Waiting for game', starting:'Starting', scanning:'Scanning save', rendering:'Rendering', retrying:'Waiting to retry', idle:'Current queue complete', queued:'Queued', active:'Active', completed:'Completed', failed:'Failed', regions:'Regions found', pendingSave:'Awaiting game save', noProgress:'Render progress unavailable', sharePoint:'Copy coordinate link', shareRoute:'Copy route link', editRoute:'Edit route', deleteRoute:'Delete route', hideRegion:'Select hidden region', editRegion:'Edit hidden region', removeRegion:'Remove hidden region', undo:'Undo', redo:'Redo', finish:'Finish', cancel:'Cancel', save:'Save', routeName:'Route name', color:'Color', routeHelp:'Left-click to add polyline vertices. Undo and redo points; finish to save.', regionHelp:'Left-click the opposite corner to hide a rectangle. Esc cancels.', routeMin:'At least two points required', routeMax:'Maximum 512 points', copied:'Link copied', copyFailed:'Copy failed; allow clipboard access and retry', error:'Operation failed', routeSaved:'Saved to My routes', sharedRoute:'Shared route', saveShared:'Save to My routes', close:'Close', confirmDelete:'Delete this route? Its share links will also stop working.', confirmRemove:'Reveal this region to all players?', confirmFog:'Saving hides this region from other players.', unavailableShare:'Share missing, revoked, or crossing a hidden region', loading:'Loading…', waypointUnavailable:'Game icon not loaded on server', latest:'Last completed', points:'points', shareWarning:'Anyone with the link can preview this route, but not your other markers.', manageRoute:'Route actions', fogName:'Region name', fogDisabled:'Admin preview: region labels off; other players remain restricted' }
   };
+  Object.assign(words.zh,{planRoute:'添加地图轨迹'});
+  Object.assign(words.en,{planRoute:'Add map track'});
   Object.assign(words.zh,{addGameMarker:'添加游戏标记',editMarker:'编辑游戏标记',deleteMarker:'删除游戏标记',shareMarker:'复制标记链接',saveMarkerShare:'保存到游戏标记',sharedMarker:'分享的标记',markerName:'名称',markerText:'说明',pinned:'置顶',suggestNames:'建议已保存名称',icon:'图标',markerSaved:'游戏标记已保存',deleteMarkerConfirm:'删除这个游戏标记？其分享链接也会失效。',markerShareWarning:'拥有链接的人可以查看这个标记。',mapDisabled:'服务器已禁用游戏地图'});
   Object.assign(words.en,{addGameMarker:'Add game marker',editMarker:'Edit game marker',deleteMarker:'Delete game marker',shareMarker:'Copy marker link',saveMarkerShare:'Save to Game markers',sharedMarker:'Shared marker',markerName:'Name',markerText:'Description',pinned:'Pinned',suggestNames:'Suggest saved names',icon:'Icon',markerSaved:'Game marker saved',deleteMarkerConfirm:'Delete this game marker? Its share links will stop working.',markerShareWarning:'Anyone with the link can view this marker.',mapDisabled:'Game map is disabled on this server'});
   Object.assign(words.zh,{deletePoi:'删除地点标记',editPoi:'编辑地点标记',sharePoi:'复制地点链接',shareTranslocator:'复制传送器链接'});
@@ -18,10 +20,12 @@
   words.en.captureEmpty='No map image is available in this selection. Wait for the area to generate or choose another area.';
   function create(options) {
     const { map, api, gameLatLng, gamePoint, getAuth, getMetadata, getLanguage, cancelMeasurement, closePanels, invalidatePrivacy, layerVisibility } = options;
-    const text = key => words[getLanguage() === 'zh' ? 'zh' : 'en'][key] || key;
+    const text = key => words[getLanguage()]?.[key] || window.ServerMapLocales?.notebook[getLanguage()]?.[key] || words.en[key] || key;
     const el = (tag, props = {}) => Object.assign(document.createElement(tag), props);
     const button = (label, action) => { const b = el('button', { type:'button', className:'notebook-button', textContent:label }); b.onclick = action; return b; };
     const routeIcons={
+      // Tabler route (MIT; see vendor/Tabler-LICENSE.txt).
+      planRoute:['M3 19a2 2 0 1 0 4 0a2 2 0 0 0 -4 0','M19 7a2 2 0 1 0 0 -4a2 2 0 0 0 0 4','M11 19h5.5a3.5 3.5 0 0 0 0 -7h-8a3.5 3.5 0 0 1 0 -7h4.5'],
       shareRoute:['M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-2 2','M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l2-2'],
       editRoute:['m16 3 5 5-12 12-6 1 1-6Z','m13 6 5 5'],
       deleteRoute:['M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7'],
@@ -32,6 +36,7 @@
       const b=button('',action),label=text(key),svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
       b.classList.add('notebook-icon-button');b.title=label;b.setAttribute('aria-label',label);b.dataset.icon=key;
       for(const [name,value] of Object.entries({viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':'1.8','stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':'true',focusable:'false'}))svg.setAttribute(name,value);
+      if(key==='planRoute'){svg.classList.add('icon','icon-tabler','icon-tabler-route');svg.setAttribute('stroke-width','2');}
       for(const d of routeIcons[key]){const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d',d);svg.append(path);}b.append(svg);return b;
     }
     const markerGroup = L.layerGroup().addTo(map), routeGroup = L.layerGroup().addTo(map), sharedGroup = L.layerGroup().addTo(map), draftGroup = L.layerGroup().addTo(map);
@@ -78,7 +83,7 @@
     progressTrack.addEventListener('click',event=>{if(event.target===progressTrack&&progressTrack.dataset.empty==='true')showTooltip(progressTrack,progressTooltipContent('pending'));});
     progressTrack.addEventListener('keydown',event=>{if(progressTrack.dataset.empty==='true'&&(event.key==='Enter'||event.key===' ')){event.preventDefault();showTooltip(progressTrack,progressTooltipContent('pending'));}});
     const progressSegments={};for(const key of ['failed','pending','completed']){const segment=button('',()=>showTooltip(segment,progressTooltipContent(key)));segment.className=`notebook-progress-segment ${key}`;segment.setAttribute('aria-expanded','false');progressSegments[key]=segment;progressTrack.append(segment);}
-    const planButton = button('', () => startRoute()); planButton.id = 'planRoute'; document.querySelector('#sidebar .tools').prepend(planButton);
+    const planButton = routeIconButton('planRoute', () => startRoute()); planButton.id = 'planRoute'; document.querySelector('#mapActions').prepend(planButton);
     const toolbar = el('div', { hidden:true }); toolbar.id = 'notebookToolbar'; toolbar.setAttribute('aria-live','polite'); document.body.append(toolbar);
     const noticeBox = el('div', { hidden:true }); noticeBox.id = 'notebookNotice'; noticeBox.setAttribute('role','status'); document.body.append(noticeBox);
     const modal = el('div', { className:'modal-backdrop', hidden:true }); modal.id = 'notebookModal'; document.body.append(modal);
@@ -109,7 +114,7 @@
       url.searchParams.set('x', Math.round(point.x - metadata.spawn.x)); url.searchParams.set('z', Math.round(point.z - metadata.spawn.z));
       url.searchParams.set('zoom', metadata.maxZoom - map.getZoom()); url.searchParams.set('renderer', new URL(location.href).searchParams.get('renderer') || 'basic'); return url;
     }
-    function sharePoint(point) { if (!getMetadata()) return; const url = shareUrl(point || contextPosition || gamePoint(map.getCenter())); url.searchParams.set('point','1'); safe(() => copyLink(url.href)); }
+    function sharePoint(point, markerId) { if (!getMetadata()) return; const url = shareUrl(point || contextPosition || gamePoint(map.getCenter())); url.searchParams.set('point','1'); if (markerId != null) url.searchParams.set('poi', String(markerId)); safe(() => copyLink(url.href)); }
     function shareRoute(route) {
       if (!route) return;
       safe(async () => {
@@ -445,7 +450,7 @@
     }
     function languageChanged() {
       for(const [key,section] of Object.entries(sections))section.title.textContent=text(key);
-      planButton.textContent=text('plan');planButton.hidden=!getAuth().authenticated;contextButtons.addGameMarker.hidden=!getAuth().authenticated;for(const k of ['shareMarker','editMarker','deleteMarker'])contextButtons[k].hidden=true;document.querySelector('#locate').hidden=!getAuth().authenticated;for(const [key,b] of Object.entries(contextButtons))b.textContent=text(key);
+      planButton.title=text('planRoute');planButton.setAttribute('aria-label',text('planRoute'));planButton.hidden=!getAuth().authenticated;contextButtons.addGameMarker.hidden=!getAuth().authenticated;for(const k of ['shareMarker','editMarker','deleteMarker'])contextButtons[k].hidden=true;for(const [key,b] of Object.entries(contextButtons))b.textContent=text(key);
       renderMarkers();renderRoutes();renderFog();renderProgress(lastProgress);if(mode||sharedRoute||sharedMarker)renderToolbar();
     }
     function authChanged() {

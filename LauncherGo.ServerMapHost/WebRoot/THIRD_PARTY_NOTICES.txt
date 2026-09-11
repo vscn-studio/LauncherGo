@@ -19,7 +19,7 @@ Referenced snapshot: old branch, 36cfe158f17b925305162f65fd97142c87c41962.
 Copyright (c) 2024 William Blake Galbreath.
 MIT License; full text: vendor/VS-LiveMap-Revival-LICENSE.txt.
 assets/icons/center.svg, home.svg, house.svg, layers.svg, marker.svg, pick.svg,
-pin.svg, player.svg, spiral.svg and trader.svg are copied from web/src/svg/.
+pin.svg, player.svg, spiral.svg, trader.svg, basic.svg and sepia.svg are copied from web/src/svg/.
 The map controls and layer presentation also draw on that project's web UI.
 The separately distributed ServerMap mod adapts its rendering and colormap code.
 
@@ -42,6 +42,12 @@ MIT License; full text: vendor/Feather-LICENSE.txt.
 The chain-link paths in notebook.js follow Feather's link icon geometry,
 with simplified coordinates and adjusted stroke width. These paths are reused
 for route, game marker, place and translocator sharing buttons.
+
+Tabler Icons
+Source: https://github.com/tabler/tabler-icons
+Copyright (c) 2020-2026 Paweł Kuna.
+MIT License; full text: vendor/Tabler-LICENSE.txt.
+The route and map-route paths are used in notebook.js and index.html.
 
 Runtime game resources
 Game waypoint SVGs and player head models/textures are supplied by connected
