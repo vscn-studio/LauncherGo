@@ -145,13 +145,19 @@
       if(candidates.length===1){toggleSelected(candidates[0]);return;}
       if(candidates.length>1){const popup=el('div',{className:'notebook-popup'});for(const m of candidates){const b=button(selected.has(m.id)?'unpick':'pick',()=>toggleSelected(m));b.textContent=`${selected.has(m.id)?'☑':'☐'} ${m.name} · ${m.minZoom}–${m.maxZoom}`;popup.append(b);}L.popup().setLatLng(gameLatLng(p.x,p.z)).setContent(popup).openOn(map);}
     }
+    function toolbarHelp(text){
+      const details=el('details',{className:'area-toolbar-help'}),summary=el('summary'),label=getLanguage()==='zh'?'操作说明':'Instructions';summary.title=label;summary.setAttribute('aria-label',label);
+      summary.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v.01"/></svg>';
+      details.append(summary,el('div',{className:'area-help',textContent:text}));return details;
+    }
     function renderSelectionToolbar(){
       toolbar.replaceChildren();if(!selected.size)return;
       const chosen=selection(),limit=higherLimit(chosen),actions=el('div',{className:'notebook-toolbar-actions'});
       mergeMax=Math.min(Math.max(4,mergeMax),Math.max(4,limit));mergeMin=Math.min(mergeMin,mergeMax);
       const range=rangeInputs('areaMerge',mergeMin,mergeMax,Math.max(4,limit)),merge=button('merge',()=>{if(!range.valid()){tell('invalidRange');return;}const r=range.read();mergeMin=r.minZoom;mergeMax=r.maxZoom;void startMerge();});merge.disabled=chosen.length<2||limit<4;
-      actions.append(range.wrapper,merge,button('clearSelection',()=>cancel()));toolbar.append(el('div',{textContent:`${t('selected')} (${chosen.length}) · ${t('type')}`}),actions);
-      const list=el('div',{className:'area-selected-list'});for(const m of chosen){const b=button('unpick',()=>toggleSelected(m));b.textContent=`${m.name} · ${m.minZoom}–${m.maxZoom} ×`;list.append(b);}toolbar.append(list,el('div',{className:'area-help',textContent:t(limit>=4?'multiHelp':'noHigher')}));
+      const rangeLabel=el('label',{textContent:t('type')});rangeLabel.append(range.wrapper);
+      actions.append(el('span',{className:'area-selection-count',textContent:`${t('selected')} (${chosen.length})`}),rangeLabel,merge,button('clearSelection',()=>cancel()),toolbarHelp(t(limit>=4?'multiHelp':'noHigher')));toolbar.append(actions);
+      const list=el('div',{className:'area-selected-list'});for(const m of chosen){const b=button('unpick',()=>toggleSelected(m));b.textContent=`${m.name} · ${m.minZoom}–${m.maxZoom} ×`;b.title=b.textContent;b.setAttribute('aria-label',`${t('unpick')}: ${m.name} · ${m.minZoom}–${m.maxZoom}`);list.append(b);}toolbar.append(list);
     }
     async function startMerge(){
       if(!getAuth().admin||busy||draft)return;await refresh();
@@ -171,7 +177,7 @@
       typeLabel.append(range.wrapper);actions.append(typeLabel,button('applyRange',()=>{if(!range.valid()){tell('invalidRange');return;}try{applyRange(range.read());renderToolbar();}catch(e){tell(e.message);}}));
       for(const key of (draft.sourceIds?['pan']:['select','erase','pan'])){const b=button(key,()=>setTool(key));b.setAttribute('aria-pressed',String(tool===key));actions.append(b);}
       for(const [key,source,target] of [['undo',undo,redo],['redo',redo,undo]]){const b=button(key,()=>{const previous=source.pop();if(!previous)return;target.push({minZoom:draft.minZoom,maxZoom:draft.maxZoom,rects:draft.rects});draft={...draft,...previous};render();renderToolbar();});b.disabled=!source.length||!!draft.sourceIds;actions.append(b);}
-      const finish=button('finish',()=>{if(!range.valid()){tell('invalidRange');return;}try{applyRange(range.read());finishDialog();}catch(e){tell(e.message);}});finish.disabled=!draft.rects.length;actions.append(finish,button('cancel',cancel));toolbar.append(actions,el('div',{className:'area-help',textContent:t('help')}),el('div',{className:'area-help',textContent:`${draft.rects.length} ${t('count')} · ${t('changedType')}`}));
+      const finish=button('finish',()=>{if(!range.valid()){tell('invalidRange');return;}try{applyRange(range.read());finishDialog();}catch(e){tell(e.message);}});finish.disabled=!draft.rects.length;actions.append(finish,button('cancel',cancel),el('span',{className:'area-selection-count',textContent:`${draft.rects.length} ${t('count')}`}),toolbarHelp(`${t('help')} ${t('changedType')}`));toolbar.append(actions);
     }
     function cancel(clearSelection=true){
       if(clearSelection)selected.clear();

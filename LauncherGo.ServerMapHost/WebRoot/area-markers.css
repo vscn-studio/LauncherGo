@@ -1,14 +1,26 @@
 .area-marker-overlay { pointer-events:none!important;overflow:hidden;clip-path:inset(0);background:transparent; }
 .area-marker-overlay text { font-family:var(--map-label-font);font-weight:600;letter-spacing:.08em;stroke-linejoin:round;text-rendering:geometricPrecision; }
-#areaMarkerToolbar { position:fixed;z-index:1005;bottom:52px;left:62px;max-width:calc(100vw - 332px);max-height:36dvh;overflow:auto;padding:10px 12px;border:var(--border);border-radius:6px;color:var(--text);background:var(--glass);box-shadow:var(--shadow); }
+#areaMarkerToolbar { position:fixed;z-index:1005;bottom:calc(52px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);width:max-content;max-width:calc(100vw - 100px);padding:6px 8px;border:var(--border);border-radius:8px;color:var(--text);background:var(--glass);box-shadow:var(--shadow);backdrop-filter:blur(6px);font-size:12px; }
+#areaMarkerToolbar .notebook-toolbar-actions { align-items:center;gap:6px; }
+#areaMarkerToolbar .area-selection-count { white-space:nowrap;font-weight:600; }
+#areaMarkerToolbar .notebook-button { min-height:30px;padding:4px 8px;white-space:nowrap; }
+#areaMarkerToolbar .area-toolbar-help { margin-left:auto; }
+#areaMarkerToolbar .area-toolbar-help summary { display:grid;place-items:center;width:30px;height:30px;list-style:none;cursor:pointer;border-radius:4px; }
+#areaMarkerToolbar .area-toolbar-help summary::-webkit-details-marker { display:none; }
+#areaMarkerToolbar .area-toolbar-help summary:hover { background:var(--hover); }
+#areaMarkerToolbar .area-toolbar-help summary:focus-visible { outline:2px solid #8abdc5;outline-offset:2px; }
+#areaMarkerToolbar .area-toolbar-help summary svg { width:18px;height:18px; }
+#areaMarkerToolbar .area-toolbar-help .area-help { position:absolute;bottom:calc(100% + 8px);right:0;width:320px;max-width:100%;margin:0;padding:10px 12px;border:var(--border);border-radius:6px;background:#20252bf5;box-shadow:var(--shadow); }
 #areaMarkerToolbar label { display:flex;align-items:center;gap:6px;font-size:12px; }
-#areaMarkerToolbar .zoom-range input { width:64px;color:var(--text);background:#20252b;border:var(--border);border-radius:4px;padding:6px; }
+#areaMarkerToolbar .zoom-range { gap:4px; }
+#areaMarkerToolbar .zoom-range input { width:52px;min-height:30px;color:var(--text);background:#20252b;border:var(--border);border-radius:4px;padding:4px; }
 #areaMarkerToolbar [aria-pressed=true] { outline:1px solid #8abdc5;background:var(--hover); }
 .area-help { margin-top:6px;color:var(--muted);font-size:12px;line-height:1.5; }
 .area-marker-drawing,.area-marker-drawing .leaflet-grab { cursor:crosshair!important;touch-action:none!important; }
 #areaMarkerModal .modal { max-height:calc(100dvh - 32px);overflow:auto; }
 #areaMarkerColor { height:40px; }
-.area-selected-list { display:flex;flex-wrap:wrap;gap:5px;margin-top:6px; }
+.area-selected-list { display:flex;gap:5px;margin-top:5px;max-width:100%;overflow-x:auto;scrollbar-width:thin; }
+#areaMarkerToolbar .area-selected-list .notebook-button { flex:0 0 auto;display:block;max-width:240px;overflow:hidden;text-overflow:ellipsis;min-height:26px;padding:3px 7px;background:var(--hover);border:0; }
 .area-opacity-field { display:grid;grid-template-columns:minmax(0,1fr) 46px;gap:4px 8px;align-items:center; }
 .area-opacity-field label { grid-column:1 / -1; }
 .area-opacity-field input[type=range] { min-width:0;padding:0;accent-color:#8abdc5; }
@@ -19,4 +31,4 @@
 .area-manager-row span { flex:1;min-width:0;overflow-wrap:anywhere;font-size:12px; }
 #areaMarkerNotice { position:fixed;top:76px;left:50%;transform:translateX(-50%);z-index:1301;max-width:calc(100vw - 30px);padding:10px;background:#20252bf5;color:var(--text);border:var(--border);border-radius:5px;font-size:12px; }
 #areaMarkerToolbar[hidden],#areaMarkerNotice[hidden] { display:none; }
-@media(max-width:700px),(pointer:coarse) { #areaMarkerToolbar { left:8px;max-width:calc(100vw - 66px);padding:8px;bottom:calc(52px + env(safe-area-inset-bottom)); } #areaMarkerBand { min-height:44px; } }
+@media(max-width:700px),(pointer:coarse) { #areaMarkerToolbar { max-width:calc(100vw - 24px);padding:6px; } #areaMarkerToolbar .notebook-button,#areaMarkerToolbar .zoom-range input,#areaMarkerToolbar .area-toolbar-help summary,#areaMarkerToolbar .area-selected-list .notebook-button { min-height:44px; } #areaMarkerToolbar .area-toolbar-help summary { width:44px; } #areaMarkerBand { min-height:44px; } }
