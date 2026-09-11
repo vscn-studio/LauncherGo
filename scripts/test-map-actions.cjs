@@ -38,7 +38,13 @@ async function main() {
       await page.goto('http://servermap.test/');
       await page.waitForFunction(()=>!document.querySelector('#go').disabled && !document.querySelector('#planRoute')?.hidden);
       const actions = page.locator('#mapActions');
-      assert.equal(await actions.locator('button').count(), 4);
+      assert.equal(await page.locator('#sidebar .tools,#sidebar .version').count(),0);
+      assert.equal(await page.locator('#sidebar #notebookProgress').count(),1,'progress remains attached without retired tools container');
+      assert.equal(await actions.locator('button').count(), 8);
+      assert.equal(await actions.locator('.icon-tabler-chart-area-line').count(),1);
+      assert.equal(await page.locator('#sidebar [data-area-action=manage]').count(),0);
+      assert.equal(await actions.locator('select').count(),0);
+      assert.equal(await actions.locator('.icon-tabler-language').count(),1);
       assert.equal(await page.locator('#locate').count(), 0);
       assert.equal(await page.locator('#planRoute').getAttribute('title'), '添加地图轨迹');
       assert.equal(await page.locator('#measure').getAttribute('title'), '传送器路线规划');
@@ -46,7 +52,7 @@ async function main() {
       assert.equal(await actions.locator('.icon-tabler-map-route').count(), 1);
       const bounds = await actions.boundingBox();
       assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width, 'toolbar fits viewport');
-      for (const id of ['planRoute','measure','home','nearestTranslocator','language']) {
+      for (const id of ['planRoute','measure','home','nearestTranslocator','momentsButton','trackingButton','areaManageButton','languageButton']) {
         const box = await page.locator('#'+id).boundingBox();
         assert.ok(box.x >= bounds.x && box.x + box.width <= bounds.x + bounds.width, id+' fits toolbar');
         if (mobile) assert.ok(box.width>=44 && box.height>=44, id+' has touch target');
@@ -60,6 +66,12 @@ async function main() {
         await page.locator('#mobileAnnouncement').click();
         assert.ok(!intersects(bounds, await page.locator('#announcement').boundingBox()), 'news does not cover toolbar');
       } else {
+        const dock=await page.locator('#topDock').boundingBox(),search=await page.locator('#searchBox').boundingBox();
+        assert.ok(Math.abs(dock.x+dock.width/2-(width<=1260?(width-255)/2:width/2))<2,'top dock is centered in available space');
+        assert.ok(bounds.x-search.x-search.width>=0&&bounds.x-search.x-search.width<10,'actions immediately follow search');
+        assert.ok(Math.abs(bounds.height-search.height)<1,'actions match search height');
+        const side=await page.locator('#sidebar').boundingBox();assert.equal(side.y,0);assert.equal(side.height,height,'desktop sidebar is full height');
+        if(width>=1920)assert.ok((await page.locator('#announcement').boundingBox()).y<=12,'announcement stays at top');
         assert.ok(!intersects(bounds, await page.locator('#sidebar').boundingBox()), 'desktop sidebar does not overlap');
         assert.ok(!intersects(bounds, await page.locator('#topTools').boundingBox()), 'desktop search does not overlap');
       }
@@ -70,8 +82,11 @@ async function main() {
       const select = page.locator('#language');
       assert.deepEqual(await select.locator('option').evaluateAll(options=>options.map(o=>o.value)), ['zh','en','ru','de','fr','es','pl','pt']);
       for (const language of ['en','ru','de','fr','es','pl','pt','zh']) {
+        await page.locator('#languageButton').click();await page.locator('#languageDialog').waitFor();
         await select.selectOption(language);
+        await page.locator('#languageDialog').waitFor({state:'hidden'});
         assert.equal(await select.locator('option').count(), 8, 'switching preserves options');
+        assert.equal(await page.locator('#languageDialog').getAttribute('aria-label'),await page.locator('#languageButton').getAttribute('aria-label'));
         assert.equal(await page.evaluate(()=>localStorage.getItem('servermap-language')), language);
         assert.equal(await page.locator('html').getAttribute('lang'), language==='zh'?'zh-CN':language==='pt'?'pt-BR':language);
         if (!['zh','en'].includes(language)) {
@@ -80,13 +95,16 @@ async function main() {
           assert.notEqual(await page.locator('[data-i18n="mapTypes"]').textContent(), 'Map Types');
         }
         assert.equal(await page.locator('#planRoute svg').count(), 1, 'language changes preserve icon');
+        assert.equal(await page.locator('#areaManageButton svg').count(),1,'language changes preserve area manager icon');
       }
+      await page.locator('#languageButton').click();await page.keyboard.press('Escape');assert.equal(await page.locator('#languageDialog').isVisible(),false);assert.equal(await page.locator('#languageButton').evaluate(el=>document.activeElement===el),true);
       await page.locator('#measure').click();
       assert.equal(await page.locator('#measure').getAttribute('aria-pressed'), 'true');
       assert.equal(await page.locator('#routeInfo').isVisible(), true);
       await page.locator('#planRoute').click();
       assert.equal(await page.locator('#measure').getAttribute('aria-pressed'), 'false');
       assert.equal(await page.locator('#notebookToolbar').isVisible(), true);
+      const notebookBox=await page.locator('#notebookToolbar').boundingBox();assert.ok(Math.abs(notebookBox.x+notebookBox.width/2-width/2)<2,'editing toolbar centered');
       await page.keyboard.press('Escape');
       assert.equal(await page.locator('#notebookToolbar').isVisible(), false);
       await page.locator('#home').click();
@@ -97,7 +115,8 @@ async function main() {
         assert.ok((await icon.evaluate(el=>getComputedStyle(el).backgroundImage)).includes(renderer+'.svg'));
         await page.locator('[data-renderer="'+renderer+'"]').click();
       }
-      await select.selectOption('de');
+      if(mobile)await page.locator('#mobileMenu').click();
+      await page.locator('#languageButton').click();await select.selectOption('de');
       await page.reload();
       await page.waitForFunction(()=>!document.querySelector('#go').disabled);
       assert.equal(await select.inputValue(), 'de', 'language persists after reload');
@@ -105,6 +124,7 @@ async function main() {
       await page.locator('#logoutButton').click();
       await page.waitForFunction(()=>document.querySelector('#planRoute').hidden);
       assert.equal(await page.locator('#planRoute').isVisible(), false, 'track button hidden after logout');
+      assert.equal(await page.locator('#areaManageButton').isVisible(),false,'area manager hidden after logout');
       assert.equal(await page.locator('#measure').isVisible(), true);
       assert.deepEqual(errors, []);
       console.log('PASS map actions '+width+'x'+height);

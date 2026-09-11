@@ -12,6 +12,7 @@ public sealed class AnnouncementStore
         public bool MountedTeleportEnabled { get; init; } = false;
         public bool PoiImagesEnabled { get; init; } = false;
         public PlayerTeleportSettings PlayerTeleport { get; init; } = new();
+        public MapManagementSettings? Management { get; init; }
     }
     private readonly string path;
     private readonly object gate = new();
@@ -27,7 +28,7 @@ public sealed class AnnouncementStore
 
     public Announcement Current { get { lock (gate) return current; } }
 
-    public Announcement Save(string html, string serverWebsite, string updatedBy, WebPageMetadata? site = null, bool? playerGearTeleportEnabled = null, PlayerTeleportSettings? playerTeleport = null, bool? poiImagesEnabled = null, bool? mountedTeleportEnabled = null)
+    public Announcement Save(string html, string serverWebsite, string updatedBy, WebPageMetadata? site = null, bool? playerGearTeleportEnabled = null, PlayerTeleportSettings? playerTeleport = null, bool? poiImagesEnabled = null, bool? mountedTeleportEnabled = null, MapManagementSettings? management = null)
     {
         if (html.Length > 50_000) html = html[..50_000];
         if (!Uri.TryCreate(serverWebsite, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")) serverWebsite = "https://vintagestory.at";
@@ -40,7 +41,8 @@ public sealed class AnnouncementStore
                 PlayerGearTeleportEnabled = playerGearTeleportEnabled ?? current.PlayerGearTeleportEnabled,
                 MountedTeleportEnabled = mountedTeleportEnabled ?? current.MountedTeleportEnabled,
                 PoiImagesEnabled = poiImagesEnabled ?? current.PoiImagesEnabled,
-                PlayerTeleport = (playerTeleport ?? current.PlayerTeleport ?? new()).Validate()
+                PlayerTeleport = (playerTeleport ?? current.PlayerTeleport ?? new()).Validate(),
+                Management = management?.Validate() ?? current.Management
             };
             AtomicFile.Replace(path, temp => File.WriteAllText(temp, JsonSerializer.Serialize(next, new JsonSerializerOptions { WriteIndented = true })));
             current = next;

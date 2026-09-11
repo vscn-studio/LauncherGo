@@ -49,6 +49,7 @@ public sealed partial class ServerMapWebServer
             var player=OnlineTeleportPlayer(passenger.PlayerUID,true);
             if (!ReferenceEquals(player.Entity,passenger) || !ReferenceEquals(passenger.MountedOn,seat)) throw new TeleportError(409,"teleport_changed");
             var admin=player.HasPrivilege("root");
+            CheckTeleportQuota(player.PlayerUID, admin);
             if (!admin && !config.PlayerGearTeleportEnabled) throw new TeleportError(403,"teleport_disabled");
             var position=seat.SeatPosition;
             riders.Add(new(player.PlayerUID,player.PlayerName,passenger.EntityId,seat.SeatId,admin,admin?0:player.PlayerUID==uid?2:1,
@@ -165,6 +166,7 @@ public sealed partial class ServerMapWebServer
             var effects=people.Select(p=>TeleportEffects.PrepareReversible(p.Player.Entity,p.Policy)).ToArray();
             if (effects.Any(e=>e.Error!=null)) throw new TeleportError(409,"teleport_changed");
             var mount=people.Single(p=>p.Rider.Uid==uid).Player.Entity.MountedOn!.MountSupplier.OnEntity;
+            using var quotaReservation = ReserveTeleportQuota(people.Where(p => !p.Rider.Admin).Select(p => p.Rider.Uid), out var commitQuota);
             try
             {
                 if (!TemporalGearPayment.ExecuteGroup(people.Select(p=>new TemporalGearPayment.Charge(TeleportSlots(p.Player).ToArray(),p.Policy.Cost(quote.Jumps),p.Policy.ItemCode)).ToArray(),()=>
@@ -175,6 +177,7 @@ public sealed partial class ServerMapWebServer
                 foreach(var effect in effects)effect.Restore();
                 throw;
             }
+            commitQuota();
             foreach (var p in people)
             {
                 teleportQuotes.TryRemove(p.Rider.Uid,out _); mountedTeleportQuotes.TryRemove(p.Rider.Uid,out _);

@@ -83,6 +83,7 @@ public sealed partial class ServerMapWebServer
                     if (!current.Admin && y != quote.Y + 1) throw new TeleportError(409, "teleport_changed");
                     var effects = TeleportEffects.Prepare(player.Entity, current.Admin ? new() : current.Settings);
                     if (effects.Error != null) throw new TeleportError(409, effects.Error);
+                    using var quotaReservation = ReserveTeleportQuota(current.Admin ? [] : [principal.PlayerUid], out var commitQuota);
                     if (!TemporalGearPayment.Execute(TeleportSlots(player), cost, () =>
                     {
                         // EntityPlayer's synchronous completion routine, after
@@ -90,6 +91,7 @@ public sealed partial class ServerMapWebServer
                         // broadcasts the teleport and updates chunk subscriptions.
                         player.Entity.Onplrteleported(quote.X, y, quote.Z, null, api);
                     }, current.Settings.ItemCode)) throw new TeleportError(409, "teleport_gears");
+                    commitQuota();
                     effects.Apply();
                     api.Logger.Notification("ServerMap teleport: player={0}; target={1},{2},{3}; item={4}; consumed={5}; admin={6}", player.PlayerUID, quote.X, y, quote.Z, current.Settings.ItemCode, cost, current.Admin);
                     return new { ok = true, x = quote.X, y, z = quote.Z, consumed = cost, itemCode = current.Settings.ItemCode };
@@ -111,6 +113,7 @@ public sealed partial class ServerMapWebServer
         if (current?.PlayerUid != uid) throw new TeleportError(401, "Login required");
         if (!current.IsAdmin && !announcements.Current.PlayerGearTeleportEnabled) throw new TeleportError(403, "teleport_disabled");
         if (!CanView(current, x, z)) throw new TeleportError(403, "Hidden region");
+        CheckTeleportQuota(uid, current.IsAdmin);
         var player = OnlineTeleportPlayer(uid);
         var pos = player.Entity.Pos;
         var settings = (announcements.Current.PlayerTeleport ?? new()).Validate();

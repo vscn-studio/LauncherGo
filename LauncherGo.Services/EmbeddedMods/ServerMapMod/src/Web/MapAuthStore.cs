@@ -22,6 +22,7 @@ public sealed class MapAuthStore
         catch { accounts = new(StringComparer.Ordinal); }
     }
 
+    public string? PlayerName(string uid) { lock (gate) return accounts.GetValueOrDefault(uid)?.PlayerName; }
     public bool SetPassword(IServerPlayer player, string password)
     {
         if (string.IsNullOrWhiteSpace(password) || password.Length < 6) return false;

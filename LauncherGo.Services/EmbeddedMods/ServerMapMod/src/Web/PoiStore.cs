@@ -10,6 +10,8 @@ public sealed class PoiStore
     public sealed record Poi(string Id, string Type, string Name, string Text, string Color, double Rotation, double X, double Z, double? X2, double? Z2, string OwnerUid, DateTimeOffset UpdatedAt)
     {
         public string? ImageKey { get; init; }
+        public string? ImageAddedBy { get; init; }
+        public string? ImageAddedByUid { get; init; }
         public int MinZoom { get; init; } = 13;
         public int MaxZoom { get; init; } = 15;
     }
@@ -52,6 +54,7 @@ public sealed class PoiStore
             var id = updating ? existing!.Id : Guid.NewGuid().ToString("N");
             var persistedOwner = updating ? existing!.OwnerUid : ownerUid;
             saved = new Poi(id, type, Limit(input.Name, 80, "POI"), Limit(input.Text, 500, ""), color, rotation, input.X, input.Z, input.X2, input.Z2, persistedOwner, DateTimeOffset.UtcNow) { ImageKey = replaceImage ? input.ImageKey : existing?.ImageKey, MinZoom = replaceZoom ? input.MinZoom : existing?.MinZoom ?? 13, MaxZoom = replaceZoom ? input.MaxZoom : existing?.MaxZoom ?? 15 };
+            saved = saved with { ImageAddedBy = replaceImage ? input.ImageAddedBy : existing?.ImageAddedBy, ImageAddedByUid = replaceImage ? input.ImageAddedByUid : existing?.ImageAddedByUid };
             points[id] = saved;
             try { PersistLocked(); }
             catch { if (existing != null) points[id] = existing; else points.TryRemove(id, out _); throw; }

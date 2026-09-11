@@ -31,6 +31,13 @@ async function run(){
    return route.fulfill({body,contentType:{'.html':'text/html','.js':'text/javascript','.css':'text/css','.png':'image/png','.svg':'image/svg+xml'}[path.extname(file)]||'text/plain'});
   });
   await page.goto('http://areas.test/');await page.waitForFunction(()=>document.querySelectorAll('#layers input').length===8);
+  const managerButton=page.locator('#mapActions #areaManageButton');await managerButton.waitFor();
+  assert.equal(await managerButton.getAttribute('title'),'管理区域标记');assert.equal(await managerButton.textContent(),'');assert.equal(await managerButton.locator('.icon-tabler-chart-area-line').count(),1);
+  assert.equal(await page.locator('#areaMarkerSection [data-area-action=manage]').count(),0);
+  await managerButton.click();await page.locator('#areaMarkerSearch').waitFor();
+  const addBox=await page.locator('.area-manager-actions [data-area-action=add]').boundingBox(),cancelBox=await page.locator('.area-manager-actions [data-area-action=cancel]').boundingBox();
+  assert.ok(cancelBox.x-(addBox.x+addBox.width)>=12,'Add and cancel have a clear gap');
+  await page.locator('.area-manager-actions [data-area-action=cancel]').click();await page.locator('#areaMarkerModal').waitFor({state:'hidden'});
   assert.deepEqual(await page.locator('#layers .layer-row').evaluateAll(rows=>rows.filter(r=>r.querySelector('input').checked).map(r=>r.dataset.layer)),['players','mounts','spawn','pois']);
   for(const id of ['myMarkers','myRoutes','hiddenRegions'])assert.equal(await page.locator('#notebook-toggle-'+id).isChecked(),true);
   assert.equal(await page.locator('#areaMarkerToggle').isChecked(),false);assert.equal(await page.locator('.area-marker-overlay').count(),0);

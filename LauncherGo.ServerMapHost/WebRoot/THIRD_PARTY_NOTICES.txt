@@ -48,6 +48,7 @@ Source: https://github.com/tabler/tabler-icons
 Copyright (c) 2020-2026 Paweł Kuna.
 MIT License; full text: vendor/Tabler-LICENSE.txt.
 The route and map-route paths are used in notebook.js and index.html.
+The aperture and s-turn-right paths are used in map-management.js.
 
 Runtime game resources
 Game waypoint SVGs and player head models/textures are supplied by connected

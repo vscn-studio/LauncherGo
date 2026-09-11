@@ -42,11 +42,14 @@ public sealed partial class ServerMapWebServer : IDisposable
     {
         this.api = api; this.config = config; this.root = root; this.reader = reader; this.materials = materials; this.auth = auth; this.pois = pois; this.announcements = announcements;
         poiImages = new PoiImageStore(Path.Combine(root, "poi-images"));
+        trackStore = new PlayerTrackStore(Path.Combine(root, "player-tracks"));
+        teleportQuota = new DailyTeleportQuota(Path.Combine(root, "teleport-quota.json"));
         translocators = new TranslocatorIndex(Path.Combine(root, "translocators.json"), message => api.Logger.Warning(message));
         notebook = new MapNotebookStore(Path.Combine(root, "web-notebook.json"));
         areaMarkers = new AreaMarkerStore(Path.Combine(root, "area-markers.json"));
         InitializeNotebook();
         InitializeAvatars();
+        trackingListener = api.Event.RegisterGameTickListener(_ => CaptureTracks(), 1000);
         webRoot = ResolveWebRoot(api); renderer = new MapRenderer(reader, root, api.World.BlockAccessor.MapSizeY, materials); pyramid = new TilePyramidBuilder(root);
         foreach (var name in Renderers) { baseTiles[name] = LoadBaseTiles(name); layerVersions[name] = 1; }
         foreach (var region in baseTiles.Values.SelectMany(tiles => tiles.Keys)) knownRegions.TryAdd(region, 0);
@@ -76,6 +79,7 @@ public sealed partial class ServerMapWebServer : IDisposable
         {
             var path = context.Request.Url?.AbsolutePath.Trim('/') ?? "";
             if (path.StartsWith("servermap/", StringComparison.OrdinalIgnoreCase)) path = path[10..];
+            if (ManagementRequest(context, path)) return;
             if (AreaMarkerRequest(context, path)) return;
             if (NotebookRequest(context, path)) return;
             if (path.StartsWith("api/v1/avatars/", StringComparison.Ordinal))
@@ -88,7 +92,7 @@ public sealed partial class ServerMapWebServer : IDisposable
                 ServeBytes(context, image, "image/png", "public, max-age=86400, immutable"); return;
             }
             if (path is "" or "servermap" or "index.html") { ServeBytes(context, Encoding.UTF8.GetBytes((announcements.Current.Site ?? new()).ApplyToHtml(File.ReadAllText(Path.Combine(webRoot, "index.html")))), "text/html; charset=utf-8", "no-store"); return; }
-            if (path.StartsWith("vendor/", StringComparison.OrdinalIgnoreCase) || path.StartsWith("assets/", StringComparison.OrdinalIgnoreCase) || path is "mobile.css" or "notebook.css" or "notebook.js" or "screenshot.js" or "poi-images.js" or "mounts.js" or "area-markers.js" or "area-markers.css") { ServeWebAsset(context, path); return; }
+            if (path.StartsWith("vendor/", StringComparison.OrdinalIgnoreCase) || path.StartsWith("assets/", StringComparison.OrdinalIgnoreCase) || path is "mobile.css" or "notebook.css" or "notebook.js" or "screenshot.js" or "poi-images.js" or "mounts.js" or "area-markers.js" or "area-markers.css" or "locales.js" or "map-management.js" or "map-management.css" or "track-timeline.js") { ServeWebAsset(context, path); return; }
             if (path == "api/v1/events") { events.Subscribe(context, stop.Token).GetAwaiter().GetResult(); return; }
             if (path == "api/v1/auth/login" && context.Request.HttpMethod == "POST") { Login(context); return; }
             if (path == "api/v1/auth/logout" && context.Request.HttpMethod == "POST") { auth.Logout(context.Request.Cookies["servermap_auth"]?.Value); context.Response.Headers["Set-Cookie"] = "servermap_auth=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict"; Json(context, new { authenticated = false }, true); return; }
@@ -178,7 +182,7 @@ public sealed partial class ServerMapWebServer : IDisposable
 
     private void HandleAnnouncement(HttpListenerContext context)
     {
-        object Response(AnnouncementStore.Announcement value) => new { html = value.Html, serverWebsite = value.ServerWebsite, site = value.Site ?? new(), mountedTeleportEnabled = value.MountedTeleportEnabled, poiImagesEnabled = value.PoiImagesEnabled, playerGearTeleportEnabled = value.PlayerGearTeleportEnabled, playerTeleport = value.PlayerTeleport ?? new(), updatedBy = value.UpdatedBy, updatedAt = value.UpdatedAt };
+        object Response(AnnouncementStore.Announcement value) => new { html = value.Html, serverWebsite = value.ServerWebsite, site = value.Site ?? new(), mountedTeleportEnabled = value.MountedTeleportEnabled, poiImagesEnabled = value.PoiImagesEnabled, playerGearTeleportEnabled = value.PlayerGearTeleportEnabled, playerTeleport = value.PlayerTeleport ?? new(), management = value.Management ?? new MapManagementSettings { PoiQuota = config.MaxPoisPerPlayer }, updatedBy = value.UpdatedBy, updatedAt = value.UpdatedAt };
         if (context.Request.HttpMethod == "GET") { Json(context, Response(announcements.Current), true); return; }
         var principal = Principal(context.Request);
         if (context.Request.HttpMethod != "POST") { Error(context, 405, "Method not allowed"); return; }
@@ -196,6 +200,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             var teleportSettings = document.RootElement.TryGetProperty("playerTeleport", out var settingsValue)
                 ? settingsValue.Deserialize<PlayerTeleportSettings>(new JsonSerializerOptions { PropertyNameCaseInsensitive = true })?.Validate()
                     ?? throw new ArgumentException("Missing teleport settings") : null;
+            var management = document.RootElement.TryGetProperty("management", out var managementValue) ? managementValue.Deserialize<MapManagementSettings>(new JsonSerializerOptions { PropertyNameCaseInsensitive = true })?.Validate() : null;
             // Serialize setting changes with teleport commits on the game thread:
             // switching off cannot race the final eligibility check and payment.
             var saved = OnGameThread(() =>
@@ -204,9 +209,9 @@ public sealed partial class ServerMapWebServer : IDisposable
                 if (teleportSettings != null && api.World.GetItem(new AssetLocation(teleportSettings.ItemCode)) == null
                     && api.World.GetBlock(new AssetLocation(teleportSettings.ItemCode)) == null)
                     throw new ArgumentException("Unknown teleport item code");
-                var value = announcements.Save(html, website, principal.PlayerName, site, playerTeleport, teleportSettings, poiImagesEnabled, mountedTeleport);
+                var value = announcements.Save(html, website, principal.PlayerName, site, playerTeleport, teleportSettings, poiImagesEnabled, mountedTeleport, management);
                 events.Publish("layer", new { layer = "pois", version = layerVersions.AddOrUpdate("pois", 2, (_, old) => old + 1) });
-                events.Publish("settings", new { mountedTeleportEnabled = value.MountedTeleportEnabled, poiImagesEnabled = value.PoiImagesEnabled, playerGearTeleportEnabled = value.PlayerGearTeleportEnabled, playerTeleport = value.PlayerTeleport });
+                events.Publish("settings", new { mountedTeleportEnabled = value.MountedTeleportEnabled, poiImagesEnabled = value.PoiImagesEnabled, playerGearTeleportEnabled = value.PlayerGearTeleportEnabled, playerTeleport = value.PlayerTeleport, management = Management });
                 return value;
             });
             Json(context, Response(saved), true);
@@ -239,7 +244,7 @@ public sealed partial class ServerMapWebServer : IDisposable
         if (context.Request.HttpMethod != "POST") { Error(context, 405, "Method not allowed"); return; }
         try
         {
-            using var document = ReadJson(context.Request, 7 * 1024 * 1024 + 65536); var rootElement = document.RootElement;
+            using var document = ReadJson(context.Request, ((Management.ImageMaxMb * 1024 * 1024 + 2) / 3) * 4 + 65536); var rootElement = document.RootElement;
             principal = Principal(context.Request);
             if (principal == null) { Error(context, 403, "Login required"); return; }
             string S(string name, string fallback = "") => rootElement.TryGetProperty(name, out var value) ? value.GetString() ?? fallback : fallback;
@@ -256,7 +261,7 @@ public sealed partial class ServerMapWebServer : IDisposable
                 { Error(context, 400, "Display range must satisfy 4 <= min <= max <= 15"); return; }
             }
             if (!string.IsNullOrEmpty(id) && (existing == null || !PoiVisible(principal, existing) || existing.OwnerUid != principal.PlayerUid && !principal.IsAdmin)) { Error(context, 403, "Cannot edit this POI"); return; }
-            if (existing == null && pois.All.Count(p => p.OwnerUid == principal.PlayerUid) >= Math.Max(0, config.MaxPoisPerPlayer)) { Error(context, 409, "POI limit reached"); return; }
+            if (existing == null && pois.All.Count(p => p.OwnerUid == principal.PlayerUid) >= Math.Max(0, Management.PoiQuota)) { Error(context, 409, "POI limit reached"); return; }
             if (!CanView(principal, x, z)) { Error(context, 403, "Hidden region"); return; }
             if (string.IsNullOrWhiteSpace(id) && !CanCreatePoiAt(principal, x, z)) { Error(context, 403, "Cannot create a POI inside another player's claim"); return; }
             var rotation = 0d;
@@ -273,10 +278,10 @@ public sealed partial class ServerMapWebServer : IDisposable
                 if (imageValue.ValueKind != JsonValueKind.Null)
                 {
                     var base64 = imageValue.GetString() ?? throw new InvalidDataException("poi_image_format");
-                    if (base64.Length > ((PoiImageStore.MaxBytes + 2) / 3) * 4) throw new InvalidDataException("poi_image_size");
-                    imageKey = poiImages.Save(Convert.FromBase64String(base64));
+                    if (base64.Length > ((Management.ImageMaxMb * 1024 * 1024 + 2) / 3) * 4) throw new InvalidDataException("poi_image_size");
+                    imageKey = poiImages.Save(Convert.FromBase64String(base64), Management);
                 }
-                input = input with { ImageKey = imageKey };
+                input = input with { ImageKey = imageKey, ImageAddedBy = imageKey == null ? null : principal.PlayerName, ImageAddedByUid = imageKey == null ? null : principal.PlayerUid };
             }
             PoiStore.SaveResult result; PoiStore.Poi? saved;
             try
@@ -284,12 +289,12 @@ public sealed partial class ServerMapWebServer : IDisposable
                 if (replaceImage && !announcements.Current.PoiImagesEnabled) throw new InvalidDataException("poi_images_disabled");
                 principal = Principal(context.Request);
                 if (principal == null || replaceZoom && !principal.IsAdmin) { poiImages.Delete(imageKey); Error(context, 403, "Permission changed; reopen the editor"); return; }
-                result = pois.TrySave(input, principal.PlayerUid, config.MaxPoisPerPlayer, principal.IsAdmin, out saved, replaceImage, replaceZoom);
+                result = pois.TrySave(input, principal.PlayerUid, Management.PoiQuota, principal.IsAdmin, out saved, replaceImage, replaceZoom);
             }
             catch { poiImages.Delete(imageKey); throw; }
             if (result != PoiStore.SaveResult.Saved) poiImages.Delete(imageKey);
             else if (replaceImage) poiImages.Delete(existing?.ImageKey);
-            if (result == PoiStore.SaveResult.QuotaExceeded) { Error(context, 409, $"POI limit reached ({Math.Max(0, config.MaxPoisPerPlayer)})"); return; }
+            if (result == PoiStore.SaveResult.QuotaExceeded) { Error(context, 409, $"POI limit reached ({Math.Max(0, Management.PoiQuota)})"); return; }
             if (result == PoiStore.SaveResult.Forbidden) { Error(context, 403, "Cannot edit another player's POI"); return; }
             events.Publish("layer", new { layer = "pois", version = layerVersions.AddOrUpdate("pois", 2, (_, old) => old + 1) }); Json(context, saved!, true);
         }
@@ -346,7 +351,15 @@ public sealed partial class ServerMapWebServer : IDisposable
         foreach (var claim in api.WorldManager.LandClaims) if ((Match(claim.Description) || Match(claim.LastKnownOwnerName)) && CanView(principal, claim.Center.X, claim.Center.Z) && (principal?.IsAdmin == true || !claim.Areas.Any(a => notebook.Regions.Any(r => MapVisibility.Intersects(r, a.MinX, a.MinZ, a.MaxX + 1, a.MaxZ + 1))))) { var center = claim.Center; results.Add(new { kind = "claim", name = string.IsNullOrWhiteSpace(claim.Description) ? claim.LastKnownOwnerName : claim.Description, hasLocation = true, x = (double?)center.X, z = (double?)center.Z }); }
         foreach (var point in translocators.Values) if (Match(point.Name) && CanView(principal, point.X, point.Z)) results.Add(new { kind = point.Kind, name = point.Name, hasLocation = true, x = (double?)point.X, z = (double?)point.Z });
         foreach (var poi in pois.All) if ((Match(poi.Name) || Match(poi.Text)) && PoiVisible(principal, poi)) results.Add(new { kind = "poi", name = poi.Name, hasLocation = true, x = (double?)poi.X, z = (double?)poi.Z });
-        return results.Take(50).ToArray();
+        return results.Where(result => JsonSerializer.SerializeToElement(result).GetProperty("kind").GetString() switch
+        {
+            "player" => !Management.Layer("players").Forbidden,
+            "poi" => !Management.Layer("pois").Forbidden,
+            "spawn" => !Management.Layer("spawn").Forbidden,
+            "translocator" => !Management.Layer("translocators").Forbidden,
+            "claim" => !Management.Layer("claims").Forbidden || !Management.Layer("claim-areas").Forbidden,
+            _ => true
+        }).Take(50).ToArray();
     }
 
     private static JsonDocument ReadJson(HttpListenerRequest request, int limit = 1024 * 1024)
@@ -464,10 +477,10 @@ public sealed partial class ServerMapWebServer : IDisposable
         catch (UnauthorizedAccessException) { return 0; }
     }
     private object Settings() => new { version = 7, enable2d = config.Enable2D, colormapReady = materials.HasClientColormap, colormapMonth = materials.ClientColormapMonth, ranges = Metadata() };
-    private object Manifest() => new { version = layerVersions.Values.DefaultIfEmpty().Max(), layers = Layers.Select(name => new { id = name, version = layerVersions[name], visible = name is "players" or "mounts" or "spawn" or "pois" }).ToArray() };
+    private object Manifest() => new { version = layerVersions.Values.DefaultIfEmpty().Max(), layers = Layers.Select(name => new { id = name, version = layerVersions[name], visible = !Management.Layer(name).Forbidden && (Management.Layer(name).Forced || Management.Layer(name).DefaultVisible), forbidden = Management.Layer(name).Forbidden, forced = Management.Layer(name).Forced, scale = Management.Layer(name).Scale }).ToArray() };
     private object Players(MapAuthStore.Principal? principal)
     {
-        if (!config.PublicPlayers) return Array.Empty<object>();
+        if (!config.PublicPlayers || Management.Layer("players").Forbidden) return Array.Empty<object>();
         return api.World.AllOnlinePlayers.Select(player => principal == null
             ? (object)new { id = player.PlayerUID, name = player.PlayerName, online = true }
             : (principal.IsAdmin || principal.PlayerUid == player.PlayerUID) && player.Entity?.Pos is { } pos && CanView(principal, pos.X, pos.Z)
@@ -476,6 +489,7 @@ public sealed partial class ServerMapWebServer : IDisposable
     }
     private object Layer(string name, string? bbox, MapAuthStore.Principal? principal)
     {
+        if (Management.Layer(name.ToLowerInvariant()).Forbidden) return new { type = "FeatureCollection", version = layerVersions[name], features = Array.Empty<object>() };
         var bounds = ParseBounds(bbox); var features = new List<object>();
         if (name.Equals("players", StringComparison.OrdinalIgnoreCase) && config.PublicPlayers && principal != null)
         {
@@ -780,6 +794,8 @@ public sealed partial class ServerMapWebServer : IDisposable
             if (!stop.IsCancellationRequested)
             {
                 if (waypointListener != 0) { api.Event.UnregisterGameTickListener(waypointListener); waypointListener = 0; }
+                if (trackingListener != 0) { api.Event.UnregisterGameTickListener(trackingListener); trackingListener = 0; }
+                foreach (var track in trackStore.Active) trackStore.Stop(track.Id, "server-stopped");
                 stop.Cancel(); events.Dispose(); avatars?.Dispose(); ClientAvatars?.Dispose(); Mounts.Dispose();
                 try { listener?.Stop(); listener?.Close(); } catch { }
             }

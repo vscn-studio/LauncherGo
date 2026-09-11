@@ -68,7 +68,10 @@
     const svgEl=(name,attrs={})=>{const node=document.createElementNS('http://www.w3.org/2000/svg',name);for(const [key,value] of Object.entries(attrs))node.setAttribute(key,String(value));return node;};
     const section=el('section',{className:'notebook-section',id:'areaMarkerSection'}),heading=el('div',{className:'notebook-heading layer-row'}),toggle=el('input',{type:'checkbox',id:'areaMarkerToggle',checked:layerVisibility.get('area-markers',false)}),label=el('label',{htmlFor:toggle.id});
     heading.append(toggle,label);section.append(heading);document.querySelector('#sidebar [data-i18n="onlinePlayers"]').before(section);
-    const manage=button('manage',()=>manageDialog());manage.classList.add('area-manage');section.append(manage);
+    const manage=button('manage',()=>manageDialog());manage.id='areaManageButton';manage.classList.add('area-manage','notebook-icon-button');manage.textContent='';
+    const manageIcon=svgEl('svg',{class:'icon icon-tabler icon-tabler-chart-area-line',viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':2,'stroke-linecap':'round','stroke-linejoin':'round','aria-hidden':true,focusable:false});
+    for(const d of ['M4 19l4 -6l4 2l4 -5l4 4l0 5l-16 0','M4 12l3 -4l4 2l5 -6l4 4'])manageIcon.append(svgEl('path',{d}));
+    manage.append(manageIcon);manage.setAttribute('aria-haspopup','dialog');manage.setAttribute('aria-controls','areaMarkerModal');document.querySelector('#mapActions').insertBefore(manage,document.getElementById('languageButton')||document.getElementById('language'));
     const context=document.querySelector('#contextMenu'),add=button('add',()=>start()),edit=button('edit',()=>start(contextMarker)),remove=button('remove',()=>removeMarker(contextMarker));context.append(add,edit,remove);
     const toolbar=el('div',{id:'areaMarkerToolbar',hidden:true}),modal=el('div',{className:'modal-backdrop',id:'areaMarkerModal',hidden:true}),notice=el('div',{id:'areaMarkerNotice',hidden:true});notice.setAttribute('role','status');document.body.append(toolbar,modal,notice);
     map.createPane('areaMarkers');map.getPane('areaMarkers').style.zIndex='410';map.getPane('areaMarkers').style.pointerEvents='none';
@@ -211,9 +214,9 @@
     function manageDialog(){
       if(!getAuth().admin)return;const form=el('div',{className:'modal'}),search=el('input',{type:'search',id:'areaMarkerSearch',placeholder:t('search')}),list=el('div');search.setAttribute('aria-label',t('search'));form.append(el('h2',{textContent:t('manage')}),search,list);
       const show=()=>{list.replaceChildren();const query=search.value.trim().toLocaleLowerCase().replace(/[–—]/g,'-'),matches=data.markers.filter(m=>`${m.name} ${m.minZoom}-${m.maxZoom}`.toLocaleLowerCase().replace(/[–—]/g,'-').includes(query));for(const m of matches){const row=el('div',{className:'area-manager-row'}),pick=button(selected.has(m.id)?'unpick':'pick',()=>{toggleSelected(m);show();});pick.disabled=!!draft;row.append(el('span',{textContent:`${m.name} · ${m.minZoom}–${m.maxZoom}`}),pick,button('edit',()=>start(m)),button('remove',()=>removeMarker(m)));list.append(row);}if(!matches.length)list.append(el('p',{textContent:t('noResults')}));};
-      search.oninput=show;show();form.append(button('add',()=>start()),button('cancel',()=>modal.hidden=true));modal.replaceChildren(form);modal.hidden=false;search.focus();
+      search.oninput=show;show();const actions=el('div',{className:'modal-actions area-manager-actions'});actions.append(button('add',()=>start()),button('cancel',()=>modal.hidden=true));form.append(actions);modal.replaceChildren(form);modal.hidden=false;search.focus();
     }
-    function lang(){label.textContent=t('layer');for(const [key,b] of [['add',add],['edit',edit],['remove',remove],['manage',manage]])b.textContent=t(key);add.hidden=manage.hidden=!getAuth().admin;edit.hidden=remove.hidden=true;renderToolbar();render();}
+    function lang(){label.textContent=t('layer');for(const [key,b] of [['add',add],['edit',edit],['remove',remove]])b.textContent=t(key);manage.title=t('manage');manage.setAttribute('aria-label',t('manage'));add.hidden=manage.hidden=!getAuth().admin;edit.hidden=remove.hidden=true;renderToolbar();render();}
     function authChanged(){epoch++;controller?.abort();loaded=false;data={revision:0,markers:[]};cancel();lang();void refresh();}
     // Pointer capture allows an erase/selection to finish outside the map. Other map
     // tools never receive these drawing gestures; pan mode restores normal navigation.

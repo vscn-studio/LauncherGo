@@ -3,38 +3,57 @@ using ServerMap.Util;
 
 namespace ServerMap.Web;
 
-// Originals exist only in the bounded request buffer; only re-encoded WebP leaves memory.
+// Still pixels are saved as PNG; animation containers retain frames without private metadata.
+// Legacy 1280 WebP display files remain readable.
 public sealed class PoiImageStore(string root)
 {
-    public const int MaxBytes = 5 * 1024 * 1024;
-    public const int MaxDimension = 2560;
+    public const int MaxBytes = 10 * 1024 * 1024;
+    public const int MaxDimension = 8192;
     public static bool ValidKey(string? key) => key is { Length: 32 } && System.Text.RegularExpressions.Regex.IsMatch(key, "^[a-f0-9]{32}$");
     public string FilePath(string key, int size)
     {
-        if (!ValidKey(key) || size is not (480 or 1280)) throw new ArgumentException("Invalid image key or size");
-        return Path.Combine(root, $"{key}-{size}.webp");
+        if (!ValidKey(key) || size is not (0 or 480 or 1280)) throw new ArgumentException("Invalid image key or size");
+        return Path.Combine(root, size == 0 ? $"{key}-original.png" : $"{key}-{size}.webp");
     }
-    public string Save(byte[] bytes)
+    public string DisplayPath(string key)
     {
-        if (bytes.Length == 0 || bytes.Length > MaxBytes) throw new InvalidDataException("poi_image_size");
+        var png = FilePath(key, 0); // Also validates the opaque key.
+        foreach (var extension in new[] { "gif", "webp" })
+        {
+            var path = Path.ChangeExtension(png, extension);
+            if (File.Exists(path)) return path;
+        }
+        return png;
+    }
+    public string Save(byte[] bytes, MapManagementSettings? settings = null)
+    {
+        settings = (settings ?? new()).Validate();
+        if (bytes.Length == 0 || bytes.Length > settings.ImageMaxMb * 1024 * 1024) throw new InvalidDataException("poi_image_size");
         using var data = SKData.CreateCopy(bytes);
         using var codec = SKCodec.Create(data);
-        if (codec == null || codec.EncodedFormat is not (SKEncodedImageFormat.Jpeg or SKEncodedImageFormat.Png or SKEncodedImageFormat.Webp or SKEncodedImageFormat.Bmp))
+        if (codec == null)
             throw new InvalidDataException("poi_image_format");
-        // Disallow animated WebP/APNG as well as GIF, including decoders that expose only frame zero.
-        if (codec.FrameCount > 1 || IsAnimatedContainer(bytes, codec.EncodedFormat)) throw new InvalidDataException("poi_image_animation");
+        if (!settings.ImageTypes.Contains(codec.EncodedFormat.ToString().ToLowerInvariant())) throw new InvalidDataException("poi_image_format");
+        var animated = AnimatedImageSanitizer.HasAnimation(bytes, codec.EncodedFormat);
         var info = codec.Info;
-        if (info.Width < 1 || info.Height < 1 || info.Width > MaxDimension || info.Height > MaxDimension) throw new InvalidDataException("poi_image_dimensions");
+        if (info.Width < 1 || info.Height < 1 || info.Width > MaxDimension || info.Height > MaxDimension || (long)info.Width * info.Height > 32_000_000) throw new InvalidDataException("poi_image_dimensions");
         using var bitmap = new SKBitmap(new SKImageInfo(info.Width, info.Height, SKColorType.Rgba8888, SKAlphaType.Premul));
         if (codec.GetPixels(bitmap.Info, bitmap.GetPixels()) != SKCodecResult.Success) throw new InvalidDataException("poi_image_format");
         var key = Guid.NewGuid().ToString("N");
         try
         {
-            foreach (var size in new[] { 480, 1280 })
+            foreach (var size in new[] { 480, 0 })
             {
+                if (size == 0 && animated)
+                {
+                    var sanitized = AnimatedImageSanitizer.Sanitize(bytes, codec.EncodedFormat);
+                    var path = Path.ChangeExtension(FilePath(key, 0), codec.EncodedFormat.ToString().ToLowerInvariant());
+                    AtomicFile.Replace(path, temp => File.WriteAllBytes(temp, sanitized));
+                    continue;
+                }
                 var swapped = (int)codec.EncodedOrigin >= 5;
                 var width = swapped ? info.Height : info.Width; var height = swapped ? info.Width : info.Height;
-                var ratio = Math.Min(1d, (double)size / Math.Max(width, height));
+                var ratio = size == 0 ? 1d : Math.Min(1d, (double)size / Math.Max(width, height));
                 using var output = new SKBitmap(Math.Max(1, (int)Math.Round(width * ratio)), Math.Max(1, (int)Math.Round(height * ratio)));
                 using (var canvas = new SKCanvas(output))
                 {
@@ -53,40 +72,19 @@ public sealed class PoiImageStore(string root)
                     canvas.DrawImage(source, new SKRect(0, 0, bitmap.Width, bitmap.Height), new SKSamplingOptions(SKCubicResampler.Mitchell));
                 }
                 using var image = SKImage.FromBitmap(output);
-                using var encoded = image.Encode(SKEncodedImageFormat.Webp, 82) ?? throw new InvalidDataException("poi_image_encode");
+                using var encoded = image.Encode(size == 0 ? SKEncodedImageFormat.Png : SKEncodedImageFormat.Webp, size == 0 ? 100 : 82) ?? throw new InvalidDataException("poi_image_encode");
                 AtomicFile.Replace(FilePath(key, size), temp => { using var stream = File.Create(temp); encoded.SaveTo(stream); });
             }
             return key;
         }
         catch { Delete(key); throw; }
     }
-    private static bool IsAnimatedContainer(byte[] bytes, SKEncodedImageFormat format)
-    {
-        if (format == SKEncodedImageFormat.Png)
-        {
-            for (long offset = 8; offset + 12 <= bytes.Length;)
-            {
-                var i = (int)offset;
-                if (bytes.AsSpan(i + 4, 4).SequenceEqual("acTL"u8)) return true;
-                offset += 12L + System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(i, 4));
-            }
-        }
-        if (format == SKEncodedImageFormat.Webp)
-        {
-            for (long offset = 12; offset + 8 <= bytes.Length;)
-            {
-                var i = (int)offset;
-                if (bytes.AsSpan(i, 4).SequenceEqual("ANIM"u8) || bytes.AsSpan(i, 4).SequenceEqual("ANMF"u8)) return true;
-                var length = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(i + 4, 4));
-                offset += 8L + length + (length & 1);
-            }
-        }
-        return false;
-    }
     public void Delete(string? key)
     {
         if (!ValidKey(key)) return;
-        foreach (var size in new[] { 480, 1280 })
+        foreach (var size in new[] { 0, 480, 1280 })
             try { File.Delete(FilePath(key!, size)); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        foreach (var extension in new[] { "gif", "webp" })
+            try { File.Delete(Path.ChangeExtension(FilePath(key!, 0), extension)); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 }

@@ -5,7 +5,7 @@ const zlib=require('node:zlib');
 function crc(bytes){let c=0xffffffff;for(const byte of bytes){c^=byte;for(let i=0;i<8;i++)c=c&1?(c>>>1)^0xedb88320:c>>>1;}return (c^0xffffffff)>>>0;}
 function chunk(type,data){const b=Buffer.alloc(data.length+12);b.writeUInt32BE(data.length);b.write(type,4);data.copy(b,8);b.writeUInt32BE(crc(b.subarray(4,-4)),b.length-4);return b;}
 function png(w,h,extra=[]){const header=Buffer.alloc(13);header.writeUInt32BE(w);header.writeUInt32BE(h,4);header[8]=8;header[9]=6;return Buffer.concat([Buffer.from('89504e470d0a1a0a','hex'),chunk('IHDR',header),...extra,chunk('IDAT',zlib.deflateSync(Buffer.alloc(h*(w*4+1)))),chunk('IEND',Buffer.alloc(0))]);}
-function dimensions(bytes){assert.equal(bytes.toString('ascii',0,4),'RIFF');assert.equal(bytes.toString('ascii',8,12),'WEBP');let size;for(let i=12;i+8<=bytes.length;){const type=bytes.toString('ascii',i,i+4),n=bytes.readUInt32LE(i+4),data=bytes.subarray(i+8,i+8+n);assert.ok(!['EXIF','XMP ','ICCP','ANIM','ANMF'].includes(type),'No metadata or animation: '+type);if(type==='VP8 ')size=[data.readUInt16LE(6)&16383,data.readUInt16LE(8)&16383];if(type==='VP8X')size=[data.readUIntLE(4,3)+1,data.readUIntLE(7,3)+1];if(type==='VP8L'){const bits=data.readUInt32LE(1);size=[(bits&16383)+1,((bits>>>14)&16383)+1];}i+=8+n+(n&1);}assert.ok(size);return size;}
+function dimensions(bytes){if(bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))){for(let i=8;i+12<=bytes.length;){const type=bytes.toString('ascii',i+4,i+8);assert.ok(!['eXIf','tEXt','iTXt','zTXt','iCCP'].includes(type),'PNG has no source metadata');i+=12+bytes.readUInt32BE(i);}return [bytes.readUInt32BE(16),bytes.readUInt32BE(20)];}assert.equal(bytes.toString('ascii',0,4),'RIFF');assert.equal(bytes.toString('ascii',8,12),'WEBP');let size;for(let i=12;i+8<=bytes.length;){const type=bytes.toString('ascii',i,i+4),n=bytes.readUInt32LE(i+4),data=bytes.subarray(i+8,i+8+n);assert.ok(!['EXIF','XMP ','ICCP','ANIM','ANMF'].includes(type),'No metadata or animation: '+type);if(type==='VP8 ')size=[data.readUInt16LE(6)&16383,data.readUInt16LE(8)&16383];if(type==='VP8X')size=[data.readUIntLE(4,3)+1,data.readUIntLE(7,3)+1];if(type==='VP8L'){const bits=data.readUInt32LE(1);size=[(bits&16383)+1,((bits>>>14)&16383)+1];}i+=8+n+(n&1);}assert.ok(size);return size;}
 module.exports=async function(call,cookies){
   const root=path.dirname(process.env.MAP_TEST_CONTROL),imagesDir=path.join(root,'poi-images'),input={name:'Image test',text:'Description',type:'text',x:300,z:300,color:'#123456',rotation:0};
   const settings=(await call('/announcement')).json();assert.equal(settings.poiImagesEnabled,false);
@@ -15,10 +15,17 @@ module.exports=async function(call,cookies){
   assert.equal((await call('/announcement',cookies.admin,{html:settings.html,poiImagesEnabled:true})).status,200);
   assert.equal((await call('/announcement',cookies.admin,{html:settings.html})).json().poiImagesEnabled,true,'Legacy saves preserve switch');
   const photo=await call('/pois',cookies.alice,body);assert.equal(photo.status,200,photo.bytes.toString());let saved=photo.json();assert.match(saved.ImageKey,/^[a-f0-9]{32}$/);
+  const moments=(await call('/moments?q=Image')).json();assert.equal(moments.total,1);assert.equal(moments.items[0].id,saved.Id);assert.equal(moments.items[0].author.toLowerCase(),'alice');
   const photoUrl=(size,key=saved.ImageKey)=>`/poi-image?id=${saved.Id}&key=${key}&size=${size}`;
-  for(const size of [480,1280]){const image=await call(photoUrl(size));assert.equal(image.status,200);assert.equal(image.headers.get('content-type'),'image/webp');assert.equal(image.headers.get('cache-control'),'no-store');assert.deepEqual(dimensions(image.bytes),[size,size/2]);}
-  assert.deepEqual((await fs.readdir(imagesDir)).sort(),[480,1280].map(size=>`${saved.ImageKey}-${size}.webp`).sort(),'No original stored');
+  for(const size of [480,0,1280]){const image=await call(photoUrl(size));assert.equal(image.status,200);assert.equal(image.headers.get('content-type'),size===480?'image/webp':'image/png');assert.equal(image.headers.get('cache-control'),'no-store');assert.deepEqual(dimensions(image.bytes),size===480?[480,240]:[1600,800]);}
+  assert.deepEqual((await fs.readdir(imagesDir)).sort(),[`${saved.ImageKey}-480.webp`,`${saved.ImageKey}-original.png`].sort(),'Sanitized full-resolution original and WebP thumbnail stored');
   assert.equal((await call('/pois',cookies.bob,{...body,id:saved.Id})).status,403);
+  // Legacy entries with only a 1280 WebP remain accessible through the new display URL.
+  const originalFile=path.join(imagesDir,saved.ImageKey+'-original.png'),heldFile=path.join(imagesDir,saved.ImageKey+'-held.png'),legacyFile=path.join(imagesDir,saved.ImageKey+'-1280.webp');
+  await fs.rename(originalFile,heldFile);await fs.copyFile(path.join(imagesDir,saved.ImageKey+'-480.webp'),legacyFile);
+  assert.equal((await call(photoUrl(0))).headers.get('content-type'),'image/webp');
+  assert.deepEqual(dimensions((await call(photoUrl(0))).bytes),[480,240]);
+  await fs.rename(heldFile,originalFile);await fs.unlink(legacyFile);
   assert.equal((await call(photoUrl(2560))).status,404);assert.equal((await call(photoUrl(480,'../bad'))).status,404);
   assert.equal((await call('/pois',cookies.alice,{...input,id:saved.Id,name:'Text edit'})).json().ImageKey,saved.ImageKey);
   assert.equal((await call('/pois',cookies.alice,{...input,id:saved.Id,rotation:30})).status,200);
@@ -27,7 +34,7 @@ module.exports=async function(call,cookies){
   const jpeg=await fs.readFile(path.join(root,'poi-test.jpeg')),oriented=Buffer.concat([jpeg.subarray(0,2),app1,jpeg.subarray(2)]);
   const oldKey=saved.ImageKey;const replaced=await call('/pois',cookies.alice,{...input,id:saved.Id,imageData:oriented.toString('base64')});assert.equal(replaced.status,200,replaced.bytes.toString());saved=replaced.json();
   assert.equal((await call(photoUrl(480,oldKey))).status,404);
-  assert.deepEqual(dimensions((await call(photoUrl(480))).bytes),[240,480]);assert.deepEqual(dimensions((await call(photoUrl(1280))).bytes),[640,1280]);
+  assert.deepEqual(dimensions((await call(photoUrl(480))).bytes),[240,480]);assert.deepEqual(dimensions((await call(photoUrl(1280))).bytes),[800,1600]);
   assert.equal((await fs.readdir(imagesDir)).length,2,'Replacement removes old thumbnails');
   // Validate format and dimensions using actual bytes, not extension or MIME claims.
   const bmp=Buffer.alloc(54+32*16*3);bmp.write('BM');bmp.writeUInt32LE(bmp.length,2);bmp.writeUInt32LE(54,10);bmp.writeUInt32LE(40,14);bmp.writeInt32LE(32,18);bmp.writeInt32LE(16,22);bmp.writeUInt16LE(1,26);bmp.writeUInt16LE(24,28);
@@ -35,18 +42,25 @@ module.exports=async function(call,cookies){
     const response=await call('/pois',cookies.alice,{...input,id:saved.Id,imageData:bytes.toString('base64')});assert.equal(response.status,200,response.bytes.toString());saved=response.json();const output=(await call(photoUrl(480))).bytes;dimensions(output);assert.equal(output.includes(Buffer.from('private-location')),false);
   }
   assert.deepEqual(dimensions((await call(photoUrl(1280))).bytes),[40,20],'Small images are not upscaled');
-  const animation=Buffer.alloc(8);animation.writeUInt32BE(2);
-  for(const bytes of [Buffer.from('GIF89a'),Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'),png(2561,1),png(1,2561),Buffer.concat([source,Buffer.alloc(5*1024*1024)]),png(2,2,[chunk('acTL',animation)]),Buffer.from('invalid')]){
+  saved=await require('./test-map-animated-images.cjs').test(call,cookies,input,saved,await fs.readFile(path.join(root,'poi-test.webp')));
+  for(const bytes of [Buffer.from('GIF89a'),Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'),png(8193,1),png(1,8193),Buffer.concat([source,Buffer.alloc(10*1024*1024)]),Buffer.from('invalid')]){
     const response=await call('/pois',cookies.alice,{...input,id:saved.Id,imageData:bytes.toString('base64')});assert.equal(response.status,400,response.bytes.toString());assert.equal((await fs.readdir(imagesDir)).length,2);
   }
   const region=(await call('/hidden-regions',cookies.admin,{name:'Image privacy',minX:290,minZ:290,maxX:310,maxZ:310})).json();
   assert.equal((await call(photoUrl(480))).status,404);assert.equal((await call(photoUrl(480),cookies.alice)).status,404);assert.equal((await call(photoUrl(480),cookies.admin)).status,200);
   assert.equal((await call('/hidden-regions?id='+region.id,cookies.admin,undefined,'DELETE',{'X-ServerMap-Request':'1'})).status,200);
-  assert.equal((await call('/announcement',cookies.admin,{html:settings.html,poiImagesEnabled:false})).status,200);assert.equal((await call(photoUrl(480),cookies.admin)).status,404);assert.equal((await call('/pois',cookies.alice,{...body,id:saved.Id})).status,403);assert.equal((await fs.readdir(imagesDir)).length,2);
+  assert.equal((await call('/announcement',cookies.admin,{html:settings.html,poiImagesEnabled:false})).status,200);assert.equal((await call(photoUrl(480),cookies.admin)).status,200);assert.equal((await call('/pois',cookies.alice,{...body,id:saved.Id})).status,403);assert.equal((await fs.readdir(imagesDir)).length,2);
   assert.equal((await call('/announcement',cookies.admin,{html:settings.html,poiImagesEnabled:true})).status,200);assert.equal((await call(photoUrl(480))).status,200);
   const cleared=await call('/pois',cookies.alice,{...input,id:saved.Id,imageData:null});assert.equal(cleared.status,200);assert.equal(cleared.json().ImageKey,null);assert.equal((await fs.readdir(imagesDir)).length,0);
   saved=(await call('/pois',cookies.alice,{...body,id:saved.Id})).json();assert.equal((await fs.readdir(imagesDir)).length,2);
   assert.equal((await call('/pois?id='+saved.Id,cookies.alice,undefined,'DELETE',{'X-ServerMap-Request':'1'})).status,200);assert.equal((await fs.readdir(imagesDir)).length,0);
+  saved=(await call('/pois',cookies.alice,body)).json();
+  assert.equal((await call('/admin/images?id='+saved.Id+'&key='+saved.ImageKey,cookies.bob,undefined,'DELETE',{'X-ServerMap-Request':'1'})).status,403);
+  assert.equal((await call('/admin/images?id='+saved.Id+'&key=stale',cookies.admin,undefined,'DELETE',{'X-ServerMap-Request':'1'})).status,409);
+  assert.equal((await call('/admin/images?id='+saved.Id+'&key='+saved.ImageKey,cookies.admin,undefined,'DELETE',{'X-ServerMap-Request':'1'})).status,200);
+  assert.equal((await call(photoUrl(0))).status,404);assert.equal((await fs.readdir(imagesDir)).length,2,'Detached images retained for recovery');
+  assert.equal((await call('/pois',cookies.alice)).json().find(p=>p.Id===saved.Id).ImageKey,null,'Marker retained');
+  await call('/pois?id='+saved.Id,cookies.alice,undefined,'DELETE',{'X-ServerMap-Request':'1'});
   await call('/announcement',cookies.admin,{html:settings.html,poiImagesEnabled:false});
-  console.log('PASS real POI images: default-off/admin switch, JPEG/PNG/WebP/BMP, size/dimension/animation validation, 480/1280 WebP, EXIF orientation and metadata stripping, privacy, replacement/removal cleanup and no originals');
+  console.log('PASS real POI images: default-off/admin switch, configured formats, size/dimension validation, 480 WebP/full-resolution display, EXIF orientation and metadata stripping, privacy, replacement/removal cleanup and sanitized originals');
 };

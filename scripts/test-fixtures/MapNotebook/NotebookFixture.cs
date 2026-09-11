@@ -31,6 +31,12 @@ public sealed class NotebookFixture : ModSystem
             var mountPixels = new byte[1024*1024*4];
             for(var i=0;i<mountPixels.Length;i+=4){mountPixels[i]=120;mountPixels[i+1]=200;mountPixels[i+3]=255;}
             var mountPng = ServerMap.Render.PngEncoder.Encode(1024,1024,mountPixels);
+            var trackStore = (PlayerTrackStore)typeof(ServerMapWebServer).GetField("trackStore", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(web)!;
+            var trackImageKey = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(mountPng));
+            trackStore.SaveMountImage(trackImageKey, mountPng);
+            var historicTrack = trackStore.Start("track-fixture", "Track fixture", "admin", 120);
+            for (var i = 0; i < 10; i++) trackStore.Append(historicTrack.Id, new(historicTrack.Started.AddMilliseconds(i), 2000 + i, 100, 2000, 0, new("Shared boat",2000+i,100,2000,0) { ImageKey=trackImageKey,WorldSize=8,CenterZ=-1,DisplayScale=2 }));
+            trackStore.Stop(historicTrack.Id, "fixture");
             foreach(var (id,uid) in new[]{(9001L,"alice"),(9002L,"bob"),(9003L,"alice")})
             {
                 var mountToken=mountStore.Request(uid,id,mountNow)!;

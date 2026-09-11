@@ -43,6 +43,8 @@ var builder = WebApplication.CreateSlimBuilder(args);
 builder.Services.Configure<HostOptions>(options => options.ShutdownTimeout = TimeSpan.FromSeconds(3));
 builder.WebHost.ConfigureKestrel(options =>
 {
+    // 50 MiB configurable image ceiling, base64 JSON overhead included.
+    options.Limits.MaxRequestBodySize = 70L * 1024 * 1024;
     var address = System.Net.IPAddress.Parse(settings.ListenAddress);
     options.Listen(address, settings.ListenPort, listen =>
     {

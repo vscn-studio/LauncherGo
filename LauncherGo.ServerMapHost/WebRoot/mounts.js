@@ -13,7 +13,7 @@
       && p.directions === DIRECTIONS && p.displayScale >= 1 && p.displayScale <= 2
       && p.worldSize >= .01 && p.worldSize <= 320 && Math.abs(p.centerX) <= 100 && Math.abs(p.centerZ) <= 100;
   }
-  function create(feature, { map, api, gameLatLng, nativeZoom }) {
+  function create(feature, { map, api, gameLatLng, nativeZoom, displayScale = () => 1, imageUrl }) {
     if (!valid(feature)) return null; // No icon placeholder when a model is unavailable.
     if (!map.getPane('mounts')) {
       const pane = map.createPane('mounts'); pane.style.zIndex = '450'; pane.style.pointerEvents = 'none';
@@ -30,7 +30,7 @@
     });
     let current = feature, source = '';
     function layout() {
-      const p = current.properties, ratio = Math.pow(2, map.getZoom() - nativeZoom()), zoomScale = ratio * p.displayScale;
+      const p = current.properties, ratio = Math.pow(2, map.getZoom() - nativeZoom()), zoomScale = ratio * p.displayScale * displayScale();
       const size = p.worldSize * zoomScale, index = direction(p.yaw);
       turn.style.width = turn.style.height = frame.style.width = frame.style.height = `${size}px`;
       turn.style.left = `${(p.centerX - p.worldSize / 2) * zoomScale}px`;
@@ -46,7 +46,7 @@
     marker.updateMount = next => {
       if (!valid(next)) return;
       current = next; marker.setLatLng(gameLatLng(...next.geometry.coordinates));
-      const url = `${api}/mount-image?id=${encodeURIComponent(next.id)}&key=${next.properties.imageKey}`;
+      const url = imageUrl ? imageUrl(next) : `${api}/mount-image?id=${encodeURIComponent(next.id)}&key=${next.properties.imageKey}`;
       if (source !== url) {
         source = url; img.style.visibility = 'hidden';
         img.onload = () => { img.style.visibility = img.naturalWidth === 1024 && img.naturalHeight === 1024 ? '' : 'hidden'; };

@@ -6,7 +6,6 @@
 .notebook-button:hover,.notebook-info:hover { background:var(--hover); }
 .notebook-button:focus-visible,.notebook-info:focus-visible,.notebook-progress-segment:focus-visible,.notebook-progress-track[data-empty=true]:focus-visible { outline:2px solid #8abdc5;outline-offset:2px; }
 .notebook-button:disabled { opacity:.5;cursor:default; }
-.tools .notebook-button { display:block;text-align:left;font-size:inherit; }
 #contextMenu button { font:inherit; }
 .notebook-info { flex:0 0 28px;width:28px;height:28px;padding:0;display:grid;place-items:center;color:var(--muted);background:transparent;border:0;border-radius:4px;font-size:17px;cursor:pointer;touch-action:manipulation; }
 .notebook-icon { display:inline-block;flex:0 0 20px;width:20px;height:20px;mask-size:contain;mask-position:center;mask-repeat:no-repeat; }
@@ -25,7 +24,7 @@
 .notebook-progress-segment.pending { --segment-color:#d3ae60; }
 .notebook-progress-segment.completed { --segment-color:#7db38b; }
 #notebookProgress[data-phase=unavailable] .notebook-progress-track { opacity:.45; }
-#notebookToolbar { position:fixed;bottom:50px;left:62px;z-index:1001;display:flex;flex-direction:column;align-items:stretch;gap:6px;width:max-content;box-sizing:border-box;padding:10px 12px;color:var(--text);background:var(--glass);border:var(--border);box-shadow:var(--shadow);backdrop-filter:blur(6px);border-radius:6px;max-height:35dvh;max-width:min(620px,calc(100vw - 332px));overflow:auto; }
+#notebookToolbar { position:fixed;bottom:calc(52px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);z-index:1001;display:flex;flex-direction:column;align-items:stretch;gap:6px;width:max-content;box-sizing:border-box;padding:10px 12px;color:var(--text);background:var(--glass);border:var(--border);box-shadow:var(--shadow);backdrop-filter:blur(6px);border-radius:6px;max-height:35dvh;max-width:min(620px,calc(100vw - 100px));overflow:auto; }
 #notebookToolbar .notebook-help { font-size:12px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere; }
 .notebook-toolbar-actions { display:flex;flex-wrap:wrap;gap:6px; }
 .notebook-popup { display:flex;flex-wrap:wrap;gap:6px;max-width:270px; }
@@ -55,7 +54,7 @@
 #notebookModal input[type=color] { height:40px; }
 #notebookToolbar[hidden],#notebookNotice[hidden],#notebookTooltip[hidden],.notebook-section[hidden],.notebook-button[hidden],.notebook-info[hidden] { display:none!important; }
 @media(max-width:700px),(pointer:coarse) {
-  #notebookToolbar { max-width:calc(100vw - 70px);bottom:calc(50px + env(safe-area-inset-bottom));padding:8px;backdrop-filter:none;box-shadow:none; }
+  #notebookToolbar { max-width:calc(100vw - 24px);padding:8px;backdrop-filter:none;box-shadow:none; }
   .notebook-button { min-height:44px; }
   .notebook-info { min-width:44px;min-height:44px; }
   .notebook-heading { height:auto;min-height:44px; }

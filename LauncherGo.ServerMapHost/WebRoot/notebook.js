@@ -78,7 +78,7 @@
     }
     const markerInfo=button('ⓘ',()=>showTooltip(markerInfo,getLanguage()==='zh'?'部分图标等待同步：管理员使用新版地图模组进入游戏后会自动同步。':'Some icons await sync: an admin must join the game with the updated map mod.'));
     markerInfo.className='notebook-info';markerInfo.hidden=true;markerInfo.setAttribute('aria-expanded','false');sections.myMarkers.heading.append(markerInfo);
-    const progressBox = el('div'); progressBox.id = 'notebookProgress'; document.querySelector('#sidebar .tools').before(progressBox);
+    const progressBox = el('div'); progressBox.id = 'notebookProgress'; document.querySelector('#sidebar').append(progressBox);
     const progressTrack=el('div',{className:'notebook-progress-track'});progressTrack.setAttribute('role','group');progressBox.append(progressTrack);
     progressTrack.addEventListener('click',event=>{if(event.target===progressTrack&&progressTrack.dataset.empty==='true')showTooltip(progressTrack,progressTooltipContent('pending'));});
     progressTrack.addEventListener('keydown',event=>{if(progressTrack.dataset.empty==='true'&&(event.key==='Enter'||event.key===' ')){event.preventDefault();showTooltip(progressTrack,progressTooltipContent('pending'));}});

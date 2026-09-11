@@ -49,7 +49,7 @@ public sealed partial class ServerMapWebServer
         catch (Exception ex) { api.Logger.Warning("ServerMap waypoint snapshot failed: {0}", ex.Message); }
     }
     private bool CanView(MapAuthStore.Principal? principal, double x, double z) => principal?.IsAdmin == true || MapVisibility.Visible(notebook.Regions, x, z);
-    private bool PoiVisible(MapAuthStore.Principal? principal, PoiStore.Poi poi) => principal?.IsAdmin == true || !notebook.Regions.Any(r => MapVisibility.Intersects(r,
+    private bool PoiVisible(MapAuthStore.Principal? principal, PoiStore.Poi poi) => principal?.IsAdmin == true || !Management.Layer("pois").Forbidden && !notebook.Regions.Any(r => MapVisibility.Intersects(r,
         Math.Min(poi.X, poi.X2 ?? poi.X), Math.Min(poi.Z, poi.Z2 ?? poi.Z), Math.Max(poi.X, poi.X2 ?? poi.X), Math.Max(poi.Z, poi.Z2 ?? poi.Z)));
     private object[] VisibleFeatures(List<object> features, MapAuthStore.Principal? principal)
     {

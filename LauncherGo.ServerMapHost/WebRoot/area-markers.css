@@ -26,7 +26,8 @@
 .area-opacity-field input[type=range] { min-width:0;padding:0;accent-color:#8abdc5; }
 .area-opacity-field output { font-size:12px;text-align:right;font-variant-numeric:tabular-nums; }
 #areaMarkerSearch { position:sticky;top:0;z-index:1; }
-.area-manage { margin:0 10px 6px; }
+.area-manage { margin:0; }
+#areaMarkerModal .area-manager-actions { justify-content:space-between;gap:12px;flex-wrap:wrap; }
 .area-manager-row { display:flex;gap:6px;align-items:center;margin:6px 0; }
 .area-manager-row span { flex:1;min-width:0;overflow-wrap:anywhere;font-size:12px; }
 #areaMarkerNotice { position:fixed;top:76px;left:50%;transform:translateX(-50%);z-index:1301;max-width:calc(100vw - 30px);padding:10px;background:#20252bf5;color:var(--text);border:var(--border);border-radius:5px;font-size:12px; }

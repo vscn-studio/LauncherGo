@@ -32,6 +32,9 @@
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\WebPageMetadata.cs" Link="ServerMap\WebPageMetadata.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\PlayerTeleportSettings.cs" Link="ServerMap\PlayerTeleportSettings.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\AnnouncementStore.cs" Link="ServerMap\AnnouncementStore.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\MapManagementSettings.cs" Link="ServerMap\MapManagementSettings.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\DailyTeleportQuota.cs" Link="ServerMap\DailyTeleportQuota.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\PlayerTrackStore.cs" Link="ServerMap\PlayerTrackStore.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Util\LruCache.cs" Link="ServerMap\LruCache.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Util\ResettableCache.cs" Link="ServerMap\ResettableCache.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Util\BackgroundMapWork.cs" Link="ServerMap\BackgroundMapWork.cs" />
