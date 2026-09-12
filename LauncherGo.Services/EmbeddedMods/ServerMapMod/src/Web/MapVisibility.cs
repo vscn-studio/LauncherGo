@@ -8,7 +8,8 @@ public static class MapVisibility
     // Preview only adds restrictions. A query parameter can never unmask a guest's tiles.
     public static bool ShouldMaskTiles(bool isAdmin, string? preview) => !isAdmin || preview == "1";
     public static bool Intersects(MapNotebookStore.Region r, double minX, double minZ, double maxX, double maxZ) =>
-        minX <= r.MaxX && maxX >= r.MinX && minZ <= r.MaxZ && maxZ >= r.MinZ;
+        r.Rects == null ? minX <= r.MaxX && maxX >= r.MinX && minZ <= r.MaxZ && maxZ >= r.MinZ :
+        r.Rects.Any(p => minX < p.MaxX && maxX >= p.MinX && minZ < p.MaxZ && maxZ >= p.MinZ);
     public static bool Visible(IEnumerable<MapNotebookStore.Region> regions, double x, double z) => !regions.Any(r => Intersects(r, x, z, x, z));
     // Keep a link when at least one endpoint is visible so the visible endpoint
     // can still be shown with an unknown destination. The line itself is only
@@ -50,17 +51,20 @@ public static class MapVisibility
         var overlaps = regions.Where(r => Intersects(r, originX, originZ, originX + span, originZ + span)).ToArray();
         if (overlaps.Length == 0) return png;
         var pixels = PngEncoder.Decode(png);
-        foreach (var r in overlaps)
+        void Mask(double minX, double minZ, double maxX, double maxZ, bool inclusive)
         {
             // Round outward so no downsampled pixel retains hidden terrain.
             // Erase RGB as well as alpha: transparency alone would leak the
             // original data, while opaque white creates a bright block below fog.
-            var left = (int)Math.Clamp(Math.Floor((r.MinX - originX) / resolution), 0, 511);
-            var top = (int)Math.Clamp(Math.Floor((r.MinZ - originZ) / resolution), 0, 511);
-            var right = (int)Math.Clamp(Math.Floor((r.MaxX - originX) / resolution) + 1, 0, 512);
-            var bottom = (int)Math.Clamp(Math.Floor((r.MaxZ - originZ) / resolution) + 1, 0, 512);
+            var left = (int)Math.Clamp(Math.Floor((minX - originX) / resolution), 0, 512);
+            var top = (int)Math.Clamp(Math.Floor((minZ - originZ) / resolution), 0, 512);
+            var right = (int)Math.Clamp(inclusive ? Math.Floor((maxX - originX) / resolution) + 1 : Math.Ceiling((maxX - originX) / resolution), 0, 512);
+            var bottom = (int)Math.Clamp(inclusive ? Math.Floor((maxZ - originZ) / resolution) + 1 : Math.Ceiling((maxZ - originZ) / resolution), 0, 512);
             for (var row = top; row < bottom; row++) for (var col = left; col < right; col++) pixels.AsSpan((row * 512 + col) * 4, 4).Clear();
         }
+        foreach (var region in overlaps)
+            if (region.Rects == null) Mask(region.MinX, region.MinZ, region.MaxX, region.MaxZ, true);
+            else foreach (var rect in region.Rects) Mask(rect.MinX, rect.MinZ, rect.MaxX, rect.MaxZ, false);
         return PngEncoder.Encode(512, 512, pixels);
     }
 }

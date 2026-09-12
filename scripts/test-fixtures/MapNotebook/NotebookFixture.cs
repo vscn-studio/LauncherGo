@@ -72,6 +72,29 @@ public sealed class NotebookFixture : ModSystem
                 Vertices = [new(0,-1,-1,0,0,0),new(0,-1,1,1,0,0),new(0,1,0,.5f,1,0)]
             };
             clientAvatars.Receive("avatar-fixture", token, 0, 1, scene.Pack(), Environment.TickCount64);
+            var bobToken = clientAvatars.Request("bob", "head-fixture", Environment.TickCount64)!;
+            clientAvatars.Receive("bob", bobToken, 0, 1, scene.Pack(), Environment.TickCount64);
+            var explorationControl = Path.Combine((string)Field("dataRoot"), "explore-bob.test");
+            long explorationTick = 0;
+            explorationTick = api.Event.RegisterGameTickListener(_ => {
+                if (!File.Exists(explorationControl)) return;
+                var player = DispatchProxy.Create<IServerPlayer, TestPlayer>();
+                var proxy = (TestPlayer)(object)player; proxy.Name = "bob"; proxy.Entity = new EntityPlayer(); proxy.Entity.Pos.SetPos(160, 100, 160);
+                // Explicit synthetic native map pieces for this fixture, not position-based exploration.
+                web.RecordVerifiedExploration(player, from x in Enumerable.Range(1, 9) from z in Enumerable.Range(1, 9) select ServerMap.Network.MapExplorationProtocol.Cell(x, z));
+                api.Event.UnregisterGameTickListener(explorationTick);
+            }, 250);
+            var nativeControl = Path.Combine((string)Field("dataRoot"), "explore-bob-native.test");
+            string? lastNativeControl = null;
+            api.Event.RegisterGameTickListener(_ => {
+                if (!File.Exists(nativeControl)) return;
+                var value = File.ReadAllText(nativeControl); if (value == lastNativeControl) return;
+                var coordinates = value.Split(',');
+                if (coordinates.Length != 2 || !int.TryParse(coordinates[0], out var x) || !int.TryParse(coordinates[1], out var z)) return;
+                var player = DispatchProxy.Create<IServerPlayer, TestPlayer>(); ((TestPlayer)(object)player).Name = "bob";
+                web.RecordVerifiedExploration(player, [ServerMap.Network.MapExplorationProtocol.Cell(x, z)]);
+                lastNativeControl = value;
+            }, 250);
             long clientAvatarTick = 0;
             clientAvatarTick = api.Event.RegisterGameTickListener(_ => {
                 var key = clientAvatars.GetKey("avatar-fixture", "head-fixture"); if (key == null) return;
@@ -104,7 +127,11 @@ public sealed class NotebookFixture : ModSystem
             Directory.CreateDirectory(Path.GetDirectoryName(tile)!);
             var pixels = new byte[512*512*4];
             for(var i=0;i<pixels.Length;i+=4){pixels[i]=30;pixels[i+1]=60;pixels[i+2]=90;pixels[i+3]=255;}
-            File.WriteAllBytes(tile, ServerMap.Render.PngEncoder.Encode(512,512,pixels));
+            var fixturePng = ServerMap.Render.PngEncoder.Encode(512,512,pixels);
+            File.WriteAllBytes(tile, fixturePng);
+            // Mobile area editing zooms out one level; provide the matching synthetic parent terrain too.
+            var parentTile = Path.Combine((string)Field("dataRoot"), "2d", "basic", "1", "0_0.png");
+            Directory.CreateDirectory(Path.GetDirectoryName(parentTile)!); File.WriteAllBytes(parentTile, fixturePng);
             api.Logger.Notification("Map notebook test fixture ready");
             // Test-only trigger: revoke root while keeping the existing HTTP session.
             var control = Path.Combine((string)Field("dataRoot"), "revoke-admin.test");
@@ -119,9 +146,11 @@ public sealed class NotebookFixture : ModSystem
 public class TestPlayer : DispatchProxy
 {
     public string Name = "";
+    public EntityPlayer? Entity;
     protected override object? Invoke(MethodInfo? method, object?[]? args) => method?.Name switch
     {
         "get_PlayerUID" or "get_PlayerName" => Name,
+        "get_Entity" => Entity,
         "HasPrivilege" => Name=="admin",
         _ => method?.ReturnType.IsValueType == true ? Activator.CreateInstance(method.ReturnType) : null
     };

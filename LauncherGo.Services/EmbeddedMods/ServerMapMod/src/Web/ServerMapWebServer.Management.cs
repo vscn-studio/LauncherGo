@@ -115,6 +115,7 @@ public sealed partial class ServerMapWebServer
     private string ImageAuthor(PoiStore.Poi point) => point.ImageAddedBy ?? auth.PlayerName(point.OwnerUid) ?? point.OwnerUid;
     private void CaptureTracks()
     {
+        RefreshExplorationGroups();
         foreach (var track in trackStore.Active)
         {
             try

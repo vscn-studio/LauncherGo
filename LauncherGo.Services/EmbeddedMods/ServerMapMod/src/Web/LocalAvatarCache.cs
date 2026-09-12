@@ -70,7 +70,11 @@ public sealed class LocalAvatarCache : IDisposable
     }
     public byte[]? Get(string key)
     {
-        lock (gate) return entries.TryGetValue(key, out var entry) ? entry.Bytes?.ToArray() : null;
+        lock (gate) if (entries.TryGetValue(key, out var entry) && entry.Bytes != null) return entry.Bytes.ToArray();
+        // Offline allies can use an already generated 2D avatar after a restart.
+        if (key.Length != 64 || !key.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f')) return null;
+        try { var file = Path.Combine(directory, key + ".png"); return File.Exists(file) && new FileInfo(file).Length <= LocalAvatarRenderer.MaxImageBytes ? File.ReadAllBytes(file) : null; }
+        catch (IOException) { return null; }
     }
     public void Dispose() => stop.Cancel();
 }

@@ -42,6 +42,7 @@ public sealed class ClientAvatarStore : IDisposable
     private static bool ValidKey(string? key) => key?.Length == 64 && key.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
     public static string AppearanceKey(string uid, byte[] skin) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("client-head-v3-front/" + uid + "/").Concat(skin).ToArray()));
     public string? GetKey(string uid, string appearance) { lock (gate) return saved.TryGetValue(uid, out var entry) && entry.Appearance == appearance ? entry.Image : null; }
+    public string? GetLastKey(string uid) { lock (gate) return saved.GetValueOrDefault(uid)?.Image; }
     public string GetStatus(string uid, string? appearance)
     {
         lock (gate)

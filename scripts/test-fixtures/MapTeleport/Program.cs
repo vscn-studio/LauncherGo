@@ -19,6 +19,7 @@ AppDomain.CurrentDomain.AssemblyResolve += (_, request) =>
 Checks.Run();
 MountedChecks.Run();
 AreaMarkerChecks.Run();
+ExplorationChecks.Run();
 static class Checks
 {
     static void Require(bool value, string message) { if (!value) throw new Exception(message); }

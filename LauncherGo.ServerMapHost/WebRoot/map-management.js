@@ -3,7 +3,7 @@
   'use strict';
   const normalize = value => Array.isArray(value) ? value.map(normalize) : value && typeof value === 'object'
     ? Object.fromEntries(Object.entries(value).map(([key,v])=>[key[0].toLowerCase()+key.slice(1),normalize(v)])) : value;
-  function create({api,map,gameLatLng,getAuth,getLanguage,getMetadata,refreshPois,closePanels}) {
+  function create({api,map,gameLatLng,getAuth,getLanguage,getMetadata,refreshPois,closePanels,showSearch,invalidateFog}) {
     const $=id=>document.getElementById(id), text=(zh,en)=>getLanguage()==='zh'?zh:en;
     const node=(tag,props={})=>Object.assign(document.createElement(tag),props);
     const action=(label,fn)=>{const b=node('button',{type:'button',textContent:label});b.onclick=fn;return b;};
@@ -34,40 +34,67 @@
     languageButton.dataset.i18nLabel='languageName';languageButton.setAttribute('aria-haspopup','menu');languageButton.setAttribute('aria-controls','languageMenu');languageButton.setAttribute('aria-expanded','false');languageButton.querySelector('svg').setAttribute('class','icon icon-tabler icon-tabler-language');
     languageButton.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();const open=languageMenu.hidden;languageMenu.hidden=!open;languageButton.setAttribute('aria-expanded',String(open));if(open){const rect=languageButton.getBoundingClientRect();languageMenu.style.display='block';languageMenu.style.top=`${rect.bottom+5}px`;languageMenu.style.left=`${Math.max(8,rect.right-180)}px`;}else languageMenu.style.display='none';});
     document.addEventListener('pointerdown',event=>{if(!languageMenu.hidden&&!languageMenu.contains(event.target)&&!languageButton.contains(event.target)){languageMenu.hidden=true;languageButton.setAttribute('aria-expanded','false');}});
-    const imageUrl=item=>ServerMapPoiImages.url(item.id,item.imageKey,0);
-    const moments=dialog('momentsDialog',text('瞬间','Moments')),gallery=node('div',{className:'moments-grid'}),galleryStatus=node('p',{role:'status'}),more=action(text('加载更多','Load more'),()=>loadMoments(false));
-    const gallerySearch=node('input',{type:'search',placeholder:text('搜索地点、描述、添加者','Search places, descriptions, authors'),'ariaLabel':text('搜索瞬间','Search moments')});
-    const galleryForm=node('form',{className:'moments-search'}),gallerySubmit=node('button',{type:'submit',textContent:text('搜索','Search')});
-    galleryForm.append(gallerySearch,gallerySubmit);moments.querySelector('header h2').after(galleryForm);
-    galleryForm.onsubmit=e=>{e.preventDefault();clearTimeout(galleryDebounce);loadMoments();};
-    moments.body.append(galleryStatus,gallery,more);
-    let galleryEpoch=0,offset=0,galleryBusy=false;
-    async function loadMoments(reset=true) {
-      if(!reset&&galleryBusy)return;const epoch=++galleryEpoch;galleryBusy=true;
-      if(reset){offset=0;gallery.replaceChildren();}galleryStatus.textContent=text('加载中…','Loading…');more.disabled=true;
-      try {
-        const data=await request('/moments?q='+encodeURIComponent(gallerySearch.value)+'&skip='+offset);
-        if(epoch!==galleryEpoch||!moments.open)return;
-        for(const item of data.items||[]){
-          const card=node('article',{className:'moment-card'}),button=action('',()=>ServerMapPoiImages.view(item)),img=node('img',{src:imageUrl(item),alt:item.name,loading:'lazy',decoding:'async'}),caption=node('div',{className:'moment-caption'});
-          caption.append(node('strong',{textContent:item.name}),node('span',{textContent:item.text}),node('span',{textContent:item.author}));
-          button.setAttribute('aria-label',[item.name,item.text,item.author].filter(Boolean).join(' · '));button.append(img);card.append(button,caption);gallery.append(card);
-          img.onerror=()=>{img.alt=text('图片无法加载','Image unavailable');};
+    // Keep alliances inline with search, not in a modal or an online-player picker.
+    const allies=node('section',{id:'alliesPanel',hidden:true}),alliesForm=node('form',{id:'alliesForm'}),alliesInput=node('input',{id:'allyMapId',type:'text',required:true,maxLength:64,autocomplete:'off',spellcheck:false});
+    const alliesJoin=node('button',{id:'allyJoin',type:'submit'}),alliesStatus=node('p',{id:'alliesStatus',role:'status'}),alliesList=node('div',{className:'allies-list'}),ownIdRow=node('div',{className:'ally-own-id'}),ownId=node('input',{id:'ownMapId',readOnly:true}),copyId=action('',async()=>{
+      if(!ownId.value)return;
+      try{if(navigator.clipboard?.writeText)await navigator.clipboard.writeText(ownId.value);else{ownId.select();if(!document.execCommand('copy'))throw Error();}alliesStatus.textContent=text('地图 ID 已复制','Map ID copied');}
+      catch{ownId.focus();ownId.select();alliesStatus.textContent=text('请复制选中的地图 ID','Copy the selected map ID');}
+    });
+    alliesForm.append(alliesInput,alliesJoin);ownIdRow.append(ownId,copyId);allies.append(alliesForm,ownIdRow,alliesStatus,alliesList);$('searchForm').after(allies);
+    let alliesEpoch=0,alliesAuthEpoch=0,alliesBusy=false,alliesData=null;
+    const alliesButton=iconButton('alliesButton',text('结盟','Allies'),['M16 21v-2a4 4 0 0 0 -4 -4H6a4 4 0 0 0 -4 4v2','M9 11a4 4 0 1 0 0 -8a4 4 0 0 0 0 8','M22 21v-2a4 4 0 0 0 -3 -3.87','M16 3.13a4 4 0 0 1 0 7.75'],event=>{
+      event.stopPropagation();if(!getAuth().authenticated)return;if(!allies.hidden){closeAllies();return;}
+      closePanels();showSearch?.();$('searchResults').replaceChildren();allies.hidden=false;alliesButton.setAttribute('aria-expanded','true');void loadAllies().then(()=>{if(!allies.hidden&&!alliesInput.disabled)alliesInput.focus();});
+    });
+    alliesButton.dataset.i18nLabel='allies';alliesButton.querySelector('svg').setAttribute('class','icon icon-tabler icon-tabler-users-group');
+    alliesButton.setAttribute('aria-controls',allies.id);alliesButton.setAttribute('aria-expanded','false');
+    function closeAllies(){allies.hidden=true;alliesEpoch++;alliesButton.setAttribute('aria-expanded','false');}
+    function allyError(error){const zh={'Invalid player map ID':'请输入有效的玩家地图 ID','Player map ID not found':'没有找到此玩家地图 ID','Cannot add yourself':'不能加入自己','Player already joined':'该玩家已加入','Player alliance limit reached (64)':'自己或对方已达到 64 位盟友上限','Exploration sharing is disabled':'服务器未开启探索共享','Player is not joined':'该玩家已被移除'};return getLanguage()==='zh'?(zh[error.message]||error.message):error.message;}
+    function updateAllyControls(){alliesJoin.disabled=alliesBusy||!alliesData?.enabled;alliesInput.disabled=alliesBusy||!alliesData?.enabled;for(const b of alliesList.querySelectorAll('button'))b.disabled=alliesBusy;copyId.disabled=!ownId.value;}
+    function renderAllies(){
+      allies.setAttribute('aria-label',text('地图探索盟友','Map exploration allies'));alliesInput.placeholder=text('玩家地图唯一 ID','Player map ID');alliesInput.setAttribute('aria-label',alliesInput.placeholder);
+      alliesJoin.textContent=text('加入','Join');ownId.setAttribute('aria-label',text('自己的玩家地图唯一 ID','Your player map ID'));copyId.textContent=text('复制','Copy');
+      ownId.value=alliesData?.mapId||'';alliesList.replaceChildren();
+      if(alliesData){
+        alliesStatus.textContent=alliesData.enabled?text('双方共享探索（添加盟友）','Shared exploration (add allies)'):text('服务器未开启探索共享；仍可删除已加入的玩家。','Exploration sharing is disabled. Joined players can still be removed.');
+        for(const member of alliesData.members||[]){
+          const item=node('div',{className:'ally-row'}),img=node('img',{alt:'',width:32,height:32,loading:'lazy'}),name=node('span',{className:'ally-name',textContent:member.name}),remove=action(text('删除','Remove'),()=>changeAllies({action:'remove',uid:member.uid}));
+          img.src=member.avatar?.startsWith('api/v1/avatars/')?api.replace(/\/api\/v1\/?$/,'')+'/'+member.avatar:'assets/icons/player.svg';img.onerror=()=>{img.onerror=null;img.src='assets/icons/player.svg';};
+          name.title=member.name;remove.setAttribute('aria-label',text('删除 ','Remove ')+member.name);item.append(img,name,remove);alliesList.append(item);
         }
-        offset+=(data.items||[]).length;more.hidden=offset>=data.total;galleryStatus.textContent=offset?'':text('暂无图片','No images yet');
-      } catch(error){if(epoch===galleryEpoch)galleryStatus.textContent=error.message;}finally{if(epoch===galleryEpoch){galleryBusy=false;more.disabled=false;}}
+        if(!alliesList.childElementCount)alliesList.append(node('p',{className:'ally-empty',textContent:text('暂无已加入的玩家','No players joined')}));
+      }
+      updateAllyControls();
     }
-    let galleryDebounce;gallerySearch.oninput=()=>{clearTimeout(galleryDebounce);galleryDebounce=setTimeout(()=>loadMoments(),250);};
-    moments.addEventListener('close',()=>{galleryEpoch++;galleryBusy=false;gallery.replaceChildren();});
-    const momentsButton=iconButton('momentsButton',text('瞬间','Moments'),['M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0','M3.6 15h10.55','M6.551 4.938l3.26 10.034','M17.032 4.636l-8.535 6.201','M20.559 14.51l-8.535 -6.201','M12.257 20.916l3.261 -10.034'],()=>{closePanels();moments.showModal();loadMoments();});
-
+    async function loadAllies(){
+      if(alliesBusy||allies.hidden||!getAuth().authenticated)return;
+      const epoch=++alliesEpoch;if(!alliesData)alliesStatus.textContent=text('加载中…','Loading…');
+      try{const data=await request('/allies');if(epoch!==alliesEpoch||!getAuth().authenticated)return;alliesData=data;renderAllies();}
+      catch(error){if(epoch===alliesEpoch){alliesStatus.textContent=allyError(error);updateAllyControls();}}
+    }
+    async function changeAllies(body){
+      if(alliesBusy||!getAuth().authenticated)return;
+      const authEpoch=alliesAuthEpoch,epoch=++alliesEpoch;alliesBusy=true;updateAllyControls();
+      try{
+        const data=await request('/allies',body);if(authEpoch!==alliesAuthEpoch)return;
+        if(epoch===alliesEpoch){alliesData=data;if(body.action==='add')alliesInput.value='';renderAllies();}
+        invalidateFog?.();
+      }catch(error){if(epoch===alliesEpoch)alliesStatus.textContent=allyError(error);}
+      finally{if(authEpoch===alliesAuthEpoch){alliesBusy=false;updateAllyControls();}}
+    }
+    alliesForm.onsubmit=event=>{event.preventDefault();const mapId=alliesInput.value.trim();if(mapId)void changeAllies({action:'add',mapId});};
+    $('searchInput').addEventListener('focus',closeAllies);
+    document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!allies.hidden){closeAllies();alliesButton.focus();}});
+    setInterval(()=>{if(!document.hidden)void loadAllies();},5000);renderAllies();
+    const imageUrl=item=>ServerMapPoiImages.url(item.id,item.imageKey,0);
     // Move existing controls, preserving their listeners and the legacy save flow.
     const form=$('manageForm'),layout=node('div',{className:'management-layout'}),nav=node('nav',{className:'management-nav'}),content=node('div',{className:'management-content'}),sections={};
-    nav.setAttribute('aria-label',text('管理分类','Administration categories'));layout.append(nav,content);form.querySelector('h2').after(layout);
+    nav.setAttribute('aria-label',text('管理分类','Administration categories'));layout.append(nav,content);form.prepend(layout);
     function section(id,label){const s=node('section',{hidden:true}),b=action(label,()=>selectSection(id));b.setAttribute('role','tab');b.setAttribute('aria-controls','management-'+id);s.id='management-'+id;s.setAttribute('role','tabpanel');nav.append(b);content.append(s);sections[id]={s,b};return s;}
     function selectSection(id){for(const [key,{s,b}] of Object.entries(sections)){s.hidden=key!==id;b.setAttribute('aria-selected',String(key===id));}if(id==='images')loadImages();}
     nav.setAttribute('role','tablist');
-    const site=section('site',text('网站与公告','Website & news')),teleport=section('teleport',text('传送配置','Teleport')),uploads=section('uploads',text('图片上传配置','Image uploads')),images=section('images',text('图片管理','Manage images')),layerSettings=section('layers',text('图层与样式','Layers & styles')),quotas=section('quotas',text('玩家额度','Player quotas'));
+    const site=section('site',text('网站与公告','Website & news')),teleport=section('teleport',text('传送配置','Teleport')),uploads=section('uploads',text('图片上传配置','Image uploads')),images=section('images',text('图片管理','Manage images')),layerSettings=section('layers',text('图层与样式','Layers & styles')),quotas=section('quotas',text('玩家额度','Player quotas')),fogSettings=section('fog',text('战争迷雾','Fog of war'));
     function move(id,target){const input=$(id);if(!input)return;const wrapper=input.closest('label');if(wrapper){target.append(wrapper);return;}const label=form.querySelector('label[for="'+id+'"]');if(label)target.append(label);target.append(input);}
     for(const id of ['announcementInput','websiteInput','siteTitleInput','siteDescriptionInput','siteKeywordsInput','siteFaviconInput'])move(id,site);
     for(const id of ['mountedTeleportInput','playerGearTeleportInput','teleportItemCodeInput','teleportItemsPerJumpInput','teleportEffectsInput'])move(id,teleport);
@@ -81,6 +108,17 @@
     uploads.append(node('p',{className:'management-note',textContent:text('去除隐私元数据，保留全分辨率展示图与动画，生成静态 WebP 缩略图。最长边 8192 像素、最多 3200 万像素；是否允许上传仅按配置类型判断。旧图片保留。','Privacy metadata is stripped; full-resolution images and animations are preserved with static WebP thumbnails. Maximum 8192 pixels per side / 32 MP. Allowed formats follow this list. Legacy images are preserved.')}));
     const poiQuota=numberField(quotas,'poiQuota',text('每位玩家的地点标记额度','Place markers per player'),0,10000,10),daily=numberField(quotas,'dailyTeleports',text('每日传送次数（0 = 无限）','Daily teleports (0 = unlimited)'),0,100000,0);
     quotas.append(node('p',{className:'management-note',textContent:text('按服务器本地日期统计；成功传送计次，管理员不计次，携带坐骑时每位普通玩家各计一次。降低标记额度不会删除旧标记。','Uses the server local date. Successful teleports count once per non-admin rider. Lowering a marker quota never deletes existing markers.')}));
+    const fogEnabled=node('input',{id:'fogEnabled',type:'checkbox'}),shareExploration=node('input',{id:'shareExploration',type:'checkbox'}),adminsBypassFog=node('input',{id:'adminsBypassFog',type:'checkbox'});
+    const fogEnabledLabel=node('label',{htmlFor:'fogEnabled',className:'setting-checkbox'}),shareLabel=node('label',{htmlFor:'shareExploration',className:'setting-checkbox'}),adminFogLabel=node('label',{htmlFor:'adminsBypassFog',className:'setting-checkbox'}),fogNote=node('p',{className:'management-note'});
+    fogSettings.append(fogEnabledLabel,shareLabel,adminFogLabel,fogNote);
+    function fogLanguage(){
+      sections.fog.b.textContent=text('战争迷雾','Fog of war');
+      fogEnabledLabel.replaceChildren(fogEnabled,document.createTextNode(text('启用战争迷雾','Enable fog of war')));
+      shareLabel.replaceChildren(shareExploration,document.createTextNode(text('允许同阵营与盟友共享探索','Share exploration with faction members and allies')));
+      adminFogLabel.replaceChildren(adminsBypassFog,document.createTextNode(text('管理员无视战争迷雾','Administrators bypass fog of war')));
+      fogNote.textContent=text('开启后仅显示已探索的地图与区域标记，未登录用户无法查看。关闭后所有人不受迷雾限制，隐藏区域仍受保护。探索记录永久保存，重新开启不会丢失；开启共享后同阵营玩家和地图 ID 盟友共享探索。','When enabled, only explored terrain and area markers are shown; anonymous visitors see none. Disabling fog reveals the map to everyone but keeps hidden regions protected. Exploration is retained when fog is re-enabled. Sharing includes faction members and map-ID allies.');
+    }
+    fogLanguage();
     const layerRows={},table=node('table',{className:'management-grid'}),head=node('tr');
     for(const label of [text('图层','Layer'),text('默认','Default'),text('禁止','Block'),text('强制','Force'),text('倍率','Scale')])head.append(node('th',{textContent:label}));table.append(head);
     for(const [id,zh,en] of [['players','玩家','Players'],['mounts','坐骑','Mounts'],['spawn','出生点','Spawn'],['claims','领地文字','Claim labels'],['claim-areas','领地区域','Claim areas'],['chunks','已生成区域','Regions'],['translocators','传送器','Translocators'],['pois','地点标记','Places']]){
@@ -115,9 +153,10 @@
     function settings(value={}){
       value=normalize(value);maxMb.value=value.imageMaxMb??10;poiQuota.value=value.poiQuota??10;daily.value=value.dailyTeleports??0;
       imageTypesInput.value=(value.imageTypes||['jpeg','png','webp','bmp']).join(', ');imageTypesInput.setCustomValidity('');
+      fogEnabled.checked=value.fogEnabled??true;shareExploration.checked=!!value.shareExploration;adminsBypassFog.checked=value.adminsBypassFog??true;alliesButton.hidden=!getAuth().authenticated;
       for(const [id,fields] of Object.entries(layerRows)){const rule=value.layers?.[id]||{};fields.defaultVisible.checked=rule.defaultVisible??['players','mounts','spawn','pois'].includes(id);fields.forbidden.checked=!!rule.forbidden;fields.forced.checked=!!rule.forced;if(fields.scale)fields.scale.value=rule.scale??1;}
     }
-    function payload(){const imageTypes=[...new Set(imageTypesInput.value.toLowerCase().split(/[\s,;，；]+/).filter(Boolean).map(t=>t.replace(/^\./,'').replace(/^jpg$/,'jpeg').replace(/^apng$/,'png')))];if(!imageTypes.length||imageTypes.length>32||imageTypes.some(t=>!/^[a-z][a-z0-9]{0,15}$/.test(t))){selectSection('uploads');const message=text('请输入图片类型名称，用逗号或空格分隔','Enter image format names separated with commas or spaces');imageTypesInput.setCustomValidity(message);imageTypesInput.reportValidity();throw Error(message);}return {imageTypes,imageMaxMb:Number(maxMb.value),poiQuota:Number(poiQuota.value),dailyTeleports:Number(daily.value),layers:Object.fromEntries(Object.entries(layerRows).map(([id,r])=>[id,{defaultVisible:r.defaultVisible.checked,forbidden:r.forbidden.checked,forced:r.forced.checked,scale:r.scale?Number(r.scale.value):1}]))};}
+    function payload(){const imageTypes=[...new Set(imageTypesInput.value.toLowerCase().split(/[\s,;，；]+/).filter(Boolean).map(t=>t.replace(/^\./,'').replace(/^jpg$/,'jpeg').replace(/^apng$/,'png')))];if(!imageTypes.length||imageTypes.length>32||imageTypes.some(t=>!/^[a-z][a-z0-9]{0,15}$/.test(t))){selectSection('uploads');const message=text('请输入图片类型名称，用逗号或空格分隔','Enter image format names separated with commas or spaces');imageTypesInput.setCustomValidity(message);imageTypesInput.reportValidity();throw Error(message);}return {imageTypes,imageMaxMb:Number(maxMb.value),poiQuota:Number(poiQuota.value),dailyTeleports:Number(daily.value),fogEnabled:fogEnabled.checked,shareExploration:shareExploration.checked,adminsBypassFog:adminsBypassFog.checked,layers:Object.fromEntries(Object.entries(layerRows).map(([id,r])=>[id,{defaultVisible:r.defaultVisible.checked,forbidden:r.forbidden.checked,forced:r.forced.checked,scale:r.scale?Number(r.scale.value):1}]))};}
     settings();selectSection('site');
 
     const tracking=dialog('trackDialog',text('玩家轨迹跟踪','Player tracking')),controls=node('div',{className:'tracking-controls'}),playerSelect=node('select',{id:'trackPlayer'}),duration=node('input',{id:'trackSeconds',type:'number',min:'1',max:'86400',value:'3600'}),trackStatus=node('p',{role:'status'}),historySearch=node('input',{type:'search',placeholder:text('搜索玩家或日期','Search player or date')}),history=node('div',{className:'track-history'});
@@ -191,13 +230,14 @@
       }catch(error){trackStatus.textContent=error.message;}finally{polling=false;}
     },3000);
     function authChanged(){
-      trackingButton.hidden=true;galleryEpoch++;imageEpoch++;historyEpoch++;trackEpoch++;
+      alliesAuthEpoch++;closeAllies();alliesBusy=false;alliesData=null;alliesInput.value='';ownId.value='';alliesStatus.textContent='';renderAllies();
+      trackingButton.hidden=true;alliesButton.hidden=!getAuth().authenticated;imageEpoch++;historyEpoch++;trackEpoch++;
       if(!getAuth().admin){tracking.close();clearTrack();history.replaceChildren();playerSelect.replaceChildren();imageList.replaceChildren();$('manageModal').hidden=true;}
-      if(moments.open)loadMoments();
     }
-    function privacyChanged(){galleryEpoch++;imageEpoch++;$('poiImageViewer').close();if(moments.open)loadMoments();}
+    function privacyChanged(){imageEpoch++;$('poiImageViewer').close();void loadAllies();}
     function languageChanged(){
-      for(const [b,zh,en] of [[momentsButton,'瞬间','Moments'],[trackingButton,'玩家轨迹跟踪','Player tracking']]){b.title=text(zh,en);b.setAttribute('aria-label',b.title);}
+      renderAllies();fogLanguage();
+      for(const [b,zh,en] of [[trackingButton,'玩家轨迹跟踪','Player tracking'],[alliesButton,'结盟','Allies']]){b.title=text(zh,en);b.setAttribute('aria-label',b.title);}
     }
     return {settings,payload,authChanged,privacyChanged,languageChanged};
   }

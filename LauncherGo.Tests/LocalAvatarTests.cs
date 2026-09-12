@@ -57,6 +57,8 @@ public sealed class LocalAvatarTests : IDisposable
             Assert.Null(cache.Get("../secret"));
         }
         using var restored=new LocalAvatarCache(renderer,path,"revision",_=>{});
+        Assert.NotNull(restored.Get(Look.Key("revision"))); // Offline list has only the persisted image key.
+        Assert.Null(restored.Get("../secret"));
         await WaitFor(restored);Assert.Equal(3,count);
         static async Task<string> WaitFor(LocalAvatarCache cache)
         {

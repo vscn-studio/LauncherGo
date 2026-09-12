@@ -50,6 +50,9 @@
 .notebook-region-label { overflow:hidden!important;clip-path:inset(0);pointer-events:none!important;background:none; }
 .notebook-region-label text { font-family:var(--map-label-font);font-weight:600;letter-spacing:0;fill:#e0e0e0;stroke:#20252b;paint-order:stroke fill;stroke-linejoin:round;text-rendering:geometricPrecision; }
 .notebook-fog { filter:none; }
+.notebook-region-draft { pointer-events:none!important;overflow:hidden;background:transparent; }
+.notebook-region-drawing,.notebook-region-drawing .leaflet-grab { cursor:crosshair!important;touch-action:none!important; }
+#notebookToolbar [aria-pressed="true"] { background:var(--hover);outline:1px solid var(--text);outline-offset:-1px; }
 .notebook-route { cursor:context-menu; }
 #notebookModal input[type=color] { height:40px; }
 #notebookToolbar[hidden],#notebookNotice[hidden],#notebookTooltip[hidden],.notebook-section[hidden],.notebook-button[hidden],.notebook-info[hidden] { display:none!important; }

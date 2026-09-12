@@ -29,7 +29,7 @@ async function main() {
         if (name.endsWith('/area-markers')) return json({revision:0,markers:[]});
         if (name.endsWith('/render-progress')) return json({phase:'idle',queued:0});
         if (name.includes('/layers/')) return json({features:[]});
-        if (name.includes('/tiles/')) return route.fulfill({path:path.join(webRoot,'assets/sky.png'),contentType:'image/png'});
+        if (name.includes('/tiles/')) return route.fulfill({path:path.join(webRoot,'assets/icons/spawn.png'),contentType:'image/png'});
         if (name.startsWith('/api/')) return json([]);
         const file = path.resolve(webRoot, name === '/' ? 'index.html' : name.slice(1));
         assert.ok(file.startsWith(webRoot + path.sep));

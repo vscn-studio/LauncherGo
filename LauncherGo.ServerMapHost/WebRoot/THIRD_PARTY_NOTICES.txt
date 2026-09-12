@@ -29,7 +29,6 @@ Referenced snapshot: 924537d6eff099404caa26d36a07a6d1cf08ba67.
 Copyright (c) 2023 Th3Dilli.
 MIT License; full text: vendor/WebCartographer-LICENSE.txt.
 vendor/webcartographer-route.js is adapted from WebCartographer/html/route.js.
-assets/sky.png is copied from WebCartographer/html/assets/sky.png.
 assets/icons/spawn.png is an unmodified copy of the server/spawn marker at
 WebCartographer/html/assets/icons/temporal_gear.png.
 The map uses its translocator route-planning approach with ServerMap-specific

@@ -23,7 +23,7 @@ async function main(){
       if(url.pathname.endsWith('/auth/me'))return json({authenticated:true,admin:false,name:'alice'});
       if(url.pathname.endsWith('/announcement'))return json({html:'<span></span>'});
       if(url.pathname.endsWith('/render-progress'))return json({phase:'idle'});
-      if(url.pathname.includes('/tiles/'))return route.fulfill({path:path.join(webRoot,'assets/sky.png'),contentType:'image/png'});
+      if(url.pathname.includes('/tiles/'))return route.fulfill({path:path.join(webRoot,'assets/icons/spawn.png'),contentType:'image/png'});
       if(url.pathname.startsWith('/api/'))return json([]);
       const asset=url.pathname==='/'?'index.html':url.pathname.slice(1),file=path.resolve(webRoot,asset);assert.ok(file.startsWith(webRoot+path.sep));
       let body=await fs.readFile(file);if(asset==='index.html')body=body.toString().replace('const map=L.map','const map=window.testMap=L.map').replace('async function fetchLayer(name){','window.refreshMounts=()=>fetchLayer("mounts");\n    async function fetchLayer(name){');

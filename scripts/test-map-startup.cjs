@@ -24,7 +24,7 @@ async function main() {
           if (url.pathname === '/api/v1/announcement') return json({ html: '' });
           if (url.pathname === '/api/v1/render-progress') return json({ phase: 'idle' });
           if (url.pathname === '/api/v1/events') return route.fulfill({ contentType: 'text/event-stream', body: ': test\n\n' });
-          if (url.pathname.startsWith('/api/v1/tiles/')) return route.fulfill({ path: path.join(webRoot, 'assets/sky.png'), contentType: 'image/png' });
+          if (url.pathname.startsWith('/api/v1/tiles/')) return route.fulfill({ path: path.join(webRoot, 'assets/icons/spawn.png'), contentType: 'image/png' });
           if (url.pathname.startsWith('/api/')) return json([]);
           const asset = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
           const file = path.resolve(webRoot, asset);

@@ -24,7 +24,8 @@ async function run(){
    if(name.endsWith('/auth/me'))return json({authenticated:true,admin,name:admin?'admin':'player'});
    if(name.endsWith('/announcement'))return json({html:''});if(name.endsWith('/render-progress'))return json({phase:'idle'});
    if(['/hidden-regions','/my-waypoints','/routes'].some(p=>name.endsWith(p)))return json([]);
-   if(name.includes('/tiles/'))return route.fulfill({path:path.join(webRoot,'assets/sky.png'),contentType:'image/png'});
+   // Synthetic tile: the optional sky artwork is no longer part of WebRoot.
+   if(name.includes('/tiles/'))return route.fulfill({body:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64'),contentType:'image/png'});
    if(name.startsWith('/api/'))return json({});
    const file=path.resolve(webRoot,name==='/'?'index.html':name.slice(1));assert.ok(file.startsWith(webRoot+path.sep));let body=await fs.readFile(file);
    if(name==='/')body=body.toString().replace('  (() => {','  const originalMap=L.map;L.map=(...args)=>(window.testMap=originalMap(...args));\n  (() => {').replace('areas=ServerMapAreas.create','areas=window.testAreas=ServerMapAreas.create');

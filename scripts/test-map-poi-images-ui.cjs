@@ -38,7 +38,7 @@ async function main(){const browser=await chromium.launch({headless:true});try{f
     if(url.pathname.endsWith('/auth/me'))return json({authenticated:true,name:'admin',admin:true});
     if(url.pathname.endsWith('/announcement')){if(req.method()==='POST')enabled=req.postDataJSON().poiImagesEnabled;return json({html:'<span></span>',poiImagesEnabled:enabled});}
     if(url.pathname.endsWith('/pois')&&req.method()==='POST'){const data=req.postDataJSON();saves.push(data);if('imageData'in data)features[0].properties.imageKey=data.imageData?'b'.repeat(32):null;return json({Id:'own'});}
-    if(url.pathname.endsWith('/poi-image')||url.pathname.includes('/tiles/'))return route.fulfill({path:path.join(webRoot,'assets/sky.png'),contentType:'image/png'});
+    if(url.pathname.endsWith('/poi-image')||url.pathname.includes('/tiles/'))return route.fulfill({path:path.join(webRoot,'assets/icons/spawn.png'),contentType:'image/png'});
     if(url.pathname.endsWith('/render-progress'))return json({phase:'idle'});
     if(url.pathname.startsWith('/api/'))return json([]);
     const file=path.resolve(webRoot,url.pathname==='/'?'index.html':url.pathname.slice(1));assert.ok(file.startsWith(webRoot+path.sep));let body=await fs.readFile(file);if(file.endsWith('index.html'))body=body.toString().replace('const map=L.map','const map=window.testMap=L.map');return route.fulfill({body,contentType:{'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png'}[path.extname(file)]||'text/plain'});

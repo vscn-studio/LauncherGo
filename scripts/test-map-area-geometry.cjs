@@ -25,6 +25,9 @@ assert.deepEqual(g.largestRectangle([[0,0,10,4],[2,4,8,10]]),[2,0,8,10],'The bes
 assert.deepEqual(g.largestRectangle([[0,0,5,10],[5,0,10,10]]),[0,0,10,10]);
 assert.deepEqual(g.largestRectangle([[-1000000,-1000000,1000000,0],[-1000000,0,1000000,1000000]]),[-1000000,-1000000,1000000,1000000]);
 assert.equal(g.largestRectangle([]),null);
+const fogFragments=Array.from({length:2048},(_,i)=>[i*64,i*64,i*64+32,i*64+32]);
+fogFragments.push([-1000,-1000,-936,-936]);
+assert.deepEqual(g.largestRectangle(fogFragments),[-1000,-1000,-936,-936],'Highly fragmented fog uses a bounded label calculation inside one explored fragment');
 function checkLargest(rects){
  const occupied=pixels(rects),xs=rects.flatMap(r=>[r[0],r[2]]),zs=rects.flatMap(r=>[r[1],r[3]]),minX=Math.min(...xs),maxX=Math.max(...xs),minZ=Math.min(...zs),maxZ=Math.max(...zs);let best=0;
  for(let x=minX;x<maxX;x++)for(let z=minZ;z<maxZ;z++)for(let x2=x+1;x2<=maxX;x2++)for(let z2=z+1;z2<=maxZ;z2++){const area=(x2-x)*(z2-z);if(area<=best)continue;let valid=true;for(let xx=x;xx<x2&&valid;xx++)for(let zz=z;zz<z2;zz++)if(!occupied.has(xx+','+zz)){valid=false;break;}if(valid)best=area;}

@@ -8,7 +8,22 @@ public sealed class MapNotebookStore
 {
     public sealed record Route(string Id, string OwnerUid, string Name, string Color, double[][] Points, DateTimeOffset UpdatedAt);
     public sealed record Share(string Id, string SourceId, Route Snapshot);
-    public sealed record Region(string Id, string Name, double MinX, double MinZ, double MaxX, double MaxZ, bool HideInGame = false);
+    public sealed record Region(string Id, string Name, double MinX, double MinZ, double MaxX, double MaxZ, bool HideInGame = false)
+    {
+        // Null denotes an older inclusive rectangle. New shapes are unions of
+        // half-open integer rectangles; the bounds are only a navigation envelope.
+        public AreaMarkerStore.Rect[]? Rects { get; init; }
+        // Teleport quotes compare independent snapshots. Array reference equality
+        // would report a privacy change on every read even without an actual edit.
+        public bool Equals(Region? other) => other != null && Id == other.Id && Name == other.Name && MinX == other.MinX && MinZ == other.MinZ && MaxX == other.MaxX && MaxZ == other.MaxZ && HideInGame == other.HideInGame
+            && (Rects == null ? other.Rects == null : other.Rects != null && Rects.SequenceEqual(other.Rects));
+        public override int GetHashCode()
+        {
+            var hash = new HashCode(); hash.Add(Id); hash.Add(Name); hash.Add(MinX); hash.Add(MinZ); hash.Add(MaxX); hash.Add(MaxZ); hash.Add(HideInGame);
+            if (Rects != null) foreach (var rect in Rects) hash.Add(rect);
+            return hash.ToHashCode();
+        }
+    }
     private sealed record State(Route[] Routes, Share[] Shares, Region[] Regions);
     private readonly string path;
     private readonly object gate = new();
@@ -19,9 +34,21 @@ public sealed class MapNotebookStore
         // Do not silently discard unreadable fog rules and expose protected terrain.
         state = File.Exists(path) ? JsonSerializer.Deserialize<State>(File.ReadAllText(path)) ?? throw new InvalidDataException("Invalid map notebook") : new([], [], []);
         if (state.Routes is null || state.Shares is null || state.Regions is null) throw new InvalidDataException("Invalid map notebook");
-        foreach (var region in state.Regions) ValidateBounds(region.MinX, region.MinZ, region.MaxX, region.MaxZ);
+        if (state.Regions.Length > 256 || state.Regions.Sum(r => r.Rects?.Length ?? 1) > AreaMarkerStore.MaxTotalRects) throw new InvalidDataException("Too many hidden regions");
+        foreach (var region in state.Regions)
+        {
+            ValidateBounds(region.MinX, region.MinZ, region.MaxX, region.MaxZ);
+            if (region.Rects != null)
+            {
+                AreaMarkerStore.ValidateRects(region.Rects);
+                if (region.MinX != region.Rects.Min(r => r.MinX) || region.MinZ != region.Rects.Min(r => r.MinZ) || region.MaxX != region.Rects.Max(r => r.MaxX) || region.MaxZ != region.Rects.Max(r => r.MaxZ))
+                    throw new InvalidDataException("Invalid hidden region bounds");
+            }
+        }
     }
-    public Region[] Regions { get { lock (gate) return state.Regions.ToArray(); } }
+    public Region[] Regions { get { lock (gate) return state.Regions.Select(Clone).ToArray(); } }
+    public static AreaMarkerStore.Rect[] PixelRects(Region region) => region.Rects?.ToArray() ??
+        [new((int)Math.Floor(region.MinX), (int)Math.Floor(region.MinZ), (int)Math.Min(32_000_000, Math.Floor(region.MaxX) + 1), (int)Math.Min(32_000_000, Math.Floor(region.MaxZ) + 1))];
     public Route[] ForOwner(string uid) { lock (gate) return state.Routes.Where(r => r.OwnerUid == uid).Select(Clone).ToArray(); }
     public Route Save(string uid, string? id, string name, string color, double[][] points)
     {
@@ -67,6 +94,7 @@ public sealed class MapNotebookStore
             if (!string.IsNullOrEmpty(id) && !state.Regions.Any(r => r.Id == id)) throw new KeyNotFoundException();
             if (string.IsNullOrEmpty(id) && state.Regions.Length >= 256) throw new InvalidOperationException("Hidden region limit reached (256)");
             var region = new Region(string.IsNullOrEmpty(id) ? Guid.NewGuid().ToString("N") : id, Limit(name, "Hidden region"), minX, minZ, maxX, maxZ, hideInGame);
+            if (state.Regions.Where(r => r.Id != id).Sum(r => r.Rects?.Length ?? 1) + 1 > AreaMarkerStore.MaxTotalRects) throw new InvalidOperationException("Hidden region geometry limit reached");
             Commit(state with { Regions = state.Regions.Where(r => r.Id != region.Id).Append(region).ToArray() });
             return region;
         }
@@ -77,6 +105,20 @@ public sealed class MapNotebookStore
         {
             if (!state.Regions.Any(r => r.Id == id)) return false;
             Commit(state with { Regions = state.Regions.Where(r => r.Id != id).ToArray() }); return true;
+        }
+    }
+    public Region SaveRegion(string? id, string name, AreaMarkerStore.Rect[] rects, bool hideInGame = false)
+    {
+        lock (gate)
+        {
+            if (!string.IsNullOrEmpty(id) && !state.Regions.Any(r => r.Id == id)) throw new KeyNotFoundException();
+            if (string.IsNullOrEmpty(id) && state.Regions.Length >= 256) throw new InvalidOperationException("Hidden region limit reached (256)");
+            var others = state.Regions.Where(r => r.Id != id).ToArray();
+            var shape = AreaMarkerStore.NormalizeRects(rects, others.SelectMany(PixelRects));
+            if (others.Sum(r => r.Rects?.Length ?? 1) + shape.Length > AreaMarkerStore.MaxTotalRects) throw new InvalidOperationException("Hidden region geometry limit reached");
+            var region = new Region(string.IsNullOrEmpty(id) ? Guid.NewGuid().ToString("N") : id, Limit(name, "Hidden region"), shape.Min(r => r.MinX), shape.Min(r => r.MinZ), shape.Max(r => r.MaxX), shape.Max(r => r.MaxZ), hideInGame) { Rects = shape };
+            Commit(state with { Regions = others.Append(region).ToArray() });
+            return Clone(region);
         }
     }
     public static bool ValidCoordinate(double value) => double.IsFinite(value) && Math.Abs(value) <= 32_000_000;
@@ -92,6 +134,7 @@ public sealed class MapNotebookStore
     }
     private void Commit(State next) { AtomicFile.Replace(path, temp => File.WriteAllText(temp, JsonSerializer.Serialize(next))); state = next; }
     private static Route Clone(Route route) => route with { Points = route.Points.Select(p => p.ToArray()).ToArray() };
+    private static Region Clone(Region region) => region with { Rects = region.Rects?.ToArray() };
     private static string Limit(string? value, string fallback) { value = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim(); return value.Length <= 80 ? value : value[..80]; }
     private static string NormalizeColor(string? color) => System.Text.RegularExpressions.Regex.IsMatch(color ?? "", "^#[0-9a-fA-F]{6}$") ? color! : "#ffd000";
 }

@@ -25,13 +25,15 @@ public sealed partial class ServerMapWebServer
         var config=announcements.Current;
         if (!config.MountedTeleportEnabled) throw new TeleportError(403,"teleport_mount_disabled");
         if (!principal.IsAdmin && !config.PlayerGearTeleportEnabled) throw new TeleportError(403,"teleport_disabled");
-        if (!CanView(principal,x,z)) throw new TeleportError(403,"Hidden region");
         var driver=OnlineTeleportPlayer(uid,true);
         var supplier=driver.Entity.MountedOn?.MountSupplier;
         var entity=supplier?.OnEntity;
         if (entity == null || !entity.Alive || entity.Teleporting || entity.Pos.Dimension != 0) throw new TeleportError(409,"teleport_changed");
         if (!ReferenceEquals(entity.GetInterface<IMountable>(),supplier)) throw new TeleportError(409,"teleport_mount_unsupported");
         if (!MountedTeleportRules.IsController(driver.Entity,supplier!)) throw new TeleportError(409,"teleport_driver_only");
+        // Only the authenticated, actual driver supplies exploration authority.
+        // Passengers need not have explored the destination themselves.
+        CheckTeleportDestination(principal,x,z);
         var kind=MountedTeleportRules.Classify(entity);
         var riders=new List<MountedRider>();
         var occupants=new List<MountedOccupant>();
@@ -59,8 +61,12 @@ public sealed partial class ServerMapWebServer
         var p=entity.Pos;
         if (!double.IsFinite(p.X+p.Y+p.Z+p.Yaw+p.Pitch+p.Roll+driver.Entity.Pos.Y) || riders.Any(r=>!double.IsFinite(r.OffsetX+r.OffsetY+r.OffsetZ) || Math.Max(Math.Abs(r.OffsetX),Math.Abs(r.OffsetZ))>64 || Math.Abs(r.OffsetY)>128))
             throw new TeleportError(409,"teleport_mount_unsupported");
-        return new(entity.EntityId,kind,p.X,p.Y,p.Z,p.Yaw,p.Pitch,p.Roll,driver.Entity.Pos.X,driver.Entity.Pos.Y,driver.Entity.Pos.Z,entity.OnGround,MountedTeleportRules.Boxes(entity),
+        var state = new MountedState(entity.EntityId,kind,p.X,p.Y,p.Z,p.Yaw,p.Pitch,p.Roll,driver.Entity.Pos.X,driver.Entity.Pos.Y,driver.Entity.Pos.Z,entity.OnGround,MountedTeleportRules.Boxes(entity),
             riders.OrderBy(r=>r.Uid,StringComparer.Ordinal).ToArray(),occupants.ToArray(),string.Join(";",supplier.Seats.Select(s=>$"{s.SeatId}:{s.Passenger?.EntityId ?? 0}")),(config.PlayerTeleport??new()).Validate());
+        // Check before loading any target chunks, then again after loading and
+        // before payment. An admin driver cannot carry ordinary riders into hiding.
+        CheckTeleportHiddenBounds(state.Riders.All(r=>r.Admin),TravelBounds(state,x,z));
+        return state;
     }
     private static bool SameMountedState(MountedState a, MountedState b) =>
         a.EntityId==b.EntityId && a.Kind==b.Kind && a.Settings==b.Settings && a.Seats==b.Seats &&
@@ -89,8 +95,7 @@ public sealed partial class ServerMapWebServer
         var y=MountedTeleportRules.ArrivalY(state.Kind,state.RiderY,driver.OffsetY,state.Y,bounds.Y1,sources,targets,state.OnGround);
         var destinationBounds=TravelBounds(state,x,z);
         // A passenger cannot be carried into an area hidden from that passenger.
-        if (state.Riders.Any(r=>!r.Admin) && notebook.Regions.Any(r=>MapVisibility.Intersects(r,destinationBounds.X1,destinationBounds.Z1,destinationBounds.X2,destinationBounds.Z2)))
-            throw new TeleportError(403,"Hidden region");
+        CheckTeleportHiddenBounds(state.Riders.All(r=>r.Admin),destinationBounds);
         var worldBoxes=state.Boxes.Select(b=>b.At(x,y,z)).ToList();
         // Check a little below the hull too, so shallow water cannot strand it.
         if (state.Kind==MountedTeleportRules.Kind.Boat)

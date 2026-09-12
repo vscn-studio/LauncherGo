@@ -90,6 +90,17 @@ public sealed class AreaMarkerStore
         }
         return normalized;
     }
+    // Shared pixel geometry for the hidden-region editor. Work and fragment counts
+    // are bounded independently of the area of the selected world coordinates.
+    public static Rect[] NormalizeRects(Rect[] rects, IEnumerable<Rect>? occupied = null)
+    {
+        ValidateRects(rects);
+        var budget = 2_000_000;
+        var normalized = Union(rects, ref budget);
+        if (occupied != null) foreach (var rect in occupied) normalized = Cut(normalized, rect, ref budget);
+        if (normalized.Count == 0) throw new ArgumentException("Select an unoccupied area");
+        return normalized.ToArray();
+    }
     private static void ValidateStyle(Appearance style)
     {
         if (style == null || new[] { style.BorderOpacity, style.FillOpacity, style.TextOpacity }.Any(v => !double.IsFinite(v) || v < 0 || v > 1))
@@ -131,6 +142,11 @@ public sealed class AreaMarkerStore
         ValidateRange(zoom, zoom);
         if (string.IsNullOrWhiteSpace(name) || name.Trim().Length > 80 || !Regex.IsMatch(color ?? "", "^#[0-9a-fA-F]{6}$") || rects == null || rects.Length is < 1 or > MaxRects)
             throw new ArgumentException("Invalid area marker");
+        ValidateRects(rects);
+    }
+    public static void ValidateRects(Rect[] rects)
+    {
+        if (rects == null || rects.Length is < 1 or > MaxRects) throw new ArgumentException("Invalid pixel region");
         foreach (var r in rects)
             if (r == null || r.MinX < -32_000_000 || r.MinZ < -32_000_000 || r.MaxX > 32_000_000 || r.MaxZ > 32_000_000 || r.MinX >= r.MaxX || r.MinZ >= r.MaxZ)
                 throw new ArgumentException("Invalid area rectangle");

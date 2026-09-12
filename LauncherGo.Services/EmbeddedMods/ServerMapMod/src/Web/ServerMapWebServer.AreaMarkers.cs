@@ -13,9 +13,32 @@ public sealed partial class ServerMapWebServer
         var method = context.Request.HttpMethod;
         if (method == "GET")
         {
+            context.Response.Headers["Vary"] = "Cookie";
             var snapshot = areaMarkers.Read(); var fog = notebook.Regions;
-            var visible = principal?.IsAdmin == true ? snapshot.Markers : snapshot.Markers.Where(m => !m.Rects.Any(r => fog.Any(f => MapVisibility.Intersects(f, r.MinX, r.MinZ, r.MaxX, r.MaxZ))));
-            Json(context, new { revision = snapshot.Revision, zoomRanges = true, markers = visible.Select(m => new { id = m.Id, name = m.Name, color = m.Color, minZoom = m.MinZoom, maxZoom = m.MaxZoom, borderOpacity = m.Style.BorderOpacity, fillOpacity = m.Style.FillOpacity, textOpacity = m.Style.TextOpacity, rects = m.Rects.Select(r => new[] { r.MinX, r.MinZ, r.MaxX, r.MaxZ }) }) }, true);
+            var management = Management;
+            var bypass = principal?.IsAdmin == true && management.AdminsBypassFog;
+            var restrict = management.FogEnabled && !bypass;
+            var explored = !restrict || principal == null ? [] : exploration.VisibleRects(principal.PlayerUid, management.ShareExploration, uid => alliances.IsAllied(principal.PlayerUid, uid));
+            static int[][] Coordinates(AreaMarkerStore.Rect[] rects) => rects.Select(r => new[] { r.MinX, r.MinZ, r.MaxX, r.MaxZ }).ToArray();
+            var visible = snapshot.Markers
+                // Keep the existing hidden-region privacy rule independent from
+                // the exploration fog. Administrators retain their preview.
+                .Where(m => principal?.IsAdmin == true || !m.Rects.Any(r => fog.Any(f => MapVisibility.Intersects(f, r.MinX, r.MinZ, r.MaxX, r.MaxZ))))
+                .Select(m =>
+                {
+                    var shape = restrict ? AreaMarkerVisibility.Clip(m.Rects, explored) : null;
+                    return new { marker = m, rects = shape?.Rects ?? m.Rects, borders = shape?.Borders };
+                })
+                .Where(item => item.rects.Length > 0 || principal?.IsAdmin == true)
+                .Select(item => new {
+                    id = item.marker.Id, name = item.marker.Name, color = item.marker.Color, minZoom = item.marker.MinZoom, maxZoom = item.marker.MaxZoom,
+                    borderOpacity = item.marker.Style.BorderOpacity, fillOpacity = item.marker.Style.FillOpacity, textOpacity = item.marker.Style.TextOpacity,
+                    rects = Coordinates(item.rects), borders = item.borders?.Select(e => new[] { e.X1, e.Z1, e.X2, e.Z2 }).ToArray(),
+                    // Only admins receive the original for explicit editing;
+                    // normal rendering and hit testing always use clipped rects.
+                    editRects = principal?.IsAdmin == true && restrict ? Coordinates(item.marker.Rects) : null
+                });
+            Json(context, new { revision = snapshot.Revision, zoomRanges = true, markers = visible }, true);
             return true;
         }
         if (method is not ("POST" or "DELETE")) { Error(context, 405, "Method not allowed"); return true; }

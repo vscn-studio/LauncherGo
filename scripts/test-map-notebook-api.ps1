@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$GameRoot, [switch]$ThroughHost, [ValidateSet('Debug','Release')][string]$HostConfiguration='Debug')
+param([Parameter(Mandatory=$true)][string]$GameRoot, [switch]$ThroughHost, [ValidateSet('Debug','Release')][string]$HostConfiguration='Debug', [string]$TestScript='test-map-notebook-api.cjs')
 $ErrorActionPreference='Stop'
 $repoRoot=Split-Path $PSScriptRoot -Parent
 $package=Join-Path $repoRoot 'LauncherGo.Services/EmbeddedMods/ServerMapMod/bin/Release/servermap.zip'
@@ -64,7 +64,7 @@ try {
     }
     $worldRoot=Get-ChildItem -LiteralPath (Join-Path $dataRoot 'ServerMap') -Directory | Select-Object -First 1
     $env:MAP_TEST_CONTROL=Join-Path $worldRoot.FullName 'revoke-admin.test'
-    & node (Join-Path $PSScriptRoot 'test-map-notebook-api.cjs')
+    & node (Join-Path $PSScriptRoot $TestScript)
     if($LASTEXITCODE -ne 0){throw 'Notebook API assertions failed.'}
     $process.StandardInput.WriteLine('/stop')
     if(!$process.WaitForExit(20000)){throw 'Isolated server failed to stop.'}

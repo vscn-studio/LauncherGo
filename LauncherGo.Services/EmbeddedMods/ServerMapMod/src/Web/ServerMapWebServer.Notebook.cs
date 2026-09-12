@@ -48,18 +48,43 @@ public sealed partial class ServerMapWebServer
         }
         catch (Exception ex) { api.Logger.Warning("ServerMap waypoint snapshot failed: {0}", ex.Message); }
     }
-    private bool CanView(MapAuthStore.Principal? principal, double x, double z) => principal?.IsAdmin == true || MapVisibility.Visible(notebook.Regions, x, z);
-    private bool PoiVisible(MapAuthStore.Principal? principal, PoiStore.Poi poi) => principal?.IsAdmin == true || !Management.Layer("pois").Forbidden && !notebook.Regions.Any(r => MapVisibility.Intersects(r,
-        Math.Min(poi.X, poi.X2 ?? poi.X), Math.Min(poi.Z, poi.Z2 ?? poi.Z), Math.Max(poi.X, poi.X2 ?? poi.X), Math.Max(poi.Z, poi.Z2 ?? poi.Z)));
+    private bool CanView(MapAuthStore.Principal? principal, double x, double z) => FogVisible(principal, x, z)
+        && (principal?.IsAdmin == true || MapVisibility.Visible(notebook.Regions, x, z));
+    private bool PoiVisible(MapAuthStore.Principal? principal, PoiStore.Poi poi)
+    {
+        if (!CanView(principal, poi.X, poi.Z)) return false;
+        return principal?.IsAdmin == true || !Management.Layer("pois").Forbidden && !notebook.Regions.Any(r => MapVisibility.Intersects(r,
+            Math.Min(poi.X, poi.X2 ?? poi.X), Math.Min(poi.Z, poi.Z2 ?? poi.Z), Math.Max(poi.X, poi.X2 ?? poi.X), Math.Max(poi.Z, poi.Z2 ?? poi.Z)));
+    }
     private object[] VisibleFeatures(List<object> features, MapAuthStore.Principal? principal)
     {
-        if (principal?.IsAdmin == true) return features.ToArray();
+        if (principal == null && Management.FogEnabled) return Array.Empty<object>();
         var regions = notebook.Regions;
-        if (regions.Length == 0) return features.ToArray();
-        return features.Where(f => MapVisibility.FeatureVisible(regions, JsonSerializer.SerializeToElement(f))).ToArray();
+        return features.Where(f =>
+        {
+            var element = JsonSerializer.SerializeToElement(f);
+            if (!FogFeatureVisible(principal, element)) return false;
+            return principal?.IsAdmin == true || MapVisibility.FeatureVisible(regions, element);
+        }).ToArray();
+    }
+    private bool FogFeatureVisible(MapAuthStore.Principal? principal, JsonElement feature)
+    {
+        if (!Management.FogEnabled || principal?.IsAdmin == true && Management.AdminsBypassFog) return true;
+        var coordinates = feature.GetProperty("geometry").GetProperty("coordinates");
+        var visible = true;
+        void Walk(JsonElement node)
+        {
+            if (node.ValueKind != JsonValueKind.Array) return;
+            if (node.GetArrayLength() >= 2 && node[0].ValueKind == JsonValueKind.Number && node[1].ValueKind == JsonValueKind.Number)
+            { visible &= FogVisible(principal, node[0].GetDouble(), node[1].GetDouble()); return; }
+            foreach (var child in node.EnumerateArray()) Walk(child);
+        }
+        Walk(coordinates); return visible;
     }
     private static object RouteView(MapNotebookStore.Route route) => new { id = route.Id, name = route.Name, color = route.Color, points = route.Points, updatedAt = route.UpdatedAt };
-    private bool RouteAllowed(MapAuthStore.Principal? principal, MapNotebookStore.Route route) => principal?.IsAdmin == true || MapVisibility.RouteVisible(notebook.Regions, route.Points);
+    private bool RouteAllowed(MapAuthStore.Principal? principal, MapNotebookStore.Route route) => principal != null
+        && (principal.IsAdmin && Management.AdminsBypassFog || route.Points.All(point => CanView(principal, point[0], point[1])))
+        && (principal.IsAdmin || MapVisibility.RouteVisible(notebook.Regions, route.Points));
     private bool NotebookRequest(HttpListenerContext context, string path)
     {
         if (WaypointRequest(context, path)) return true;
@@ -87,7 +112,8 @@ public sealed partial class ServerMapWebServer
         }
         if (method == "GET" && path == "api/v1/hidden-regions")
         {
-            Json(context, notebook.Regions.Select(r => new { id = r.Id, name = principal?.IsAdmin == true ? r.Name : "", minX = r.MinX, minZ = r.MinZ, maxX = r.MaxX, maxZ = r.MaxZ, hideInGame = r.HideInGame }).ToArray(), true); return true;
+            Json(context, notebook.Regions.Select(r => new { id = r.Id, name = principal?.IsAdmin == true ? r.Name : "", minX = r.MinX, minZ = r.MinZ, maxX = r.MaxX, maxZ = r.MaxZ, hideInGame = r.HideInGame,
+                rects = MapNotebookStore.PixelRects(r).Select(p => new { minX = p.MinX, minZ = p.MinZ, maxX = p.MaxX, maxZ = p.MaxZ }).ToArray() }).ToArray(), true); return true;
         }
         if (method == "GET" && path == "api/v1/route-shares")
         {
@@ -115,6 +141,7 @@ public sealed partial class ServerMapWebServer
                 Json(context, new { removed = true }, true); return true;
             }
             using var doc = ReadJson(context.Request); var value = doc.RootElement;
+            if (path == "api/v1/hidden-regions" && Principal(context.Request)?.IsAdmin != true) { Error(context, 403, "Admin login required"); return true; }
             string S(string key, string fallback = "") => value.TryGetProperty(key, out var p) ? p.GetString() ?? fallback : fallback;
             if (path == "api/v1/routes")
             {
@@ -129,13 +156,16 @@ public sealed partial class ServerMapWebServer
                 }
                 else points = value.GetProperty("points").Deserialize<double[][]>()!;
                 MapNotebookStore.ValidatePoints(points);
-                if (!principal.IsAdmin && !MapVisibility.RouteVisible(notebook.Regions, points)) throw new UnauthorizedAccessException();
+                if (!principal.IsAdmin && (points.Any(point => !CanView(principal, point[0], point[1])) || !MapVisibility.RouteVisible(notebook.Regions, points))) throw new UnauthorizedAccessException();
                 Json(context, RouteView(notebook.Save(principal.PlayerUid, string.IsNullOrEmpty(shareId) ? S("id") : null, name, color, points)), true);
             }
             else if (path == "api/v1/route-shares") Json(context, new { id = notebook.ShareRoute(principal.PlayerUid, S("id")) }, true);
             else
             {
-                var region = notebook.SaveRegion(S("id"), S("name"), value.GetProperty("minX").GetDouble(), value.GetProperty("minZ").GetDouble(), value.GetProperty("maxX").GetDouble(), value.GetProperty("maxZ").GetDouble(), value.TryGetProperty("hideInGame", out var hide) && hide.GetBoolean());
+                var hideInGame = value.TryGetProperty("hideInGame", out var hide) && hide.GetBoolean();
+                var region = value.TryGetProperty("rects", out var rects)
+                    ? notebook.SaveRegion(S("id"), S("name"), rects.Deserialize<AreaMarkerStore.Rect[]>(new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!, hideInGame)
+                    : notebook.SaveRegion(S("id"), S("name"), value.GetProperty("minX").GetDouble(), value.GetProperty("minZ").GetDouble(), value.GetProperty("maxX").GetDouble(), value.GetProperty("maxZ").GetDouble(), hideInGame);
                 events.Publish("visibility", new { changed = true });
                 Json(context, new { id = region.Id }, true);
             }

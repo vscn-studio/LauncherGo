@@ -33,6 +33,8 @@
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\PlayerTeleportSettings.cs" Link="ServerMap\PlayerTeleportSettings.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\AnnouncementStore.cs" Link="ServerMap\AnnouncementStore.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\MapManagementSettings.cs" Link="ServerMap\MapManagementSettings.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\TeleportAccess.cs" Link="ServerMap\TeleportAccess.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Network\MapExplorationSync.cs" Link="ServerMap\MapExplorationSync.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\DailyTeleportQuota.cs" Link="ServerMap\DailyTeleportQuota.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\PlayerTrackStore.cs" Link="ServerMap\PlayerTrackStore.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Util\LruCache.cs" Link="ServerMap\LruCache.cs" />
@@ -41,7 +43,9 @@
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\World\SavedWorldQueries.cs" Link="ServerMap\SavedWorldQueries.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Util\AtomicFile.cs" Link="ServerMap\AtomicFile.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\MapNotebookStore.cs" Link="ServerMap\MapNotebookStore.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\AllianceStore.cs" Link="ServerMap\AllianceStore.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\AreaMarkerStore.cs" Link="ServerMap\AreaMarkerStore.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\AreaMarkerVisibility.cs" Link="ServerMap\AreaMarkerVisibility.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\PoiStore.cs" Link="ServerMap\PoiStore.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\MapVisibility.cs" Link="ServerMap\MapVisibility.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\GameWaypointSnapshot.cs" Link="ServerMap\GameWaypointSnapshot.cs" />

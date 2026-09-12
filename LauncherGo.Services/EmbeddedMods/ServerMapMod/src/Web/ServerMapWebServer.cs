@@ -24,7 +24,7 @@ public sealed partial class ServerMapWebServer : IDisposable
     private static readonly string[] Layers = ["players", "mounts", "spawn", "claims", "claim-areas", "chunks", "translocators", "pois"];
     private readonly ICoreServerAPI api; private readonly ServerMapConfig config; private readonly string root; private readonly string webRoot;
     private readonly WorldDatabaseReader reader; private readonly MapPalette materials; private readonly MapRenderer renderer; private readonly TilePyramidBuilder pyramid;
-    private readonly MapAuthStore auth; private readonly PoiStore pois; private readonly AnnouncementStore announcements;
+    private readonly MapAuthStore auth; private readonly PoiStore pois; private readonly AnnouncementStore announcements; private readonly ExplorationStore exploration; private readonly AllianceStore alliances;
     private readonly SemaphoreSlim poiWrites = new(1, 1);
     private readonly PoiImageStore poiImages;
     private readonly CancellationTokenSource stop = new(); private readonly LiveEventHub events = new();
@@ -35,12 +35,13 @@ public sealed partial class ServerMapWebServer : IDisposable
     private readonly object maintenanceGate = new();
     private Task maintenance = Task.CompletedTask;
     private bool maintenanceStarted;
+    private int nativeExplorationChanged, explorationGroupsChanged;
     private readonly DateTimeOffset startedAt = DateTimeOffset.UtcNow;
     private HttpListener? listener;
 
     public ServerMapWebServer(ICoreServerAPI api, ServerMapConfig config, string root, WorldDatabaseReader reader, MapPalette materials, MapAuthStore auth, PoiStore pois, AnnouncementStore announcements)
     {
-        this.api = api; this.config = config; this.root = root; this.reader = reader; this.materials = materials; this.auth = auth; this.pois = pois; this.announcements = announcements;
+        this.api = api; this.config = config; this.root = root; this.reader = reader; this.materials = materials; this.auth = auth; this.pois = pois; this.announcements = announcements; exploration = new ExplorationStore(root); alliances = new AllianceStore(root);
         poiImages = new PoiImageStore(Path.Combine(root, "poi-images"));
         trackStore = new PlayerTrackStore(Path.Combine(root, "player-tracks"));
         teleportQuota = new DailyTeleportQuota(Path.Combine(root, "teleport-quota.json"));
@@ -97,6 +98,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             if (path == "api/v1/auth/login" && context.Request.HttpMethod == "POST") { Login(context); return; }
             if (path == "api/v1/auth/logout" && context.Request.HttpMethod == "POST") { auth.Logout(context.Request.Cookies["servermap_auth"]?.Value); context.Response.Headers["Set-Cookie"] = "servermap_auth=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict"; Json(context, new { authenticated = false }, true); return; }
             if (path == "api/v1/auth/me") { var principal = Principal(context.Request); Json(context, principal == null ? new { authenticated = false } : new { authenticated = true, name = principal.PlayerName, admin = principal.IsAdmin }, true); return; }
+            if (path == "api/v1/allies") { HandleAllies(context); return; }
             if (path == "api/v1/announcement") { HandleAnnouncement(context); return; }
             if (path == "api/v1/status") { Json(context, Status(), true); return; }
             if (path == "api/v1/search") { Json(context, Search(context.Request.QueryString["q"], Principal(context.Request)), true); return; }
@@ -109,6 +111,8 @@ public sealed partial class ServerMapWebServer : IDisposable
             if (path == "api/v1/settings") { Json(context, Settings(), true); return; }
             if (path == "api/v1/layers/manifest") { Json(context, Manifest()); return; }
             if (path.StartsWith("api/v1/layers/", StringComparison.OrdinalIgnoreCase)) { var name = path[14..]; if (!Layers.Contains(name, StringComparer.OrdinalIgnoreCase)) { NotFound(context); return; } Json(context, Layer(name, context.Request.QueryString["bbox"], Principal(context.Request)), true); return; }
+            if (path == "api/v1/fog/regions") { ServeFogRegions(context); return; }
+            if (path.StartsWith("api/v1/fog/", StringComparison.OrdinalIgnoreCase)) { ServeFogTile(context, path[11..]); return; }
             if (path.StartsWith("api/v1/tiles/", StringComparison.OrdinalIgnoreCase)) { ServePyramidTile(context, path[13..]); return; }
             if (path.StartsWith("api/v1/2d/", StringComparison.OrdinalIgnoreCase)) { ServeLegacyTile(context, path[10..]); return; }
             if (path == "api/v1/players") { Json(context, Players(Principal(context.Request)), true); return; }
@@ -129,17 +133,70 @@ public sealed partial class ServerMapWebServer : IDisposable
         if (parts.Length != 3 || !Renderers.Contains(parts[0], StringComparer.OrdinalIgnoreCase) || parts[1] != "0" || !TryTileName(parts[2], out var x, out var z)) { NotFound(context); return; }
         ServeTile(context, parts[0], 0, x, z);
     }
+    private void ServeFogTile(HttpListenerContext context, string route)
+    {
+        var parts = route.Split('/');
+        if (parts.Length != 2 || !int.TryParse(parts[0], out var zoom) || !TryTileName(parts[1], out var x, out var z) || zoom is < 0 or > TilePyramidBuilder.MaxZoom) { NotFound(context); return; }
+        var principal = Principal(context.Request); var management = Management;
+        if (!management.FogEnabled) { context.Response.Headers["Vary"] = "Cookie"; ServeBytes(context, TransparentTile, "image/png", "no-store"); return; }
+        var bypass = principal?.IsAdmin == true && management.AdminsBypassFog;
+        var bytes = exploration.FogTile(zoom, x, z, principal?.PlayerUid, management.ShareExploration, bypass, api.World.AllOnlinePlayers.OfType<IServerPlayer>(), uid => alliances.IsAllied(principal!.PlayerUid, uid));
+        context.Response.Headers["Vary"] = "Cookie"; ServeBytes(context, bytes, "image/png", "no-store");
+    }
+    private void ServeFogRegions(HttpListenerContext context)
+    {
+        context.Response.Headers["Vary"] = "Cookie";
+        var principal = Principal(context.Request);
+        bool Number(string key, out double value) => double.TryParse(context.Request.QueryString[key], NumberStyles.Float, CultureInfo.InvariantCulture, out value) && double.IsFinite(value);
+        if (!Number("minX", out var minX) || !Number("minZ", out var minZ) || !Number("maxX", out var maxX) || !Number("maxZ", out var maxZ)) { Error(context, 400, "Invalid bounds"); return; }
+        var management = Management;
+        var coverage = baseTiles["sepia"].Keys.Where(tile => Intersects(tile.X * 512d, tile.Z * 512d, tile.X * 512d + 512, tile.Z * 512d + 512, (minX, minZ, maxX, maxZ))).Select(tile => new { x = tile.X, z = tile.Z }).ToArray();
+        if (!management.FogEnabled) { Json(context, new { enabled = false, cellSize = ExplorationStore.CellSize, bypass = true, cells = Array.Empty<object>(), coverage }, true); return; }
+        if (principal == null) { Json(context, new { enabled = true, cellSize = ExplorationStore.CellSize, bypass = false, cells = Array.Empty<object>(), coverage }, true); return; }
+        if (principal.IsAdmin && management.AdminsBypassFog) { Json(context, new { enabled = true, cellSize = ExplorationStore.CellSize, bypass = true, cells = Array.Empty<object>(), coverage }, true); return; }
+        var cells = exploration.VisibleCells(principal.PlayerUid, minX, minZ, maxX, maxZ, management.ShareExploration, api.World.AllOnlinePlayers.OfType<IServerPlayer>(), uid => alliances.IsAllied(principal.PlayerUid, uid));
+        Json(context, new { enabled = true, cellSize = ExplorationStore.CellSize, bypass = false, cells = cells.Select(cell => new { x = cell.X, z = cell.Z }).ToArray(), coverage }, true);
+    }
     private void ServeTile(HttpListenerContext context, string rendererName, int zoom, int x, int z)
     {
         if (Math.Abs((long)x) > 1_048_576 || Math.Abs((long)z) > 1_048_576) { NotFound(context); return; }
         var path = Path.Combine(root, "2d", rendererName.ToLowerInvariant(), zoom.ToString(CultureInfo.InvariantCulture), $"{x}_{z}.png");
+        var principal = Principal(context.Request); var management = Management;
+        var bypass = principal?.IsAdmin == true && management.AdminsBypassFog;
         var exists = File.Exists(path);
         var bytes = exists ? File.ReadAllBytes(path) : TransparentTile;
-        if (MapVisibility.ShouldMaskTiles(Principal(context.Request)?.IsAdmin == true, context.Request.QueryString["hideRegions"]))
-            bytes = MapVisibility.MaskTile(bytes, zoom, x, z, notebook.Regions);
+        if (management.FogEnabled && !bypass)
+        {
+            bytes = principal == null ? TransparentTile : exploration.MaskTile(bytes, zoom, x, z, principal.PlayerUid, management.ShareExploration, api.World.AllOnlinePlayers.OfType<IServerPlayer>(), uid => alliances.IsAllied(principal.PlayerUid, uid));
+        }
+        // Exploration bypass must still honor the administrator's hidden-region preview.
+        if (MapVisibility.ShouldMaskTiles(principal?.IsAdmin == true, context.Request.QueryString["hideRegions"])) bytes = MapVisibility.MaskTile(bytes, zoom, x, z, notebook.Regions);
         context.Response.Headers["Vary"] = "Cookie";
         ServeBytes(context, bytes, "image/png", "no-store");
     }
+
+    public bool HasOwnExploration(string uid, long cell) => exploration.ContainsOwnCell(uid, cell);
+    public void RecordVerifiedExploration(IServerPlayer player, IEnumerable<long> cells)
+    {
+        if (exploration.UpdateGroups(player)) Interlocked.Exchange(ref explorationGroupsChanged, 1);
+        if (exploration.RecordNativeChunks(player, cells)) Interlocked.Exchange(ref nativeExplorationChanged, 1);
+    }
+
+    private void RefreshExplorationGroups()
+    {
+        foreach (var player in api.World.AllOnlinePlayers.OfType<IServerPlayer>())
+        {
+            try { if (exploration.UpdateGroups(player)) Interlocked.Exchange(ref explorationGroupsChanged, 1); }
+            catch (Exception ex) { api.Logger.Warning("ServerMap exploration group save failed: {0}", ex.Message); }
+        }
+        // Coalesce generation batches to one event per tick. Never broadcast player IDs or coordinates.
+        // A group change may revoke access; additive exploration must not invalidate active teleport quotes.
+        if (Interlocked.Exchange(ref explorationGroupsChanged, 0) != 0) events.Publish("visibility", new { changed = true });
+        if (Interlocked.Exchange(ref nativeExplorationChanged, 0) != 0) events.Publish("exploration", new { changed = true });
+    }
+
+    private bool FogVisible(MapAuthStore.Principal? principal, double x, double z) => !Management.FogEnabled || principal != null
+        && (principal.IsAdmin && Management.AdminsBypassFog || exploration.IsVisible(principal.PlayerUid, x, z, Management.ShareExploration, api.World.AllOnlinePlayers.OfType<IServerPlayer>(), uid => alliances.IsAllied(principal.PlayerUid, uid)));
     private static bool TryTileName(string value, out int x, out int z)
     {
         x = z = 0; if (!value.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) return false;
@@ -158,9 +215,11 @@ public sealed partial class ServerMapWebServer : IDisposable
         // Never retain map admin access merely because root was present when
         // the password/session was created. Use the game's current authority.
         var player = api.World.AllOnlinePlayers.FirstOrDefault(p => p.PlayerUID == principal.PlayerUid);
+        // A known live/offline game role overrides the historical account flag,
+        // including false after demotion. Never OR the old flag into a denial.
         var admin = player?.HasPrivilege("root") ?? (api.World is Vintagestory.Server.ServerMain server
             && api.PlayerData.GetPlayerDataByUid(principal.PlayerUid) is Vintagestory.Server.ServerPlayerData data
-            && data.HasPrivilege("root", server.Config.RolesByCode));
+            ? data.HasPrivilege("root", server.Config.RolesByCode) : principal.IsAdmin);
         return principal with { IsAdmin = admin };
     }
 
@@ -423,7 +482,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             version = 12,
             serverName = api.Server.Config.ServerName,
             updatedAt = startedAt,
-            serverMapVersion = "0.3.4",
+            serverMapVersion = "0.3.5",
             poiZoomRanges = true,
             tileVersion = typeof(ServerMapWebServer).Assembly.ManifestModule.ModuleVersionId.ToString("N"),
             colorVersion = materials.ClientColormapVersion,
@@ -447,7 +506,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             // Flat aliases keep the metadata easy to consume for lightweight
             // custom web roots that do not understand the nested objects.
             serverVersion = GameVersion.LongGameVersion,
-            mapVersion = "0.3.4",
+            mapVersion = "0.3.5",
             mapSize = $"{mapSizeX} × {mapSizeZ} × {mapSizeY}",
             cacheSizeBytes = cacheBytes,
             renderTimeMs = RenderMilliseconds,
@@ -481,11 +540,56 @@ public sealed partial class ServerMapWebServer : IDisposable
     private object Players(MapAuthStore.Principal? principal)
     {
         if (!config.PublicPlayers || Management.Layer("players").Forbidden) return Array.Empty<object>();
-        return api.World.AllOnlinePlayers.Select(player => principal == null
-            ? (object)new { id = player.PlayerUID, name = player.PlayerName, online = true }
-            : (principal.IsAdmin || principal.PlayerUid == player.PlayerUID) && player.Entity?.Pos is { } pos && CanView(principal, pos.X, pos.Z)
+        if (principal == null) return Array.Empty<object>();
+        return api.World.AllOnlinePlayers.Select(player =>
+            (principal.IsAdmin || principal.PlayerUid == player.PlayerUID) && player.Entity?.Pos is { } pos && CanView(principal, pos.X, pos.Z)
                 ? new { id = player.PlayerUID, name = player.PlayerName, online = true, x = player.Entity?.Pos.X, y = player.Entity?.Pos.Y, z = player.Entity?.Pos.Z }
                 : new { id = player.PlayerUID, name = player.PlayerName, online = true, x = (double?)null, y = (double?)null, z = (double?)null }).ToArray();
+    }
+    private object Allies(MapAuthStore.Principal? principal)
+    {
+        if (principal == null) return new { enabled = Management.ShareExploration, members = Array.Empty<object>() };
+        var snapshot = alliances.Snapshot(principal.PlayerUid);
+        var members = snapshot.Allies.Select(uid =>
+        {
+            var player = api.World.AllOnlinePlayers.FirstOrDefault(p => p.PlayerUID == uid);
+            var key = ClientAvatars?.GetLastKey(uid) ?? alliances.Avatar(uid);
+            return new { uid, name = player?.PlayerName ?? auth.PlayerName(uid) ?? uid, online = player != null,
+                avatar = (player == null ? null : PlayerAvatar(player)) ?? (key == null ? null : "api/v1/avatars/" + key + ".png") };
+        }).OrderBy(p => p.name).ToArray();
+        return new { enabled = Management.ShareExploration, mapId = snapshot.MapId, members };
+    }
+    private void HandleAllies(HttpListenerContext context)
+    {
+        var principal = Principal(context.Request); if (context.Request.HttpMethod == "GET") { Json(context, Allies(principal), true); return; }
+        if (principal == null) { Error(context, 401, "Login required"); return; }
+        if (context.Request.HttpMethod != "POST") { Error(context, 405, "Method not allowed"); return; }
+        if (context.Request.Headers["X-ServerMap-Request"] != "1") { Error(context, 403, "Missing request header"); return; }
+        try
+        {
+            using var document = ReadJson(context.Request, 4096); var root = document.RootElement;
+            if (Principal(context.Request)?.PlayerUid != principal.PlayerUid) { Error(context, 401, "Login required"); return; }
+            string Field(string name) => root.ValueKind == JsonValueKind.Object && root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString()! : throw new ArgumentException("Invalid alliance request");
+            var action = Field("action");
+            if (action == "add")
+            {
+                if (!Management.ShareExploration) { Error(context, 403, "Exploration sharing is disabled"); return; }
+                alliances.Join(principal.PlayerUid, Field("mapId"));
+            }
+            else if (action == "remove")
+            {
+                // Revocation remains available even while sharing is disabled.
+                if (!alliances.Remove(principal.PlayerUid, Field("uid"))) { Error(context, 404, "Player is not joined"); return; }
+            }
+            else { Error(context, 400, "Invalid alliance action"); return; }
+            events.Publish("visibility", new { changed = true });
+            Json(context, Allies(principal), true);
+        }
+        catch (KeyNotFoundException ex) { Error(context, 404, ex.Message); }
+        catch (ArgumentException ex) { Error(context, 400, ex.Message); }
+        catch (JsonException) { Error(context, 400, "Invalid alliance request"); }
+        catch (InvalidDataException) { Error(context, 400, "Invalid alliance request"); }
+        catch (InvalidOperationException ex) { Error(context, 409, ex.Message); }
     }
     private object Layer(string name, string? bbox, MapAuthStore.Principal? principal)
     {
@@ -544,8 +648,8 @@ public sealed partial class ServerMapWebServer : IDisposable
         foreach (var point in translocators.Values)
         {
             var targetX = point.TargetX; var targetZ = point.TargetZ;
-            var sourceVisible = principal?.IsAdmin == true || MapVisibility.Visible(notebook.Regions, point.X, point.Z);
-            var targetVisible = principal?.IsAdmin == true || MapVisibility.Visible(notebook.Regions, targetX, targetZ);
+            var sourceVisible = CanView(principal, point.X, point.Z);
+            var targetVisible = CanView(principal, targetX, targetZ);
             var sourceKey = FormattableString.Invariant($"{point.X},{point.Y},{point.Z}");
             var targetKey = FormattableString.Invariant($"{targetX},{point.TargetY},{targetZ}");
             var pairKey = string.CompareOrdinal(sourceKey, targetKey) <= 0 ? sourceKey + "|" + targetKey : targetKey + "|" + sourceKey;
@@ -558,7 +662,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             var safeSourceZ = sourceVisible ? point.Z : targetZ;
             var safeTargetX = targetVisible ? targetX : point.X;
             var safeTargetZ = targetVisible ? targetZ : point.Z;
-            var lineVisible = principal?.IsAdmin == true || MapVisibility.TranslocatorLineVisible(notebook.Regions, point.X, point.Z, targetX, targetZ);
+            var lineVisible = sourceVisible && targetVisible && (principal?.IsAdmin == true || MapVisibility.TranslocatorLineVisible(notebook.Regions, point.X, point.Z, targetX, targetZ));
             var safeId = principal?.IsAdmin == true || sourceVisible
                 ? point.Id
                 : $"translocator-{targetX}-{point.TargetY}-{targetZ}";
@@ -597,16 +701,20 @@ public sealed partial class ServerMapWebServer : IDisposable
         {
             var fingerprint = PlayerMapSyncSystem.Appearance(player);
             var clientKey = fingerprint == null ? null : ClientAvatars?.GetKey(player.PlayerUID, fingerprint);
-            if (clientKey != null) return "api/v1/avatars/" + clientKey + ".png";
+            if (clientKey != null) return RememberPlayerAvatar(player.PlayerUID, clientKey);
             if (avatars == null) return null;
             var parts = player.Entity.WatchedAttributes.GetTreeAttribute("skinConfig")?.GetTreeAttribute("appliedParts");
             if (parts == null) return null;
             var appearance = new LocalAvatarRenderer.Appearance(parts.GetString("baseskin", "skin20"), parts.GetString("eyecolor", "acid-green"),
                 parts.GetString("hairbase", "bald"), parts.GetString("hairextra", "none"), parts.GetString("mustache", "none"), parts.GetString("beard", "none"), parts.GetString("haircolor", "cordovan"));
             var key = avatars.Request(appearance);
-            return key == null ? null : "api/v1/avatars/" + key + ".png";
+            return key == null ? null : RememberPlayerAvatar(player.PlayerUID, key);
         }
         catch { return null; }
+    }
+    private string RememberPlayerAvatar(string uid, string key)
+    {
+        alliances.RememberAvatar(uid, key); return "api/v1/avatars/" + key + ".png";
     }
     private ConcurrentDictionary<(int X, int Z), byte> LoadBaseTiles(string rendererName)
     {
@@ -796,7 +904,7 @@ public sealed partial class ServerMapWebServer : IDisposable
                 if (waypointListener != 0) { api.Event.UnregisterGameTickListener(waypointListener); waypointListener = 0; }
                 if (trackingListener != 0) { api.Event.UnregisterGameTickListener(trackingListener); trackingListener = 0; }
                 foreach (var track in trackStore.Active) trackStore.Stop(track.Id, "server-stopped");
-                stop.Cancel(); events.Dispose(); avatars?.Dispose(); ClientAvatars?.Dispose(); Mounts.Dispose();
+                stop.Cancel(); events.Dispose(); avatars?.Dispose(); ClientAvatars?.Dispose(); Mounts.Dispose(); exploration.Dispose(); alliances.Dispose();
                 try { listener?.Stop(); listener?.Close(); } catch { }
             }
             return maintenance;

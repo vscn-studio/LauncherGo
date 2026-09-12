@@ -26,6 +26,7 @@
   const rangeOverlaps=(a,b)=>a.minZoom<=b.maxZoom&&a.maxZoom>=b.minZoom;
   const higherLimit=markers=>markers.length?Math.min(...markers.map(m=>m.minZoom))-1:3;
   const appearance=m=>({borderOpacity:m?.borderOpacity??.25,fillOpacity:m?.fillOpacity??.08,textOpacity:m?.textOpacity??.58});
+  const editableRects=m=>m.editRects??m.rects;
   const pixelRect=(a,b)=>{const x1=Math.floor(Math.min(a.x,b.x)),z1=Math.floor(Math.min(a.z,b.z));return [x1,z1,Math.max(x1+1,Math.ceil(Math.max(a.x,b.x))),Math.max(z1+1,Math.ceil(Math.max(a.z,b.z)))];};
   const contains=(r,p)=>p.x>=r[0]&&p.x<r[2]&&p.z>=r[1]&&p.z<r[3];
   const bounds=rects=>[Math.min(...rects.map(r=>r[0])),Math.min(...rects.map(r=>r[1])),Math.max(...rects.map(r=>r[2])),Math.max(...rects.map(r=>r[3]))];
@@ -33,6 +34,9 @@
   // selection fragments. Coordinate compression costs O(n²), not world area.
   function largestRectangle(rects){
     if(!rects.length)return null;
+    // Exploration can fragment a saved area far beyond the editor's limit.
+    // Keep label placement bounded and wholly inside a visible fragment.
+    if(rects.length>MAX_RECTS)return rects.reduce((best,r)=>(r[2]-r[0])*(r[3]-r[1])>(best[2]-best[0])*(best[3]-best[1])?r:best);
     const xs=[...new Set(rects.flatMap(r=>[r[0],r[2]]))].sort((a,b)=>a-b),zs=[...new Set(rects.flatMap(r=>[r[1],r[3]]))].sort((a,b)=>a-b);
     const xi=new Map(xs.map((v,i)=>[v,i])),zi=new Map(zs.map((v,i)=>[v,i])),events=zs.map(()=>[]),diff=new Int32Array(xs.length+1),heights=new Float64Array(xs.length);
     for(const [x1,z1,x2,z2] of rects){events[zi.get(z1)].push([xi.get(x1),xi.get(x2),1]);events[zi.get(z2)].push([xi.get(x1),xi.get(x2),-1]);}
@@ -91,7 +95,7 @@
     async function refresh(){
       if(!ready||document.hidden||pending)return;pending=true;const captured=epoch;
       try{const next=await request();if(captured!==epoch)return;if(!Array.isArray(next.markers)||!Number.isSafeInteger(next.revision))throw Error('unavailable');loaded=true;if(JSON.stringify(next)!==JSON.stringify(data)){data=next;for(const id of selected)if(!data.markers.some(m=>m.id===id))selected.delete(id);render();renderToolbar();}}
-      catch{if(captured===epoch&&!loaded){data={revision:0,markers:[]};render();}}finally{pending=false;}
+      catch{if(captured===epoch&&!loaded){data={revision:0,markers:[]};render();}}finally{pending=false;if(captured!==epoch)void refresh();}
     }
     function rangeInputs(prefix,min,max,limit=15){
       const wrapper=el('div',{className:'zoom-range'}),low=el('input',{id:prefix+'Min',type:'number',min:'4',max:String(limit),step:'1',required:true,value:String(min)}),high=el('input',{id:prefix+'Max',type:'number',min:'4',max:String(limit),step:'1',required:true,value:String(max)});
@@ -103,8 +107,8 @@
     function applyRange(range){
       if(!validRange(range.minZoom,range.maxZoom)||draft.sourceIds&&range.maxZoom>higherLimit(selection()))throw Error('invalidRange');
       if(range.minZoom===draft.minZoom&&range.maxZoom===draft.maxZoom)return;
-      let source=draft.rects;if(draft.sourceIds){source=[];for(const r of selection().flatMap(m=>m.rects))source=paint(source,r,false);}
-      const rects=cut(source,data.markers.filter(m=>m.id!==draft.id&&rangeOverlaps(m,range)).flatMap(m=>m.rects));
+      let source=draft.rects;if(draft.sourceIds){source=[];for(const r of selection().flatMap(editableRects))source=paint(source,r,false);}
+      const rects=cut(source,data.markers.filter(m=>m.id!==draft.id&&rangeOverlaps(m,range)).flatMap(editableRects));
       undo.push({minZoom:draft.minZoom,maxZoom:draft.maxZoom,rects:draft.rects});if(undo.length>32)undo.shift();redo=[];draft={...draft,...range,rects};render();
     }
     function visible(marker){return map.getZoom()>=marker.minZoom&&map.getZoom()<=marker.maxZoom;}
@@ -114,7 +118,7 @@
       const style=appearance(marker),chosen=selected.has(marker.id),svg=svgEl('svg',{viewBox:`${b[0]} ${b[1]} ${b[2]-b[0]} ${b[3]-b[1]}`,preserveAspectRatio:'none','aria-label':marker.name||t('add'),role:'img'});svg.dataset.areaId=marker.id||'draft';svg.dataset.selected=String(chosen);
       const shape=marker.rects.map(([x1,z1,x2,z2])=>`M${x1} ${z1}H${x2}V${z2}H${x1}Z`).join('');
       svg.append(svgEl('path',{d:shape,fill:marker.color,'fill-opacity':isDraft?Math.max(.12,style.fillOpacity):style.fillOpacity,stroke:'none'}));
-      const geo=geometry(marker.rects),segments=geo.edges.map(([x1,z1,x2,z2])=>[gameLatLng(x1,z1),gameLatLng(x2,z2)]),edgeOptions={pane:isDraft?'areaMarkerDraft':'areaMarkerEdges',renderer:isDraft?draftEdgeRenderer:edgeRenderer,weight:2,lineCap:'round',lineJoin:'round',smoothFactor:0,interactive:false,bubblingMouseEvents:false,areaMarkerId:marker.id||'draft'};
+      const geo=geometry(marker.rects),segments=(isDraft?geo.edges:marker.borders??geo.edges).map(([x1,z1,x2,z2])=>[gameLatLng(x1,z1),gameLatLng(x2,z2)]),edgeOptions={pane:isDraft?'areaMarkerDraft':'areaMarkerEdges',renderer:isDraft?draftEdgeRenderer:edgeRenderer,weight:2,lineCap:'butt',lineJoin:'round',smoothFactor:0,interactive:false,bubblingMouseEvents:false,areaMarkerId:marker.id||'draft'};
       // Native Leaflet paths use screen-space projection/strokes like claim areas.
       // They are not resized or half-clipped at the world-sized SVG's outer edge.
       L.polyline(segments,{...edgeOptions,className:'area-marker-boundary',color:marker.color,opacity:isDraft?.85:style.borderOpacity}).addTo(target);
@@ -167,8 +171,8 @@
       if(!data.zoomRanges){tell('unavailable');return;}
       const sources=selection(),range={minZoom:mergeMin,maxZoom:mergeMax};if(sources.length<2||!validRange(mergeMin,mergeMax)||mergeMax>higherLimit(sources)){tell('noHigher');return;}
       try{
-        let rects=[];for(const r of sources.flatMap(m=>m.rects))rects=paint(rects,r,false);
-        rects=cut(rects,data.markers.filter(m=>rangeOverlaps(m,range)).flatMap(m=>m.rects));if(!rects.length){tell('empty');return;}
+        let rects=[];for(const r of sources.flatMap(editableRects))rects=paint(rects,r,false);
+        rects=cut(rects,data.markers.filter(m=>rangeOverlaps(m,range)).flatMap(editableRects));if(!rects.length){tell('empty');return;}
         const ids=sources.map(m=>m.id);cancelOtherTools();cancel();for(const id of ids)selected.add(id);
         draft={...appearance(),id:'',name:'',color:'#9cbdc7',...range,sourceIds:ids,rects,revision:data.revision};
         savedHandlers=Object.fromEntries(['dragging','doubleClickZoom','boxZoom','touchZoom'].map(k=>[k,!!map[k]?.enabled()]));map.doubleClickZoom.disable();setTool('pan');render();finishDialog();
@@ -192,8 +196,8 @@
       context.classList.remove('show');if(!getAuth().admin||busy)return;await refresh();if(!loaded||!data.zoomRanges){tell('unavailable');return;}if(!getAuth().admin)return;
       cancelOtherTools();cancel();map.closePopup();marker=marker?data.markers.find(m=>m.id===marker.id):null;
       const band=marker?[marker.minZoom,marker.maxZoom]:BANDS.find(b=>map.getZoom()>=b[0]&&map.getZoom()<=b[1])||BANDS[3];
-      draft={...appearance(marker),id:marker?.id||'',name:marker?.name||'',color:marker?.color||'#9cbdc7',minZoom:band[0],maxZoom:band[1],rects:marker?.rects.map(r=>r.slice())||[],revision:data.revision};
-      if(marker){const b=bounds(marker.rects);map.fitBounds([gameLatLng(b[0],b[1]),gameLatLng(b[2],b[3])],{padding:[50,100],maxZoom:15,animate:false});}
+      draft={...appearance(marker),id:marker?.id||'',name:marker?.name||'',color:marker?.color||'#9cbdc7',minZoom:band[0],maxZoom:band[1],rects:marker?editableRects(marker).map(r=>r.slice()):[],revision:data.revision};
+      if(marker){const b=bounds(draft.rects);map.fitBounds([gameLatLng(b[0],b[1]),gameLatLng(b[2],b[3])],{padding:[50,100],maxZoom:15,animate:false});}
       savedHandlers=Object.fromEntries(['dragging','doubleClickZoom','boxZoom','touchZoom'].map(k=>[k,!!map[k]?.enabled()]));map.doubleClickZoom.disable();map.boxZoom.disable();map.touchZoom?.disable();setTool('select');render();
     }
     function finishDialog(){
@@ -227,7 +231,7 @@
     const rect=pixelRect;
     mapEl.addEventListener('pointerdown',e=>{if(!draft||tool==='pan'||e.button!==0||e.target.closest('.leaflet-control,.leaflet-popup')||!modal.hidden)return;stopEvent(e);if(pointer)return;pointer={id:e.pointerId,start:point(e)};mapEl.setPointerCapture(e.pointerId);},true);
     mapEl.addEventListener('pointermove',e=>{if(!pointer||e.pointerId!==pointer.id)return;stopEvent(e);const r=rect(pointer.start,point(e)),latLngs=[gameLatLng(r[0],r[1]),gameLatLng(r[2],r[3])];if(!rubber)rubber=L.rectangle(latLngs,{pane:'areaMarkerDraft',renderer:L.svg({pane:'areaMarkerDraft'}),color:tool==='erase'?'#ef8989':'#fff',weight:1,fillOpacity:.14,interactive:false}).addTo(draftGroup);else rubber.setBounds(latLngs);},true);
-    mapEl.addEventListener('pointerup',e=>{if(!pointer||e.pointerId!==pointer.id)return;stopEvent(e);const r=rect(pointer.start,point(e));pointer=null;try{mapEl.releasePointerCapture(e.pointerId);}catch{}try{if(r.some(v=>Math.abs(v)>32000000))throw Error('complex');const occupied=data.markers.filter(m=>m.id!==draft.id&&rangeOverlaps(m,draft)).flatMap(m=>m.rects),next=paint(draft.rects,r,tool==='erase',occupied);if(JSON.stringify(next)!==JSON.stringify(draft.rects)){undo.push({minZoom:draft.minZoom,maxZoom:draft.maxZoom,rects:draft.rects});if(undo.length>32)undo.shift();redo=[];draft.rects=next;}}catch(error){tell(error.message);}renderDraft();renderToolbar();},true);
+    mapEl.addEventListener('pointerup',e=>{if(!pointer||e.pointerId!==pointer.id)return;stopEvent(e);const r=rect(pointer.start,point(e));pointer=null;try{mapEl.releasePointerCapture(e.pointerId);}catch{}try{if(r.some(v=>Math.abs(v)>32000000))throw Error('complex');const occupied=data.markers.filter(m=>m.id!==draft.id&&rangeOverlaps(m,draft)).flatMap(editableRects),next=paint(draft.rects,r,tool==='erase',occupied);if(JSON.stringify(next)!==JSON.stringify(draft.rects)){undo.push({minZoom:draft.minZoom,maxZoom:draft.maxZoom,rects:draft.rects});if(undo.length>32)undo.shift();redo=[];draft.rects=next;}}catch(error){tell(error.message);}renderDraft();renderToolbar();},true);
     mapEl.addEventListener('pointercancel',()=>{pointer=null;renderDraft();});
     for(const event of ['click','dblclick','contextmenu'])mapEl.addEventListener(event,e=>{if(draft&&tool!=='pan'&&!e.target.closest('.leaflet-control,.leaflet-popup'))stopEvent(e);},true);
     map.on('moveend zoomend resize',schedule);

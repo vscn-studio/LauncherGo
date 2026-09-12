@@ -29,8 +29,8 @@ async function main(){
     if(req.method()==='POST'){const p=req.postDataJSON();writes.push(p);return json({...track,id:'track1'});}
     return json(u.searchParams.has('id')?track:deleted?[]:[track]);
    }
-   if(n.endsWith('/poi-image')){images.push(u.searchParams.get('size'));return route.fulfill({path:path.join(root,'assets/sky.png'),contentType:'image/png'});}
-   if(n.includes('/tiles/'))return route.fulfill({path:path.join(root,'assets/sky.png'),contentType:'image/png'});
+   if(n.endsWith('/poi-image')){images.push(u.searchParams.get('size'));return route.fulfill({path:path.join(root,'assets/icons/spawn.png'),contentType:'image/png'});}
+   if(n.includes('/tiles/'))return route.fulfill({path:path.join(root,'assets/icons/spawn.png'),contentType:'image/png'});
    if(n.endsWith('/area-markers'))return json({revision:0,markers:[]});
    if(n.startsWith('/api/'))return json([]);
    const file=path.resolve(root,n==='/'?'index.html':n.slice(1));assert.ok(file.startsWith(root+path.sep));let body=await fs.readFile(file);

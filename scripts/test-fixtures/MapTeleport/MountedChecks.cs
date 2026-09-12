@@ -96,7 +96,7 @@ static class MountedChecks
                     : (pos.Y<95 || dry&&pos.Y==98 || shallow&&pos.X>9000&&pos.Y==98 || obstacle&&pos.X==10001&&pos.Y==100 ? stone:air),
                 _=>Proxy.Default(m.ReturnType)
             });
-            var notifications=0;var failBroadcast=false;Action? onLoad=null;
+            var notifications=0;var loads=0;var failBroadcast=false;Action? onLoad=null;
             var gameEvents=Proxy.Make<IServerEventAPI>((m,a)=>{
                 if(m.Name=="EnqueueMainThreadTask")((Action)a![0]!)();
                 return Proxy.Default(m.ReturnType);
@@ -108,7 +108,7 @@ static class MountedChecks
             var api=Proxy.Make<ICoreServerAPI>((m,a)=>m.Name switch {
                 "get_World"=>world,"get_Event"=>gameEvents,"get_ModLoader"=>Proxy.Make<IModLoader>(),"get_Logger"=>Proxy.Make<ILogger>(),
                 "get_Network"=>Proxy.Make<IServerNetworkAPI>((nm,na)=>{if(nm.Name=="BroadcastEntityPacket"){notifications++;if(failBroadcast)throw new IOException("Injected network failure");}return Proxy.Default(nm.ReturnType);}),
-                "get_WorldManager"=>Proxy.Make<IWorldManagerAPI>((wm,wa)=>{if(wm.Name=="LoadChunkColumnPriority"){onLoad?.Invoke();((ChunkLoadOptions)wa![2]!).OnLoaded();}return Proxy.Default(wm.ReturnType);}),
+                "get_WorldManager"=>Proxy.Make<IWorldManagerAPI>((wm,wa)=>{if(wm.Name=="LoadChunkColumnPriority"){loads++;onLoad?.Invoke();((ChunkLoadOptions)wa![2]!).OnLoaded();}return Proxy.Default(wm.ReturnType);}),
                 _=>Proxy.Default(m.ReturnType)
             });
             mount.Api=api;mount.World=world;
@@ -117,7 +117,7 @@ static class MountedChecks
             var cookies=players.Select(p=>"servermap_auth="+auth.Login(p.PlayerName,"mounted-test-password")!.Value.SessionId).ToArray();
             var settings=new AnnouncementStore(Path.Combine(root,"announcement.json"));
             var policy=new PlayerTeleportSettings{EffectsEnabled=true,HealthLoss=2,HungerLoss=20,StabilityLossPercent=10};
-            settings.Save("","https://example.com","test",playerGearTeleportEnabled:true,playerTeleport:policy);
+            settings.Save("","https://example.com","test",playerGearTeleportEnabled:true,playerTeleport:policy,management:new(){FogEnabled=false});
             var notebook=new MapNotebookStore(Path.Combine(root,"notebook.json"));
             var links=new TranslocatorIndex(Path.Combine(root,"links.json"),_=>{});links.ReplaceChunk(3,3,3,[new(100,100,100,10000,100,10000)]);
             var web=(ServerMapWebServer)RuntimeHelpers.GetUninitializedObject(typeof(ServerMapWebServer));
@@ -125,6 +125,21 @@ static class MountedChecks
             foreach(var name in new[]{"teleportQuotes","mountedTeleportQuotes","teleportRequests","layerVersions"})
             {var f=typeof(ServerMapWebServer).GetField(name,BindingFlags.Instance|BindingFlags.NonPublic)!;f.SetValue(web,Activator.CreateInstance(f.FieldType));}
             Field("api",api);Field("auth",auth);Field("announcements",settings);Field("notebook",notebook);Field("translocators",links);Field("stop",new CancellationTokenSource());Field("waypointRequests",new SemaphoreSlim(8,8));
+            Field("config",new ServerMap.Configuration.ServerMapConfig());
+            Field("teleportQuota",new DailyTeleportQuota(Path.Combine(root,"quota.json")));
+            using var exploration=new ExplorationStore(root);using var alliances=new AllianceStore(root);
+            Field("exploration",exploration);Field("alliances",alliances);
+            // Seed the real reader's map-chunk cache, avoiding any world/SQLite
+            // mutation while exercising the ordinary quote and execute handlers.
+            var reader=(ServerMap.World.WorldDatabaseReader)RuntimeHelpers.GetUninitializedObject(typeof(ServerMap.World.WorldDatabaseReader));
+            var readerType=reader.GetType();readerType.GetField("queryGate",BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(reader,new object());
+            var mapField=readerType.GetField("mapChunks",BindingFlags.Instance|BindingFlags.NonPublic)!;
+            var mapCache=Activator.CreateInstance(mapField.FieldType,4)!;mapField.SetValue(reader,mapCache);
+            var mapChunk=(Vintagestory.Server.ServerMapChunk)RuntimeHelpers.GetUninitializedObject(typeof(Vintagestory.Server.ServerMapChunk));
+            var heights=Enumerable.Repeat((ushort)98,1024).ToArray();
+            typeof(Vintagestory.Server.ServerMapChunk).GetField("RainHeightMap")!.SetValue(mapChunk,heights);
+            mapField.FieldType.GetMethod("GetOrAdd")!.Invoke(mapCache,[new ServerMap.World.ChunkKey(312,0,312).ToIndex(),new System.Func<long,Vintagestory.Server.ServerMapChunk?>(_=>mapChunk)]);
+            Field("reader",reader);
             var handler=typeof(ServerMapWebServer).GetMethod("HandleTeleport",BindingFlags.Instance|BindingFlags.NonPublic)!;
             async Task<JsonElement> Call(bool preview,object body,int caller=0)
             {
@@ -136,7 +151,11 @@ static class MountedChecks
             }
             Task<JsonElement> Quote(int caller=0)=>Call(true,new{x=10000,z=10000},caller);
             async Task Error(string code, bool preview=true, string? id=null,int caller=0)
-            {var result=preview?await Quote(caller):await Call(false,new{quoteId=id},caller);Require(result.TryGetProperty("error",out var e)&&e.GetString()==code,$"Expected {code}: {result}");}
+            {
+                var before=party.Select((p,i)=>(p.Pos.X,p.Pos.Y,p.Pos.Z,p.Health.Health,inventories[i][0].StackSize)).ToArray();
+                var result=preview?await Quote(caller):await Call(false,new{quoteId=id},caller);Require(result.TryGetProperty("error",out var e)&&e.GetString()==code,$"Expected {code}: {result}");
+                Require(before.SequenceEqual(party.Select((p,i)=>(p.Pos.X,p.Pos.Y,p.Pos.Z,p.Health.Health,inventories[i][0].StackSize))),"Rejected teleport changed a player's position, health or inventory");
+            }
             await Error("teleport_mount_disabled");
             settings.Save("","https://example.com","test",mountedTeleportEnabled:true);
             Require(new AnnouncementStore(Path.Combine(root,"announcement.json")).Current.MountedTeleportEnabled,"Mount toggle did not persist");
@@ -192,6 +211,78 @@ static class MountedChecks
                 throw new Exception("Effect-phase failure accepted");
             }
             catch(IOException){reversible.Restore();Require(inventories[0][0].StackSize==10&&mount.Pos.X==100.5&&party[0].Health.Health==20,"Effect-phase failure did not restore fees, effects and position");}
+            // Destination permissions run through the real HTTP quote/execute
+            // pipeline, including changes during asynchronous chunk loading.
+            ResetParty();admin[0]=admin[1]=false;
+            settings.Save("","","test",playerGearTeleportEnabled:true);
+            void Fog(bool enabled,bool share=false,bool bypass=true) => settings.Save("","","test",management:
+                (settings.Current.Management??new()) with {FogEnabled=enabled,ShareExploration=share,AdminsBypassFog=bypass});
+            void Explore(ExplorationStore store,int index)
+            {
+                store.RecordNativeChunks(players[index], from x in Enumerable.Range(308,9) from z in Enumerable.Range(308,9)
+                    select ServerMap.Network.MapExplorationProtocol.Cell(x,z));
+            }
+            Fog(true);var beforeLoads=loads;await Error(TeleportAccess.Unexplored);
+            Require(loads==beforeLoads,"Unexplored mounted quote loaded destination chunks");
+            Explore(exploration,1);await Error(TeleportAccess.Unexplored); // A knowledgeable passenger cannot authorize the driver.
+            using var driverExploration=new ExplorationStore(Path.Combine(root,"driver-only-exploration"));
+            Field("exploration",driverExploration);Explore(driverExploration,0);
+            Require(!driverExploration.IsVisible("passenger",10000,10000,false,players),"Passenger unexpectedly explored the target");
+            q=await Quote();Require(q.GetProperty("allowed").GetBoolean(),"Driver exploration did not permit carrying an unexplored passenger");
+            success=await Call(false,new{quoteId=q.GetProperty("quoteId").GetString()});
+            Require(success.GetProperty("ok").GetBoolean()&&party[1].Pos.X==10001.5,"Unexplored passenger was not carried with the explored driver");
+            Require(inventories[0][0].StackSize==8&&inventories[1][0].StackSize==9,"Exploration exception changed party fees");
+            ResetParty();Field("exploration",exploration); // Only the passenger has own exploration in this store.
+            Fog(true,true);alliances.Join("driver",alliances.Snapshot("passenger").MapId);
+            q=await Quote();Require(q.GetProperty("allowed").GetBoolean(),"Allowed shared exploration was ignored");
+            alliances.Remove("driver","passenger");await Error(TeleportAccess.Unexplored,false,q.GetProperty("quoteId").GetString());
+            alliances.Join("driver",alliances.Snapshot("passenger").MapId);q=await Quote();
+            onLoad=()=>alliances.Remove("driver","passenger");await Error(TeleportAccess.Unexplored,false,q.GetProperty("quoteId").GetString());onLoad=null;
+            Fog(false);q=await Quote();Fog(true);await Error(TeleportAccess.Unexplored,false,q.GetProperty("quoteId").GetString());
+            Fog(false);q=await Quote();onLoad=()=>Fog(true);await Error(TeleportAccess.Unexplored,false,q.GetProperty("quoteId").GetString());onLoad=null;
+            Fog(false);
+            var pixelHidden=notebook.SaveRegion(null,"Hidden target pixel",[new(10000,10000,10001,10001)],false);
+            beforeLoads=loads;await Error(TeleportAccess.HiddenRegion);Require(loads==beforeLoads,"Hidden mounted quote loaded destination chunks");
+            notebook.RemoveRegion(pixelHidden.Id);
+            q=await Quote();pixelHidden=notebook.SaveRegion(null,"New hidden pixel",[new(10000,10000,10001,10001)],false);
+            await Error(TeleportAccess.HiddenRegion,false,q.GetProperty("quoteId").GetString());notebook.RemoveRegion(pixelHidden.Id);
+            q=await Quote();string? lateHidden=null;
+            onLoad=()=>lateHidden??=notebook.SaveRegion(null,"Late hidden passenger pixel",[new(10001,10000,10002,10001)],false).Id;
+            await Error(TeleportAccess.HiddenRegion,false,q.GetProperty("quoteId").GetString());onLoad=null;notebook.RemoveRegion(lateHidden!);
+            admin[0]=true;pixelHidden=notebook.SaveRegion(null,"Admin driver, ordinary passenger",[new(10001,10000,10002,10001)],false);
+            await Error(TeleportAccess.HiddenRegion);notebook.RemoveRegion(pixelHidden.Id);admin[0]=false;
+            Console.WriteLine("PASS mounted visibility: driver-only exploration, unexplored passenger travel, passenger-only denial, shared exploration revocation, master switch, hidden pixels/overhang and post-load rechecks without payment");
+
+            // The same destination rules apply when the player is on foot.
+            party[0].Seat(null);passengers[0]=null;
+            Fog(true);await Error(TeleportAccess.Unexplored);
+            Fog(false);pixelHidden=notebook.SaveRegion(null,"Solo hidden pixel",[new(10000,10000,10001,10001)],false);
+            await Error(TeleportAccess.HiddenRegion);notebook.RemoveRegion(pixelHidden.Id);
+            q=await Quote();Require(q.GetProperty("allowed").GetBoolean()&&!q.TryGetProperty("mounted",out _),"Ordinary solo quote failed");
+            Fog(true);await Error(TeleportAccess.Unexplored,false,q.GetProperty("quoteId").GetString());
+            Fog(false);q=await Quote();onLoad=()=>Fog(true);await Error(TeleportAccess.Unexplored,false,q.GetProperty("quoteId").GetString());onLoad=null;
+            Fog(false);q=await Quote();lateHidden=null;
+            onLoad=()=>lateHidden??=notebook.SaveRegion(null,"Late solo hidden pixel",[new(10000,10000,10001,10001)],false).Id;
+            await Error(TeleportAccess.HiddenRegion,false,q.GetProperty("quoteId").GetString());onLoad=null;notebook.RemoveRegion(lateHidden!);
+            Field("exploration",driverExploration);Fog(true);q=await Quote();
+            success=await Call(false,new{quoteId=q.GetProperty("quoteId").GetString()});
+            Require(success.GetProperty("ok").GetBoolean()&&party[0].Pos.X==10000.5&&inventories[0][0].StackSize==9,"Explored solo teleport failed or overcharged");
+            ResetParty();Field("exploration",exploration);Fog(false);
+            // Visible centre, but the player's collision footprint overlaps a hidden pixel.
+            var originalBox=party[0].CollisionBox;party[0].CollisionBox=new(-.3f,0,-.3f,.75f,1.8f,.3f);
+            pixelHidden=notebook.SaveRegion(null,"Solo collision overhang",[new(10001,10000,10002,10001)],false);
+            await Error(TeleportAccess.HiddenRegion);notebook.RemoveRegion(pixelHidden.Id);party[0].CollisionBox=originalBox;
+            // A cookie created as admin must not retain that authority after demotion.
+            admin[0]=true;auth.SetPassword(players[0],"mounted-test-password");
+            cookies[0]="servermap_auth="+auth.Login("driver","mounted-test-password")!.Value.SessionId;
+            q=await Quote();Require(q.GetProperty("admin").GetBoolean(),"Admin quote missing");
+            admin[0]=false;pixelHidden=notebook.SaveRegion(null,"Demoted admin target",[new(10000,10000,10001,10001)],false);
+            await Error(TeleportAccess.HiddenRegion,false,q.GetProperty("quoteId").GetString());await Error(TeleportAccess.HiddenRegion);notebook.RemoveRegion(pixelHidden.Id);
+            Fog(true);await Error(TeleportAccess.Unexplored);
+            admin[0]=true;Fog(true,bypass:false);await Error(TeleportAccess.Unexplored);
+            Fog(true);q=await Quote();onLoad=()=>admin[0]=false;
+            await Error(TeleportAccess.Unexplored,false,q.GetProperty("quoteId").GetString());onLoad=null;
+            Console.WriteLine("PASS solo visibility: hidden and unexplored rejection, lossless late denial, explored success, collision overhang and cached-admin demotion");
             Console.WriteLine("PASS admin/ordinary mixed parties, revoked admin, policy changes, hidden passenger overhang, all-admin exemption and post-move effect rollback");
             Console.WriteLine("PASS mounted HTTP pipeline: disabled/default persistence, actual controller, 2x/1x quote/payment/effects, insufficient/lethal passenger, driver/seat/offline/setting/motion changes, unsafe/unloaded/late-obstructed destination, rollback, native seated multi-player sync and replay rejection");
         }

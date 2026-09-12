@@ -211,5 +211,88 @@ public sealed class MapNotebookTests : IDisposable
             properties = new { kind = "translocator" }
         });
 
+    [Fact]
+    public void PixelRegionsUnionAsOneRecordAndEditWithoutChangingIdentity()
+    {
+        var store = Store();
+        var region = store.SaveRegion(null, "Cross", [new(-8,-2,8,2), new(-2,-8,2,8), new(-8,-2,8,2)], true);
+        Assert.Single(store.Regions);
+        Assert.Equal(112, region.Rects!.Sum(r => (r.MaxX-r.MinX)*(r.MaxZ-r.MinZ)));
+        Assert.True(Assert.Single(Store().Regions).HideInGame);
+        Assert.False(MapVisibility.Visible(store.Regions, 0, 7));
+        Assert.True(MapVisibility.Visible(store.Regions, 7, 7)); // Bounding-box corner is not hidden.
+        Assert.True(MapVisibility.Visible(store.Regions, 2, 7)); // Exclusive right edge.
+        var edited = store.SaveRegion(region.Id, "Edited", [new(-8,-2,-1,2), new(1,-2,8,2)], false);
+        Assert.Equal(region.Id, edited.Id); Assert.Single(Store().Regions); Assert.False(edited.HideInGame);
+        Assert.True(MapVisibility.Visible(store.Regions, 0, 0));
+        var result = Assert.Single(NotebookSearch.Find("Edited", "admin", true, new(), store));
+        Assert.False(MapVisibility.Visible(store.Regions, result.x, result.z));
+    }
+    [Fact]
+    public void PixelRegionHolesAndSinglePixelsMaskExactlyAtNativeAndParentZooms()
+    {
+        var store = Store();
+        store.SaveRegion(null, "Ring", [new(10,10,20,12), new(10,18,20,20), new(10,12,12,18), new(18,12,20,18), new(24,24,25,25)]);
+        Assert.True(MapVisibility.RouteVisible(store.Regions, [[13,13],[17,17]]));
+        Assert.True(MapVisibility.GeometryVisible(store.Regions, JsonSerializer.SerializeToElement(new[] {13,13})));
+        var pixels = Enumerable.Repeat((byte)255, 512*512*4).ToArray();
+        var png = PngEncoder.Encode(512,512,pixels);
+        var native = PngEncoder.Decode(MapVisibility.MaskTile(png,0,0,0,store.Regions));
+        byte[] At(byte[] data,int x,int z) => data.AsSpan((z*512+x)*4,4).ToArray();
+        foreach (var (x,z) in new[]{(10,10),(19,19),(24,24)}) Assert.Equal(new byte[4], At(native,x,z));
+        foreach (var (x,z) in new[]{(9,10),(20,19),(15,15),(25,24),(24,25)}) Assert.Equal(new byte[]{255,255,255,255},At(native,x,z));
+        var parent = PngEncoder.Decode(MapVisibility.MaskTile(png,1,0,0,store.Regions));
+        Assert.Equal(new byte[4],At(parent,12,12));
+        Assert.Equal(new byte[]{255,255,255,255},At(parent,13,12));
+        Assert.Equal(new byte[]{255,255,255,255},At(parent,7,7));
+    }
+    [Fact]
+    public void PixelRegionArraysAreIsolatedAndInvalidSavesAreAtomic()
+    {
+        var store=Store(); AreaMarkerStore.Rect[] input=[new(0,0,1,1),new(2,2,3,3)];
+        var region=store.SaveRegion(null,"Pixels",input);
+        input[0]=new(20,20,21,21); region.Rects![0]=input[0]; store.Regions[0].Rects![0]=input[0];
+        Assert.False(MapVisibility.Visible(store.Regions,0,0));
+        var before=File.ReadAllText(Path.Combine(root,"notebook.json"));
+        Assert.Throws<ArgumentException>(()=>store.SaveRegion(region.Id,"Invalid",Array.Empty<AreaMarkerStore.Rect>()));
+        Assert.Throws<ArgumentException>(()=>store.SaveRegion(region.Id,"Invalid",[new(0,0,0,1)]));
+        Assert.Throws<ArgumentException>(()=>store.SaveRegion(region.Id,"Invalid",[new(-32_000_001,0,1,1)]));
+        Assert.Throws<ArgumentException>(()=>store.SaveRegion(region.Id,"Invalid",new AreaMarkerStore.Rect[1025]));
+        Assert.Throws<KeyNotFoundException>(()=>store.SaveRegion("missing","Missing",[new(1,1,2,2)]));
+        Assert.Equal(before,File.ReadAllText(Path.Combine(root,"notebook.json")));
+        Assert.Single(store.Regions);
+    }
+    [Fact]
+    public void PixelRegionsPreserveNeighboursAndLegacyInclusiveTerrain()
+    {
+        var store=Store(); var legacy=store.SaveRegion(null,"Old",0,0,1,1);
+        Assert.Null(Assert.Single(Store().Regions).Rects);
+        var next=store.SaveRegion(null,"Around",[new(-1,-1,3,3)]);
+        Assert.Equal(12,next.Rects!.Sum(r=>(r.MaxX-r.MinX)*(r.MaxZ-r.MinZ)));
+        Assert.All(next.Rects!,r=>Assert.False(AreaMarkerStore.Intersects(r,new(0,0,2,2))));
+        var edited=store.SaveRegion(legacy.Id,"Old edited",MapNotebookStore.PixelRects(legacy));
+        Assert.Equal(legacy.Id,edited.Id); Assert.Equal(2,Store().Regions.Length);
+        Assert.False(MapVisibility.Visible([edited],1,1)); Assert.True(MapVisibility.Visible([edited],2,1));
+    }
+    [Fact]
+    public void PrivacySnapshotsCompareGeometryByValueForTeleportQuotes()
+    {
+        var store=Store(); var original=store.SaveRegion(null,"Ring",[new(0,0,1,3),new(2,0,3,3)]);
+        var quoted=store.Regions;
+        Assert.True(quoted.SequenceEqual(store.Regions));Assert.True(quoted.SequenceEqual(Store().Regions));
+        Assert.Equal(quoted[0].GetHashCode(),store.Regions[0].GetHashCode());
+        store.SaveRegion(original.Id,"Ring",[new(0,0,3,1),new(0,2,3,3)]); // Same ID/bounds/name, different pixels.
+        Assert.False(quoted.SequenceEqual(store.Regions));
+    }
+    [Fact]
+    public void LegacyMaskKeepsTheInclusiveLastPixelAtCoordinateLimit()
+    {
+        var region=new MapNotebookStore.Region("old","",31_999_999,0,32_000_000,1);
+        var png=PngEncoder.Encode(512,512,Enumerable.Repeat((byte)255,512*512*4).ToArray());
+        var masked=PngEncoder.Decode(MapVisibility.MaskTile(png,0,62_500,0,[region]));
+        Assert.Equal(new byte[4],masked[..4]); // The inclusive endpoint is the next tile's first pixel.
+        Assert.Equal(new byte[]{255,255,255,255},masked[4..8]);
+    }
+
     public void Dispose() { if (Directory.Exists(root)) Directory.Delete(root,true); }
 }

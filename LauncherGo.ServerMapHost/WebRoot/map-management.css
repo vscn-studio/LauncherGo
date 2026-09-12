@@ -1,5 +1,6 @@
 #manageForm { width:min(1000px,calc(100vw - 28px));padding:0;overflow:hidden; }
 #mapActions button[hidden] { display:none!important; }
+#starCanvas { position:absolute;inset:0;z-index:0;width:100%;height:100%;pointer-events:none; }
 .layer-locked { opacity:.65; }
 @media(min-width:701px) and (pointer:fine) {
   #topDock { position:fixed;z-index:1002;top:10px;left:50%;transform:translateX(-50%);display:flex;align-items:flex-start;gap:6px;width:max-content;max-width:calc(100vw - 40px); }
@@ -44,6 +45,21 @@
 .map-dialog[open] { display:flex;flex-direction:column; }
 .map-dialog-body { padding:12px 18px 18px;overflow:auto;overscroll-behavior:contain;min-height:0; }
 .map-dialog-body>p[role=status]:empty { display:none; }
+#alliesPanel { margin-top:6px;padding-top:6px;border-top:1px solid #ffffff25;font-size:12px; }
+#alliesPanel[hidden] { display:none; }
+#alliesForm { display:flex;gap:5px; }
+#alliesForm input { width:0;flex:1; }
+#alliesPanel button { flex:none;white-space:nowrap; }
+#alliesPanel button:disabled { opacity:.45;cursor:default; }
+.ally-own-id { display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px;margin-top:9px; }
+#searchBox #ownMapId { width:100%;box-sizing:border-box;font:10px/1.5 Consolas,monospace;cursor:text;padding:5px 2px; }
+#alliesStatus { margin:8px 0;color:var(--muted);line-height:1.5;overflow-wrap:anywhere; }
+.allies-list { display:grid;gap:5px;max-height:min(260px,30dvh);overflow:auto;overscroll-behavior:contain; }
+.ally-row { display:flex;align-items:center;gap:7px;padding:5px 0;border-top:1px solid #ffffff18; }
+.ally-row img { width:32px;height:32px;flex:none;object-fit:contain;image-rendering:pixelated; }
+.ally-name { flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.ally-empty { color:var(--muted);margin:4px 0; }
+@media(pointer:coarse) { #alliesPanel button,#alliesForm input { min-height:40px; } }
 .map-dialog::backdrop { background:#000a;backdrop-filter:blur(3px); }
 .map-dialog header { display:flex;flex:none;align-items:center;gap:14px;margin:0;padding:6px 10px 6px 18px;min-height:56px;border-bottom:1px solid #ffffff18; }
 .map-dialog header h2 { flex:1;font-size:18px;margin:0;line-height:1.3; }

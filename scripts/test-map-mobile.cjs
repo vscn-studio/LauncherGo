@@ -37,7 +37,7 @@ async function main() {
         if (name.endsWith('/announcement')) return json({ html: '<h3>服务器公告</h3><p>Mobile layout test</p>' });
         if (['/api/v1/my-waypoints','/api/v1/routes','/api/v1/hidden-regions'].includes(name)) return json([]);
         if (name.endsWith('/render-progress')) return json({phase:'idle',queued:0});
-        if (name.includes('/tiles/')) return route.fulfill({ path: path.join(webRoot, 'assets/sky.png'), contentType: 'image/png' });
+        if (name.includes('/tiles/')) return route.fulfill({ path: path.join(webRoot, 'assets/icons/spawn.png'), contentType: 'image/png' });
         const file = path.resolve(webRoot, name === '/' ? 'index.html' : name.slice(1));
         assert.ok(file.startsWith(webRoot + path.sep));
         let body = await fs.readFile(file);

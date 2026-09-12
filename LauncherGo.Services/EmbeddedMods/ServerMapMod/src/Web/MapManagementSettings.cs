@@ -8,6 +8,9 @@ public sealed record MapManagementSettings
     public int ImageMaxMb { get; init; } = 10;
     public int PoiQuota { get; init; } = 10;
     public int DailyTeleports { get; init; } = 0;
+    public bool FogEnabled { get; init; } = true;
+    public bool ShareExploration { get; init; } = false;
+    public bool AdminsBypassFog { get; init; } = true;
     public Dictionary<string, LayerRule> Layers { get; init; } = new();
     public static bool SupportsScale(string id) => id is "players" or "mounts" or "translocators";
     public static string NormalizeImageType(string type) => type.Trim().TrimStart('.').ToLowerInvariant() switch { "jpg" => "jpeg", "apng" => "png", var value => value };

@@ -112,13 +112,28 @@ public sealed partial class ServerMapWebServer
         var current = Principal(context.Request);
         if (current?.PlayerUid != uid) throw new TeleportError(401, "Login required");
         if (!current.IsAdmin && !announcements.Current.PlayerGearTeleportEnabled) throw new TeleportError(403, "teleport_disabled");
-        if (!CanView(current, x, z)) throw new TeleportError(403, "Hidden region");
+        CheckTeleportDestination(current, x, z);
         CheckTeleportQuota(uid, current.IsAdmin);
         var player = OnlineTeleportPlayer(uid);
+        // A visible centre does not permit the arriving player to overlap a
+        // hidden pixel with their collision box (including single-pixel regions).
+        CheckTeleportHiddenBounds(current.IsAdmin, MountedTeleportRules.Bounds(MountedTeleportRules.Boxes(player.Entity)).At(x, 0, z));
         var pos = player.Entity.Pos;
         var settings = (announcements.Current.PlayerTeleport ?? new()).Validate();
         return new(new(pos.X, pos.Y, pos.Z), current.IsAdmin, TemporalGearPayment.Count(TeleportSlots(player), settings.ItemCode), settings,
             current.IsAdmin ? null : TeleportEffects.Prepare(player.Entity, settings).Error);
+    }
+    private void CheckTeleportDestination(MapAuthStore.Principal principal, double x, double z)
+    {
+        var management = Management;
+        var reason = TeleportAccess.Denial(management, principal.IsAdmin, !MapVisibility.Visible(notebook.Regions, x, z), () =>
+            exploration.IsVisible(principal.PlayerUid, x, z, management.ShareExploration, api.World.AllOnlinePlayers.OfType<IServerPlayer>(), uid => alliances.IsAllied(principal.PlayerUid, uid)));
+        if (reason != null) throw new TeleportError(403, reason);
+    }
+    private void CheckTeleportHiddenBounds(bool adminOnly, MountedTeleportRules.Box bounds)
+    {
+        if (!adminOnly && notebook.Regions.Any(r => MapVisibility.Intersects(r, bounds.X1, bounds.Z1, bounds.X2, bounds.Z2)))
+            throw new TeleportError(403, TeleportAccess.HiddenRegion);
     }
     private IServerPlayer OnlineTeleportPlayer(string uid, bool allowMounted = false)
     {

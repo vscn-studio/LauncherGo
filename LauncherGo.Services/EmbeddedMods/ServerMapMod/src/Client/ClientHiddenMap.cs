@@ -27,7 +27,7 @@ public sealed class ClientHiddenMap : IDisposable
     public void Apply(ServerHiddenMapPacket packet)
     {
         var values = packet.Bounds;
-        if (values == null || values.Length > 256 * 4 || values.Length % 4 != 0 || values.Any(v => !double.IsFinite(v) || Math.Abs(v) > 32_000_000)) return;
+        if (values == null || values.Length > 8192 * 4 || values.Length % 4 != 0 || values.Any(v => !double.IsFinite(v) || Math.Abs(v) > 32_000_000)) return;
         for (var i = 0; i < values.Length; i += 4) if (values[i + 2] <= values[i] || values[i + 3] <= values[i + 1]) return;
         bounds = values.ToArray();
     }
@@ -38,7 +38,7 @@ public sealed class ClientHiddenMap : IDisposable
         var px = (mouse.X - map.Bounds.renderX) / map.Bounds.InnerWidth; var py = (mouse.Y - map.Bounds.renderY) / map.Bounds.InnerHeight;
         if (px < 0 || px > 1 || py < 0 || py > 1) return false;
         var view = map.CurrentBlockViewBounds; var x = view.X1 + px * (view.X2 - view.X1); var z = view.Z1 + py * (view.Z2 - view.Z1);
-        for (var i = 0; i < bounds.Length; i += 4) if (x >= bounds[i] && x <= bounds[i + 2] && z >= bounds[i + 1] && z <= bounds[i + 3]) return true;
+        for (var i = 0; i < bounds.Length; i += 4) if (x >= bounds[i] && x < bounds[i + 2] && z >= bounds[i + 1] && z < bounds[i + 3]) return true;
         return false;
     }
     private static void AfterMouseMove(GuiDialogWorldMap __instance, MouseEvent args)

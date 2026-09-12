@@ -9,7 +9,7 @@ async function main() {
     for (const owner of ['', 'admin', 'player']) for (const width of [1280, 390]) {
       const page = await browser.newPage({viewport:{width,height:844},locale:'zh-CN'});
       const errors=[]; page.on('pageerror', e=>errors.push(e.message));
-      let cost=owner==='admin'?0:2, available=3, posts=0, failure=false, quoteBody, enabled=false,mounted=false,mountedEnabled=false;
+      let cost=owner==='admin'?0:2, available=3, posts=0, failure=false, quoteBody, quoteError=null, quoteHold=null, quoteStarted=null, enabled=false,mounted=false,mountedEnabled=false;
       const defaults={itemCode:'game:gear-temporal',itemsPerJump:1,effectsEnabled:false,stabilityLossPercent:0,hungerLoss:0,healthLoss:0};
       let policy={...defaults};
       await page.addInitScript(()=>{window.EventSource=class extends EventTarget{constructor(){super();window.testEvents=this;}close(){}};});
@@ -23,6 +23,8 @@ async function main() {
         if(name.endsWith('/announcement')){if(route.request().method()==='POST'){assert.equal(owner,'admin');const body=route.request().postDataJSON();enabled=body.playerGearTeleportEnabled;policy=body.playerTeleport;mountedEnabled=body.mountedTeleportEnabled;}return json({html:'',mountedTeleportEnabled:mountedEnabled,playerGearTeleportEnabled:enabled,playerTeleport:policy});}
         if(name.endsWith('/teleport/quote')){
           quoteBody=route.request().postDataJSON();assert.equal(route.request().headers()['x-servermap-request'],'1');
+          if(quoteError)return json({error:quoteError},403);
+          if(quoteHold){quoteStarted();await quoteHold;}
           const reason=owner!=='admin'&&cost===0?'teleport_zero_jumps':cost>available?'teleport_gears':null;
           return json({quoteId:'server-quote',x:quoteBody.x+.5,y:111,z:quoteBody.z+.5,cost,jumps:cost/policy.itemsPerJump,itemCode:policy.itemCode,settings:policy,available,admin:owner==='admin',allowed:!reason,reason,...(mounted?{mounted:true,participants:[{name:'driver',driver:true,multiplier:2,cost:4,settings:{...policy,effectsEnabled:true,healthLoss:4}},{name:'<img src=x onerror=alert(1)>',driver:false,multiplier:1,cost:2,settings:{...policy,effectsEnabled:true,healthLoss:2}}]}:{})});
         }
@@ -50,6 +52,25 @@ async function main() {
       assert.equal(await page.locator('#teleportSubmit').isEnabled(),true);
       if(owner==='player'){
         assert.match(await page.locator('#teleportDetails').textContent(),/本次消耗: 2/);
+        const nativeRefresh=page.waitForResponse(response=>new URL(response.url()).pathname.endsWith('/fog/regions'));
+        await page.evaluate(()=>window.testEvents.dispatchEvent(new MessageEvent('exploration',{data:'{"changed":true}'})));
+        await nativeRefresh;
+        assert.equal(await page.locator('#teleportSubmit').isEnabled(),true,'Additive native exploration cancelled an otherwise valid teleport quote');
+        for(const [code,message] of [['Hidden region',/不能传送到隐藏区域/],['teleport_unexplored',/未探索区域.*驾驶员/]]){
+          quoteError=code;await page.locator('#teleportRefresh').click();await page.waitForFunction(()=>!document.querySelector('#teleportRefresh').disabled);
+          assert.equal(await page.locator('#teleportSubmit').isEnabled(),false);assert.match(await page.locator('#teleportError').textContent(),message);
+          await page.locator('#teleportForm').evaluate(form=>form.dispatchEvent(new Event('submit',{cancelable:true})));assert.equal(posts,0,'Forbidden destination was submitted');
+        }
+        quoteError=null;
+        let release;const arrived=new Promise(resolve=>quoteStarted=resolve);quoteHold=new Promise(resolve=>release=resolve);
+        await page.locator('#teleportRefresh').click();await arrived;
+        const refreshed=page.waitForResponse('**/api/v1/hidden-regions');
+        await page.evaluate(()=>window.testEvents.dispatchEvent(new MessageEvent('visibility',{data:'{"changed":true}'})));
+        await refreshed;release();quoteHold=null;
+        await page.waitForFunction(()=>!document.querySelector('#teleportRefresh').disabled);
+        assert.equal(await page.locator('#teleportSubmit').isEnabled(),false,'Old quote re-enabled confirmation after a visibility change');
+        assert.match(await page.locator('#teleportError').textContent(),/可见权限已变化/);
+        await page.locator('#teleportRefresh').click();await page.waitForFunction(()=>!document.querySelector('#teleportSubmit').disabled);
         policy={itemCode:'game:gear-rusty',itemsPerJump:3,effectsEnabled:true,stabilityLossPercent:25,hungerLoss:100,healthLoss:2};cost=6;available=9;
         await page.evaluate(policy=>window.testEvents.dispatchEvent(new MessageEvent('settings',{data:JSON.stringify({playerGearTeleportEnabled:true,playerTeleport:policy})})),policy);
         assert.equal(await page.locator('#teleportSubmit').isEnabled(),false,'Policy update must invalidate confirmation');
@@ -89,6 +110,7 @@ async function main() {
         await page.locator('#teleportModal [data-close-modal]').click();
         if(width<700)await page.locator('#mobileMenu').click();
         await page.locator('#manageButton').click();
+        await page.locator('[aria-controls="management-teleport"]').click();
         assert.equal(await page.locator('#mountedTeleportInput').isChecked(),false);
         await page.locator('#mountedTeleportInput').check();
         await page.locator('#playerGearTeleportInput').uncheck();

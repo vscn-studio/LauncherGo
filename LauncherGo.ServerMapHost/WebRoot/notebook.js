@@ -8,6 +8,8 @@
   };
   Object.assign(words.zh,{planRoute:'添加地图轨迹'});
   Object.assign(words.en,{planRoute:'Add map track'});
+  Object.assign(words.zh,{select:'框选',erase:'擦除',pan:'移动地图',regionHelp:'拖拽框选或擦除，精度为 1 方块；多次框选合为一个区域。完成后设置名称并保存，Esc 返回或取消。',regionEmpty:'请选择尚未隐藏的范围。',regionComplex:'选区过于复杂或超出地图范围，请缩小选区。',regionLimit:'隐藏区域几何总量已达上限，请减少选区。'});
+  Object.assign(words.en,{select:'Select',erase:'Erase',pan:'Pan map',regionHelp:'Drag to select or erase at 1-block precision. All strokes form one region. Finish to name and save; Esc goes back or cancels.',regionEmpty:'Select an area that is not already hidden.',regionComplex:'Selection is too complex or outside the map. Select a smaller area.',regionLimit:'Hidden region geometry limit reached. Reduce the selection.'});
   Object.assign(words.zh,{addGameMarker:'添加游戏标记',editMarker:'编辑游戏标记',deleteMarker:'删除游戏标记',shareMarker:'复制标记链接',saveMarkerShare:'保存到游戏标记',sharedMarker:'分享的标记',markerName:'名称',markerText:'说明',pinned:'置顶',suggestNames:'建议已保存名称',icon:'图标',markerSaved:'游戏标记已保存',deleteMarkerConfirm:'删除这个游戏标记？其分享链接也会失效。',markerShareWarning:'拥有链接的人可以查看这个标记。',mapDisabled:'服务器已禁用游戏地图'});
   Object.assign(words.en,{addGameMarker:'Add game marker',editMarker:'Edit game marker',deleteMarker:'Delete game marker',shareMarker:'Copy marker link',saveMarkerShare:'Save to Game markers',sharedMarker:'Shared marker',markerName:'Name',markerText:'Description',pinned:'Pinned',suggestNames:'Suggest saved names',icon:'Icon',markerSaved:'Game marker saved',deleteMarkerConfirm:'Delete this game marker? Its share links will stop working.',markerShareWarning:'Anyone with the link can view this marker.',mapDisabled:'Game map is disabled on this server'});
   Object.assign(words.zh,{deletePoi:'删除地点标记',editPoi:'编辑地点标记',sharePoi:'复制地点链接',shareTranslocator:'复制传送器链接'});
@@ -20,6 +22,7 @@
   words.en.captureEmpty='No map image is available in this selection. Wait for the area to generate or choose another area.';
   function create(options) {
     const { map, api, gameLatLng, gamePoint, getAuth, getMetadata, getLanguage, cancelMeasurement, closePanels, invalidatePrivacy, layerVisibility } = options;
+    const regionGeometry=ServerMapAreas.geometry,mapEl=map.getContainer();
     const text = key => words[getLanguage()]?.[key] || window.ServerMapLocales?.notebook[getLanguage()]?.[key] || words.en[key] || key;
     const el = (tag, props = {}) => Object.assign(document.createElement(tag), props);
     const button = (label, action) => { const b = el('button', { type:'button', className:'notebook-button', textContent:label }); b.onclick = action; return b; };
@@ -46,10 +49,16 @@
     map.getPane('notebookFog').style.pointerEvents = 'none';
     const fogGroup = L.layerGroup().addTo(map);
     const fogRenderer = L.svg({pane:'notebookFog'});
+    map.createPane('notebookRegionDraft');map.getPane('notebookRegionDraft').style.zIndex='660';map.getPane('notebookRegionDraft').style.pointerEvents='none';
+    const regionDraftRenderer=L.svg({pane:'notebookRegionDraft'});
+    map.createPane('notebookRegionRubber');map.getPane('notebookRegionRubber').style.zIndex='661';map.getPane('notebookRegionRubber').style.pointerEvents='none';
+    const regionRubberRenderer=L.svg({pane:'notebookRegionRubber'});
 
     const fogPreferenceKey=`servermap-fog-preview:${location.host}${api}`;
     let ready = false, authEpoch = 0, privacyEpoch = 0, markers = [], routes = [], regions = [], selectedRoute, sharedRoute, sharedId = new URL(location.href).searchParams.get('route');
-    let mode = null, draft = [], redoDraft = [], editingId = null, selectionStart = null, selectionRect, contextPosition, contextRoute, contextRegion, requestBusy = false;
+    let mode = null, draft = [], redoDraft = [], editingId = null, selectionStart = null, selectionRect, regionDraftPieces = [], contextPosition, contextRoute, contextRegion, requestBusy = false;
+    let regionPointer=null,regionHandlers=null,regionEditing=null,regionTool='select',regionUndo=[],regionRedo=[],regionRubber=null;
+    const regionRects=r=>(r.rects||[r]).map(p=>[p.minX,p.minZ,p.maxX,p.maxZ]);
     let markersSignature = '', fogSignature = '', noticeTimer, preview, lastProgress, writing = false;
     const sections = {};
     for (const key of ['myMarkers','myRoutes','hiddenRegions']) {
@@ -91,7 +100,7 @@
     const noticeBox = el('div', { hidden:true }); noticeBox.id = 'notebookNotice'; noticeBox.setAttribute('role','status'); document.body.append(noticeBox);
     const modal = el('div', { className:'modal-backdrop', hidden:true }); modal.id = 'notebookModal'; document.body.append(modal);
     const contextMenu = document.querySelector('#contextMenu'), contextButtons = {};
-    for (const [key, handler] of Object.entries({addGameMarker:()=>markerDialog(),shareMarker:()=>shareMarker(contextMarker),editMarker:()=>markerDialog(contextMarker),deleteMarker:()=>removeMarker(contextMarker),sharePoint:sharePoint,shareRoute:() => shareRoute(contextRoute),editRoute:() => startRoute(contextRoute),deleteRoute:() => removeRoute(contextRoute),captureRegion:selectScreenshot,hideRegion:selectRegion,editRegion:() => regionDialog(contextRegion),removeRegion:() => removeRegion(contextRegion)})) {
+    for (const [key, handler] of Object.entries({addGameMarker:()=>markerDialog(),shareMarker:()=>shareMarker(contextMarker),editMarker:()=>markerDialog(contextMarker),deleteMarker:()=>removeMarker(contextMarker),sharePoint:sharePoint,shareRoute:() => shareRoute(contextRoute),editRoute:() => startRoute(contextRoute),deleteRoute:() => removeRoute(contextRoute),captureRegion:selectScreenshot,hideRegion:selectRegion,editRegion:() => selectRegion(contextRegion),removeRegion:() => removeRegion(contextRegion)})) {
       const b = button('', () => { contextMenu.classList.remove('show'); handler(); }); contextMenu.append(b); contextButtons[key] = b;
     }
     function notice(message) { clearTimeout(noticeTimer); noticeBox.textContent = message; noticeBox.hidden = false; noticeTimer = setTimeout(() => { noticeBox.hidden = true; }, 6000); }
@@ -217,9 +226,12 @@
     }
     function cancelMode() {
       document.dispatchEvent(new Event('servermap-notebook-cancel'));
-      mode=null;draft=[];redoDraft=[];editingId=null;selectionStart=null;draftGroup.clearLayers();selectionRect=null;preview=null;planButton.classList.remove('active');toolbar.hidden=true;
-      map.dragging.enable();map.doubleClickZoom.enable();map.getContainer().style.cursor='';
-      renderRoutes();
+      releaseRegionPointer();mapEl.classList.remove('notebook-region-drawing');
+      regionEditing=null;regionUndo=[];regionRedo=[];
+      mode=null;draft=[];redoDraft=[];editingId=null;selectionStart=null;regionDraftPieces=[];draftGroup.clearLayers();selectionRect=null;preview=null;planButton.classList.remove('active');toolbar.hidden=true;
+      if(regionHandlers){for(const [key,enabled] of Object.entries(regionHandlers))map[key]?.[enabled?'enable':'disable']();regionHandlers=null;}
+      else{map.dragging.enable();map.doubleClickZoom.enable();}mapEl.style.cursor='';
+      renderRoutes();renderFog();
     }
     function startRoute(route) {
       if (!getAuth().authenticated) { document.querySelector('#loginButton').click(); return; }
@@ -242,7 +254,13 @@
         toolbar.append(el('div',{className:'notebook-help',textContent:`${selectedRoute?.name || text('plan')} · ${text('routeHelp')} (${draft.length}/512)`}),undo,redo,button(text('save'),finishRoute),button(text('cancel'),cancelMode));
       }
       else if(mode==='screenshot') toolbar.append(el('div',{className:'notebook-help',textContent:text('captureHelp')}),button(text('cancel'),cancelMode));
-      else if(mode==='region') toolbar.append(el('div',{className:'notebook-help',textContent:text('regionHelp')}),button(text('cancel'),cancelMode));
+      else if(mode==='region') {
+        toolbar.append(el('div',{className:'notebook-help',textContent:(regionEditing?.name?regionEditing.name+' · ':'')+text('regionHelp')}));
+        for(const key of ['select','erase','pan']){const b=button(text(key),()=>setRegionTool(key));b.dataset.regionTool=key;b.setAttribute('aria-pressed',String(regionTool===key));toolbar.append(b);}
+        for(const [key,source,target] of [['undo',regionUndo,regionRedo],['redo',regionRedo,regionUndo]]){const b=button(text(key),()=>{const previous=source.pop();if(!previous)return;target.push(regionDraftPieces);regionDraftPieces=previous;renderRegionDraft();renderToolbar();});b.disabled=!source.length;b.dataset.regionTool=key;toolbar.append(b);}
+        const finish=button(text('finish'),regionDialog);finish.disabled=!regionDraftPieces.length;
+        toolbar.append(finish,button(text('cancel'),cancelMode));
+      }
       else if(sharedMarker){toolbar.append(el('div',{className:'notebook-help',textContent:`${text('sharedMarker')}: ${sharedMarker.name}`}));if(getAuth().authenticated)toolbar.append(button(text('saveMarkerShare'),importMarker));toolbar.append(button(text('shareMarker'),()=>shareMarker(sharedMarker)),button(text('close'),()=>{toolbar.hidden=true;}));}
       else if(sharedRoute) {toolbar.append(el('div',{className:'notebook-help',textContent:`${text('sharedRoute')}: ${sharedRoute.name}`}));if(getAuth().authenticated)toolbar.append(button(text('saveShared'),importShared));toolbar.append(button(text('shareRoute'),()=>shareRoute(sharedRoute)),button(text('close'),()=>{toolbar.hidden=true;}));}
       else toolbar.hidden=true;
@@ -268,7 +286,8 @@
       writing=true;const epoch=authEpoch;safe(async()=>{const route=await request('/routes',{shareId:sharedId});if(epoch!==authEpoch)return;selectedRoute=route;sharedRoute=null;sharedId=null;showSection('myRoutes');const url=new URL(location.href);url.searchParams.delete('route');history.replaceState(null,'',url);toolbar.hidden=true;await refreshPrivate();renderRoutes();notice(text('routeSaved'));}).finally(()=>{writing=false;});
     }
     function addRegionLabel(region) {
-      const width=region.maxX-region.minX,height=region.maxZ-region.minZ;
+      const rects=regionRects(region),fit=regionGeometry.largestRectangle(rects);if(!fit)return;
+      const [minX,minZ,maxX,maxZ]=fit,width=maxX-minX,height=maxZ-minZ;
       if(!(width>0&&height>0))return;
       const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg'),group=document.createElementNS(ns,'g'),label=document.createElementNS(ns,'text');
       svg.setAttribute('viewBox',`0 0 ${width} ${height}`);svg.setAttribute('preserveAspectRatio','none');
@@ -280,7 +299,7 @@
       group.setAttribute('transform',`translate(${width/2} ${height/2}) rotate(${angle*180/Math.PI})`);
       label.textContent=title;label.setAttribute('text-anchor','middle');label.setAttribute('font-size','100');label.setAttribute('y','0');
       group.append(label);svg.append(group);
-      L.svgOverlay(svg,[gameLatLng(region.minX,region.minZ),gameLatLng(region.maxX,region.maxZ)],{pane:'notebookFog',className:'notebook-region-label',interactive:false}).addTo(fogGroup);
+      L.svgOverlay(svg,[gameLatLng(minX,minZ),gameLatLng(maxX,maxZ)],{pane:'notebookFog',className:'notebook-region-label',interactive:false}).addTo(fogGroup);
       const box=label.getBBox(),textWidth=Math.max(1,box.width),textHeight=Math.max(1,box.height);
       const scale=.82*Math.min(width/(textWidth*cos+textHeight*sin),height/(textWidth*sin+textHeight*cos));
       // Scale geometry instead of shrinking the font: browser minimum font
@@ -292,10 +311,10 @@
     function renderFog() {
       fogGroup.clearLayers();const admin=getAuth().admin;map.getPane('notebookFog').style.pointerEvents=admin?'auto':'none';sections.hiddenRegions.section.hidden=!admin;
       for(const region of regions){
-        if(admin&&!sections.hiddenRegions.toggle.checked)continue;
-        const rectangle=L.rectangle([gameLatLng(region.minX,region.minZ),gameLatLng(region.maxX,region.maxZ)],{pane:'notebookFog',renderer:fogRenderer,className:'notebook-fog',stroke:false,fillOpacity:0,interactive:!!admin,bubblingMouseEvents:false}).addTo(fogGroup);
+        if(admin&&(!sections.hiddenRegions.toggle.checked||mode==='region'&&region.id===regionEditing?.id))continue;
+        const rectangle=L.polygon(regionRects(region).map(([x1,z1,x2,z2])=>[gameLatLng(x1,z1),gameLatLng(x2,z1),gameLatLng(x2,z2),gameLatLng(x1,z2)]),{pane:'notebookFog',renderer:fogRenderer,className:'notebook-fog',stroke:false,fillOpacity:0,interactive:!!admin,bubblingMouseEvents:false}).addTo(fogGroup);
         addRegionLabel(region);
-        if(admin){rectangle.on('contextmenu',event=>{if(event.originalEvent)L.DomEvent.stop(event.originalEvent);map.fire('contextmenu',{...event,notebookRegion:region});});const popup=el('div',{className:'notebook-popup'}),actions=el('div',{className:'notebook-popup-actions'});actions.append(routeIconButton('editRegion',()=>regionDialog(region)),routeIconButton('removeRegion',()=>removeRegion(region)));popup.append(el('b',{textContent:region.name}),actions);rectangle.bindPopup(popup);}
+        if(admin){rectangle.on('contextmenu',event=>{if(event.originalEvent)L.DomEvent.stop(event.originalEvent);map.fire('contextmenu',{...event,notebookRegion:region});});const popup=el('div',{className:'notebook-popup'}),actions=el('div',{className:'notebook-popup-actions'});actions.append(routeIconButton('editRegion',()=>selectRegion(region)),routeIconButton('removeRegion',()=>removeRegion(region)));popup.append(el('b',{textContent:region.name}),actions);rectangle.bindPopup(popup);}
       }
 
     }
@@ -335,15 +354,47 @@
       }catch(error){if(controller===captureController)status.textContent=text(words.zh[error.message]?error.message:'captureFailed');}
       finally{clearTimeout(timeout);if(controller===captureController)captureController=null;}
     }
-    function selectRegion() {
-      if(!getAuth().admin)return;cancelMode();cancelMeasurement();closePanels();mode='region';selectionStart=contextPosition||gamePoint(map.getCenter());map.dragging.disable();map.doubleClickZoom.disable();map.getContainer().style.cursor='crosshair';renderToolbar();
+    function releaseRegionPointer(){const pointer=regionPointer;regionPointer=null;regionRubber?.remove();regionRubber=null;if(pointer)try{mapEl.releasePointerCapture(pointer.id);}catch{}}
+    function regionDragRect(point){
+      const rect=regionGeometry.pixelRect(regionPointer.start,point);
+      if(rect.some(v=>!Number.isFinite(v)||Math.abs(v)>32000000))throw Error('regionComplex');
+      return rect;
     }
-    function regionDialog(region) {
-      if(!getAuth().admin||!region)return;
-      const origin=getMetadata().spawn;
-      dialog(text('editRegion'),[{name:'name',label:text('fogName'),value:region.name||text('hiddenRegions')},{name:'hideInGame',label:getLanguage()==='zh'?'是否游戏内隐藏':'Hide on in-game maps',type:'checkbox',value:!!region.hideInGame},...['minX','minZ','maxX','maxZ'].map(name=>({name,label:name,type:'number',value:region[name]-(name.endsWith('X')?origin.x:origin.z)}))],text('confirmFog'),async value=>{
-        const payload={...value,id:region.id};for(const key of ['minX','minZ','maxX','maxZ'])payload[key]+=key.endsWith('X')?origin.x:origin.z;
-        await request('/hidden-regions',payload);cancelMode();await privacyChanged();
+    function regionSelection(point){
+      const rect=regionDragRect(point);
+      const occupied=regions.filter(r=>r.id!==regionEditing?.id).flatMap(regionRects);
+      const next=regionGeometry.paint(regionDraftPieces,rect,regionTool==='erase',occupied);
+      if(next.length+occupied.length>8192)throw Error('regionLimit');return next;
+    }
+    function renderRegionDraft(rects=regionDraftPieces){
+      draftGroup.clearLayers();regionRubber=null;if(!rects.length)return;
+      const minX=Math.min(...rects.map(r=>r[0])),minZ=Math.min(...rects.map(r=>r[1])),maxX=Math.max(...rects.map(r=>r[2])),maxZ=Math.max(...rects.map(r=>r[3]));
+      const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg'),shape=document.createElementNS(ns,'path');
+      svg.setAttribute('viewBox',`${minX} ${minZ} ${maxX-minX} ${maxZ-minZ}`);svg.setAttribute('preserveAspectRatio','none');svg.setAttribute('aria-label',text('hiddenRegions'));
+      // Fill the disjoint union once; shared edges are removed from its outline.
+      shape.setAttribute('d',rects.map(([x1,z1,x2,z2])=>`M${x1} ${z1}H${x2}V${z2}H${x1}Z`).join(''));shape.setAttribute('fill','#fff');shape.setAttribute('fill-opacity','.35');shape.setAttribute('stroke','none');svg.append(shape);
+      L.svgOverlay(svg,[gameLatLng(minX,minZ),gameLatLng(maxX,maxZ)],{pane:'notebookRegionDraft',className:'notebook-region-draft',interactive:false}).addTo(draftGroup);
+      const edges=regionGeometry.boundary(rects).map(([x1,z1,x2,z2])=>[gameLatLng(x1,z1),gameLatLng(x2,z2)]);
+      L.polyline(edges,{pane:'notebookRegionDraft',renderer:regionDraftRenderer,className:'notebook-region-draft-boundary',color:'#fff',weight:1,smoothFactor:0,lineCap:'butt',interactive:false}).addTo(draftGroup);
+    }
+    function setRegionTool(tool){
+      releaseRegionPointer();regionTool=tool;
+      map.dragging[tool==='pan'?'enable':'disable']();map.touchZoom?.[tool==='pan'?'enable':'disable']();
+      mapEl.classList.toggle('notebook-region-drawing',tool!=='pan');renderRegionDraft();renderToolbar();
+    }
+    function selectRegion(region) {
+      if(!getAuth().admin)return;cancelMode();cancelMeasurement();closePanels();map.closePopup();mode='region';
+      regionEditing=region||null;regionDraftPieces=region?regionRects(region):[];
+      regionHandlers=Object.fromEntries(['dragging','doubleClickZoom','boxZoom','touchZoom'].map(key=>[key,!!map[key]?.enabled()]));
+      for(const key of Object.keys(regionHandlers))map[key]?.disable();setRegionTool('select');renderFog();
+    }
+    function regionDialog() {
+      if(!getAuth().admin||mode!=='region'||!regionDraftPieces.length)return;
+      const region=regionEditing,rects=regionDraftPieces.map(([minX,minZ,maxX,maxZ])=>({minX,minZ,maxX,maxZ})),epoch=authEpoch;
+      const fields=[{name:'name',label:text('fogName'),value:region?.name||text('hiddenRegions')},{name:'hideInGame',label:getLanguage()==='zh'?'是否游戏内隐藏':'Hide on in-game maps',type:'checkbox',value:!!region?.hideInGame}];
+      dialog(text('editRegion'),fields,text('confirmFog'),async value=>{
+        await request('/hidden-regions',{...value,id:region?.id,rects});if(epoch!==authEpoch)return;
+        cancelMode();await privacyChanged();
       });
     }
     function removeRegion(region) {if(!region||!getAuth().admin||!confirm(text('confirmRemove')))return;safe(async()=>{await request(`/hidden-regions?id=${encodeURIComponent(region.id)}`,undefined,'DELETE');await privacyChanged();});}
@@ -403,6 +454,10 @@
       closeScreenshot();
       routeGroup.clearLayers();sharedGroup.clearLayers();sharedMarkerGroup.clearLayers();markerGroup.clearLayers();markersSignature='';fogSignature='';
       await refreshFog();await refreshPrivate();if(sharedId)await loadShared(false);if(sharedMarkerId)await loadSharedMarker(false);
+    }
+    async function explorationChanged() {
+      // Additive visibility does not cancel an active draft, screenshot selection or teleport quote.
+      await refreshPrivate();if(sharedId)await loadShared(false);if(sharedMarkerId)await loadSharedMarker(false);
     }
     async function loadShared(fit=true) {
       if(!sharedId)return;const epoch=authEpoch,visibility=privacyEpoch;
@@ -464,7 +519,7 @@
     sections.myRoutes.toggle.onchange=()=>{layerVisibility?.set('notebook:myRoutes',sections.myRoutes.toggle.checked);renderRoutes();};
     sections.hiddenRegions.toggle.onchange=()=>{if(!getAuth().admin)return;try{localStorage.setItem(fogPreferenceKey,sections.hiddenRegions.toggle.checked?'on':'off');}catch{}renderFog();invalidatePrivacy();};
     map.on('contextmenu',event=>{
-      contextMarker=event.notebookMarker||null;contextPosition=gamePoint(event.latlng);contextRoute=event.notebookRoute||null;contextRegion=event.notebookRegion||(getAuth().admin?regions.find(r=>contextPosition.x>=r.minX&&contextPosition.x<=r.maxX&&contextPosition.z>=r.minZ&&contextPosition.z<=r.maxZ):null);
+      contextMarker=event.notebookMarker||null;contextPosition=gamePoint(event.latlng);contextRoute=event.notebookRoute||null;contextRegion=event.notebookRegion||(getAuth().admin?regions.find(r=>regionRects(r).some(([x1,z1,x2,z2])=>contextPosition.x>=x1&&contextPosition.x<x2&&contextPosition.z>=z1&&contextPosition.z<z2)):null);
       contextButtons.shareRoute.hidden=!contextRoute;contextButtons.editRoute.hidden=!getAuth().authenticated||!contextRoute||contextRoute===sharedRoute;contextButtons.deleteRoute.hidden=!getAuth().authenticated||!contextRoute||contextRoute===sharedRoute;
       contextButtons.addGameMarker.hidden=!getAuth().authenticated;contextButtons.shareMarker.hidden=!contextMarker;contextButtons.editMarker.hidden=!getAuth().authenticated||!contextMarker||contextMarker===sharedMarker;contextButtons.deleteMarker.hidden=contextButtons.editMarker.hidden;contextButtons.hideRegion.hidden=!getAuth().admin;contextButtons.editRegion.hidden=!getAuth().admin||!contextRegion;contextButtons.removeRegion.hidden=!getAuth().admin||!contextRegion;
       // Newly added controls can be taller than the base context menu.
@@ -474,21 +529,42 @@
     map.on('click',event=>{
       if(mode==='route'){if(draft.length>=512){notice(text('routeMax'));return;}const p=gamePoint(event.latlng);draft.push([Math.round(p.x),Math.round(p.z)]);redoDraft=[];renderDraft();renderToolbar();}
       else if(mode==='screenshot'){const bounds=L.latLngBounds(gameLatLng(selectionStart.x,selectionStart.z),event.latlng);cancelMode();screenshot(bounds);}
-      else if(mode==='region'){const p=gamePoint(event.latlng),start=selectionStart;if(Math.abs(p.x-start.x)<1||Math.abs(p.z-start.z)<1)return;const region={name:'',minX:Math.floor(Math.min(start.x,p.x)),minZ:Math.floor(Math.min(start.z,p.z)),maxX:Math.ceil(Math.max(start.x,p.x)),maxZ:Math.ceil(Math.max(start.z,p.z))};cancelMode();regionDialog(region);}
     });
     map.on('mousemove',event=>{
       if(mode==='route'&&draft.length){const last=draft.at(-1);if(!preview)preview=L.polyline([],{color:'#ffd000',dashArray:'5 5',weight:2,interactive:false}).addTo(draftGroup);preview.setLatLngs([gameLatLng(...last),event.latlng]);}
-      if((mode==='region'||mode==='screenshot')&&selectionStart){if(!selectionRect)selectionRect=L.rectangle([gameLatLng(selectionStart.x,selectionStart.z),event.latlng],{color:'#fff',fillColor:'#fff',fillOpacity:.5,interactive:false}).addTo(draftGroup);else selectionRect.setBounds([gameLatLng(selectionStart.x,selectionStart.z),event.latlng]);}
+      if(mode==='screenshot'&&selectionStart){if(!selectionRect)selectionRect=L.rectangle([gameLatLng(selectionStart.x,selectionStart.z),event.latlng],{color:'#fff',fillColor:'#fff',fillOpacity:.5,interactive:false}).addTo(draftGroup);else selectionRect.setBounds([gameLatLng(selectionStart.x,selectionStart.z),event.latlng]);}
     });
+    const stopRegionEvent=event=>{event.preventDefault();event.stopImmediatePropagation();};
+    const regionPoint=event=>gamePoint(map.mouseEventToLatLng(event));
+    function previewRegion(point){
+      try{
+        const [x1,z1,x2,z2]=regionDragRect(point),bounds=[gameLatLng(x1,z1),gameLatLng(x2,z2)];
+        // Keep committed strokes unchanged while dragging, like area markers.
+        // Merge or erase only on pointerup so the active rectangle stays visible.
+        if(!regionRubber)regionRubber=L.rectangle(bounds,{pane:'notebookRegionRubber',renderer:regionRubberRenderer,className:'notebook-region-rubber',color:regionTool==='erase'?'#ef8989':'#fff',weight:1,fillOpacity:.14,interactive:false}).addTo(draftGroup);
+        else regionRubber.setBounds(bounds);
+      }catch(error){notice(text(error.message));regionRubber?.remove();regionRubber=null;}
+    }
+    mapEl.addEventListener('pointerdown',event=>{if(mode!=='region'||regionTool==='pan'||event.button!==0||!modal.hidden||event.target.closest('.leaflet-control,.leaflet-popup'))return;stopRegionEvent(event);if(regionPointer)return;regionPointer={id:event.pointerId,start:regionPoint(event)};mapEl.setPointerCapture(event.pointerId);previewRegion(regionPointer.start);},true);
+    mapEl.addEventListener('pointermove',event=>{if(!regionPointer||event.pointerId!==regionPointer.id)return;stopRegionEvent(event);previewRegion(regionPoint(event));},true);
+    mapEl.addEventListener('pointerup',event=>{
+      if(!regionPointer||event.pointerId!==regionPointer.id)return;stopRegionEvent(event);
+      try{const next=regionSelection(regionPoint(event));if(JSON.stringify(next)!==JSON.stringify(regionDraftPieces)){regionUndo.push(regionDraftPieces);if(regionUndo.length>32)regionUndo.shift();regionRedo=[];regionDraftPieces=next;}}catch(error){notice(text(error.message==='complex'?'regionComplex':error.message));}
+      releaseRegionPointer();renderRegionDraft();renderToolbar();
+    },true);
+    for(const event of ['pointercancel','lostpointercapture'])mapEl.addEventListener(event,()=>{if(regionPointer){releaseRegionPointer();renderRegionDraft();}});
+    for(const event of ['click','dblclick','contextmenu'])mapEl.addEventListener(event,e=>{if(mode==='region'&&regionTool!=='pan'&&!e.target.closest('.leaflet-control,.leaflet-popup'))stopRegionEvent(e);},true);
     document.addEventListener('pointerdown',event=>{if(tooltipOwner&&!tooltip.contains(event.target)&&!tooltipOwner.contains(event.target))closeTooltip();});
-    document.addEventListener('keydown',event=>{if(event.key==='Escape'){closeScreenshot();closeTooltip();modal.hidden=true;cancelMode();}});
+    document.addEventListener('keydown',event=>{if(event.key==='Escape'){closeScreenshot();closeTooltip();if(mode==='region'&&!modal.hidden){modal.hidden=true;return;}modal.hidden=true;cancelMode();}
+      if(mode==='region'&&modal.hidden&&(event.ctrlKey||event.metaKey)&&!event.target.closest('input,textarea,select')){const key=event.key.toLowerCase();if(key==='z'||key==='y'){event.preventDefault();toolbar.querySelector(`[data-region-tool="${key==='y'||event.shiftKey?'redo':'undo'}"]`)?.click();}}
+    });
     window.addEventListener('resize',closeTooltip);document.querySelector('#sidebar').addEventListener('scroll',closeTooltip);
     map.on('move zoom resize',closeTooltip);
 
     document.querySelector('#measure').addEventListener('click',()=>{if(mode)cancelMode();});
     document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});
     setInterval(poll,5000);languageChanged();
-    return { cancelMode, isSelectingScreenshot:()=>mode==='screenshot', iconButton:routeIconButton,copyPointLink:sharePoint,hideRegions:()=>!getAuth().admin||sections.hiddenRegions.toggle.checked,focusSearchResult,authChanged,languageChanged,privacyChanged,ready:async()=>{ready=true;await poll();await loadShared();await loadSharedMarker();if(new URL(location.href).searchParams.get('point')==='1'){const p=gamePoint(map.getCenter()),origin=getMetadata().spawn;L.circleMarker(map.getCenter(),{radius:7,color:'#fff',fillColor:'#e66c75',fillOpacity:1}).bindPopup(`X ${Math.round(p.x-origin.x)}, Z ${Math.round(p.z-origin.z)}`).addTo(map).openPopup();}} };
+    return { cancelMode, isSelectingScreenshot:()=>mode==='screenshot', iconButton:routeIconButton,copyPointLink:sharePoint,hideRegions:()=>!getAuth().admin||sections.hiddenRegions.toggle.checked,focusSearchResult,authChanged,languageChanged,privacyChanged,explorationChanged,ready:async()=>{ready=true;await poll();await loadShared();await loadSharedMarker();if(new URL(location.href).searchParams.get('point')==='1'){const p=gamePoint(map.getCenter()),origin=getMetadata().spawn;L.circleMarker(map.getCenter(),{radius:7,color:'#fff',fillColor:'#e66c75',fillOpacity:1}).bindPopup(`X ${Math.round(p.x-origin.x)}, Z ${Math.round(p.z-origin.z)}`).addTo(map).openPopup();}} };
   }
   window.ServerMapNotebook={create};
 })();

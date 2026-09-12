@@ -20,6 +20,10 @@ public static class NotebookSearch
                 yield return new("route", route.Id, route.Name, route.Points[0][0], route.Points[0][1]);
         if (admin)
             foreach (var region in regions)
-                if (Match(region.Name)) yield return new("hidden-region", region.Id, region.Name, (region.MinX + region.MaxX) / 2, (region.MinZ + region.MaxZ) / 2);
+                if (Match(region.Name))
+                {
+                    var rect = MapNotebookStore.PixelRects(region).MaxBy(r => (long)(r.MaxX - r.MinX) * (r.MaxZ - r.MinZ))!;
+                    yield return new("hidden-region", region.Id, region.Name, (rect.MinX + rect.MaxX) / 2d, (rect.MinZ + rect.MaxZ) / 2d);
+                }
     }
 }

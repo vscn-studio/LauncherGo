@@ -91,7 +91,7 @@ async function main(){
     }
     if(name.endsWith('/route-shares')){if(method==='GET'){const shared=shares.get(url.searchParams.get('id'));return shared?visible(shared.points)?json(shared):json({},403):json({},404);}const id='s'+(++sequence);shares.set(id,structuredClone(routes.get(data.id)));return json({id});}
     if(name.endsWith('/hidden-regions')){if(method==='GET')return json(regions);if(owner!=='admin')return json({},403);if(method==='DELETE'){regions=regions.filter(r=>r.id!==url.searchParams.get('id'));return json({removed:true});}const value={...data,id:data.id||'fog'+(++sequence)};regions=regions.filter(r=>r.id!==value.id).concat(value);return json({id:value.id});}
-    if(name.includes('/tiles/'))return route.fulfill({path:path.join(webRoot,'assets/sky.png'),contentType:'image/png'});
+    if(name.includes('/tiles/'))return route.fulfill({path:path.join(webRoot,'assets/icons/spawn.png'),contentType:'image/png'});
     if(name.startsWith('/api/'))return json({});
     const file=path.resolve(webRoot,name==='/'?'index.html':name.slice(1));assert.ok(file.startsWith(webRoot+path.sep));let body=await fs.readFile(file);
     if(name==='/')body=body.toString().replace('  (() => {','  const makeMap=L.map;L.map=(...args)=>(window.testMap=makeMap(...args));\n  (() => {');

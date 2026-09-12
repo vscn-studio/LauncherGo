@@ -62,5 +62,15 @@ foreach ($mod in $mods) {
         $bridge = Get-Content -LiteralPath (Join-Path $repository 'LauncherGo.Services/EmbeddedMods/LauncherGoServerBridgeMod/LauncherGoServerBridgeModSystem.cs') -Raw
         Assert-Equal ([regex]::Match($bridge, 'BridgeVersion\s*=\s*"([^"]+)"').Groups[1].Value) $info.version 'Bridge heartbeat version'
     }
+    if ($mod.Id -eq 'servermap') {
+        Assert-Equal ([regex]::Match($source, '\bmapVersion\s*=\s*"([^"]+)"').Groups[1].Value) $info.version 'Map metadata version alias'
+    }
 }
-Write-Output 'PASS release metadata: build-only SDK tools, runtime/native/content inventory enforcement, and all four embedded mod versions.'
+$appProject = [xml](Get-Content -LiteralPath (Join-Path $repository 'LauncherGo.App/LauncherGo.App.csproj') -Raw)
+$appVersion = [string]$appProject.Project.PropertyGroup[0].Version
+Assert-Equal ([string]$appProject.Project.PropertyGroup[0].InformationalVersion) $appVersion 'Launcher informational version'
+foreach ($language in @('zh-CN', 'en-US')) {
+    $notes = Get-Content -LiteralPath (Join-Path $repository "docs/releases/v$appVersion.$language.md") -Raw
+    Assert-Equal ($notes.TrimStart().StartsWith("# LauncherGo $appVersion`n") -or $notes.TrimStart().StartsWith("# LauncherGo $appVersion`r`n")) $true "Release notes title ($language)"
+}
+Write-Output 'PASS release metadata: license inventory, all four embedded mod versions, map version aliases, launcher version and bilingual release notes.'

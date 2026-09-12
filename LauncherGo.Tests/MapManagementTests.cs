@@ -12,12 +12,26 @@ public sealed class MapManagementTests : IDisposable
         var store = new AnnouncementStore(Path.Combine(root, "announcement.json"));
         Assert.Null(store.Current.Management);
         var config = new MapManagementSettings();
+        Assert.True(config.FogEnabled); Assert.True(config.AdminsBypassFog);
         Assert.Equal(10, config.ImageMaxMb); Assert.Equal(10, config.PoiQuota); Assert.Equal(0, config.DailyTeleports);
         Assert.True(config.Layer("players").DefaultVisible);
         store.Save("news", "https://example.com", "admin", management: config with { ImageMaxMb = 20, Layers = new() { ["mounts"] = new(Forced: true, Scale: 2) } });
         store.Save("legacy save", "https://example.com", "admin");
         var loaded = new AnnouncementStore(Path.Combine(root, "announcement.json")).Current.Management!;
         Assert.Equal(20, loaded.ImageMaxMb); Assert.True(loaded.Layer("mounts").Forced); Assert.Equal(2, loaded.Layer("mounts").Scale);
+    }
+    [Fact]
+    public void FogSwitchPersistsWithoutDeletingSharingOrLegacyDefaults()
+    {
+        var legacy = System.Text.Json.JsonSerializer.Deserialize<MapManagementSettings>("{}");
+        Assert.True(legacy!.FogEnabled);
+        var store = new AnnouncementStore(Path.Combine(root, "announcement.json"));
+        store.Save("news", "", "admin", management: new() { FogEnabled = false, ShareExploration = true, AdminsBypassFog = false });
+        store.Save("legacy news edit", "", "admin");
+        var saved = new AnnouncementStore(Path.Combine(root, "announcement.json")).Current.Management!;
+        Assert.False(saved.FogEnabled); Assert.True(saved.ShareExploration); Assert.False(saved.AdminsBypassFog);
+        store.Save("news", "", "admin", management: saved with { FogEnabled = true });
+        Assert.True(new AnnouncementStore(Path.Combine(root, "announcement.json")).Current.Management!.FogEnabled);
     }
     [Fact]
     public void RejectsInvalidPolicies()

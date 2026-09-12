@@ -131,6 +131,7 @@ public sealed class ClientAvatarTests : IDisposable
             Assert.False(store.Receive("alice", token, 0, 1, data, 1003));
         }
         using var restored = new ClientAvatarStore(root, _ => { }); Assert.Equal(key, restored.GetKey("alice", "look")); Assert.Null(restored.Request("alice", "look", 1_000_000));
+        Assert.Equal(key,restored.GetLastKey("alice"));Assert.Null(restored.GetLastKey("unknown"));
         Assert.NotNull(restored.Request("alice", "look", 1_000_000, refresh:true)); Assert.Equal(key, restored.GetKey("alice", "look"));
     }
     [Fact] public void BadOrderExpiredTokensAndMemoryFloodAreRejected()

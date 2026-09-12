@@ -29,6 +29,9 @@ static class AreaMarkerChecks
             var web=(ServerMapWebServer)RuntimeHelpers.GetUninitializedObject(typeof(ServerMapWebServer));
             void Field(string name,object value)=>typeof(ServerMapWebServer).GetField(name,BindingFlags.Instance|BindingFlags.NonPublic)!.SetValue(web,value);
             Field("api",api);Field("auth",auth);Field("notebook",notebook);Field("areaMarkers",areas);Field("events",new LiveEventHub());
+            var settings=new AnnouncementStore(Path.Combine(root,"announcement.json"));settings.Save("","","test",management:new(){FogEnabled=false});
+            Field("announcements",settings);Field("config",new ServerMap.Configuration.ServerMapConfig());
+            Field("poiImages",new PoiImageStore(Path.Combine(root,"poi-images")));
             var versions=new System.Collections.Concurrent.ConcurrentDictionary<string,long>();foreach(var key in new[]{"players","mounts","spawn","claims","claim-areas","chunks","translocators","pois"})versions[key]=1;Field("layerVersions",versions);
             var manifest=JsonSerializer.SerializeToElement(typeof(ServerMapWebServer).GetMethod("Manifest",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(web,null));
             Require(manifest.GetProperty("layers").EnumerateArray().Where(l=>l.GetProperty("visible").GetBoolean()).Select(l=>l.GetProperty("id").GetString()).Order().SequenceEqual(new[]{"mounts","players","pois","spawn"}),"Unexpected default map layers");

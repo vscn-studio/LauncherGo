@@ -17,6 +17,8 @@ public sealed class PlayerMapSyncSystem : ModSystem
     private IServerNetworkChannel? serverChannel;
     private IClientNetworkChannel? clientChannel;
     private ClientHiddenMap? hiddenMap;
+    private ClientNativeExploration? clientExploration;
+    private ServerNativeExploration? serverExploration;
     private IDisposable? headCapture;
     private ServerAvatarRequestPacket? pendingCapture;
     private long captureDeadline;
@@ -27,32 +29,63 @@ public sealed class PlayerMapSyncSystem : ModSystem
     private Queue<ClientAvatarChunkPacket>? outgoing;
     private readonly CancellationTokenSource stop = new();
     private long tick;
-    private bool connected, capturing, receivedRegions;
-    private long nextCapture, nextHello;
+    private bool connected, capturing, receivedRegions, serverExplorationSupported;
+    private long nextCapture, nextHello, explorationErrorAt;
     public override void StartServerSide(ICoreServerAPI api)
     {
         server = api;
+        try { serverExploration = new ServerNativeExploration(api, () => api.ModLoader.GetModSystem<ServerMapModSystem>()?.WebServer); }
+        catch (Exception ex) { api.Logger.Error("ServerMap native exploration sync unavailable; no position-radius fallback will be used: {0}", ex.Message); }
         serverChannel = api.Network.RegisterChannel(Channel).RegisterMessageType<ClientMapReadyPacket>().RegisterMessageType<ServerHiddenMapPacket>()
             .RegisterMessageType<ServerAvatarRequestPacket>().RegisterMessageType<ClientAvatarChunkPacket>()
-            .SetMessageHandler<ClientMapReadyPacket>((player, _) =>
+            // Append new packet IDs so the existing avatar/hidden-region protocol remains compatible.
+            .RegisterMessageType<ClientMapExplorationPacket>().RegisterMessageType<ServerMapExplorationAckPacket>()
+            .SetMessageHandler<ClientMapReadyPacket>((player, packet) =>
             {
                 var now = Environment.TickCount64;
                 if (helloAt.GetValueOrDefault(player.PlayerUID) > now) return;
                 helloAt[player.PlayerUID] = now + 5000; readyPlayers.Add(player.PlayerUID); regionVersions.Remove(player.PlayerUID); avatarChecked.Remove(player.PlayerUID);
                 api.Logger.Notification("ServerMap player-data client connected: {0}.", player.PlayerUID);
                 SyncPlayer(player);
+                if (serverExploration?.Begin(player, packet.ExplorationProtocol, packet.ExplorationClient) is { } hello) serverChannel?.SendPacket(hello, player);
             })
             .SetMessageHandler<ClientAvatarChunkPacket>((player, packet) =>
             {
                 var store = api.ModLoader.GetModSystem<ServerMapModSystem>()?.WebServer?.ClientAvatars;
                 if (!string.IsNullOrEmpty(packet.Error)) store?.ReportFailure(player.PlayerUID, packet.Token, packet.Error, Environment.TickCount64);
                 else store?.Receive(player.PlayerUID, packet.Token, packet.Index, packet.Total, packet.Data, Environment.TickCount64);
+            })
+            .SetMessageHandler<ClientMapExplorationPacket>((player, packet) =>
+            {
+                if (stop.IsCancellationRequested) return;
+                try
+                {
+                    if (serverExploration?.Receive(player, packet, Environment.TickCount64) is { } ack) serverChannel?.SendPacket(ack, player);
+                }
+                catch (Exception ex)
+                {
+                    // Withhold the ACK on persistence failures; the bounded client batch will be retried.
+                    if (Environment.TickCount64 >= explorationErrorAt)
+                    {
+                        explorationErrorAt = Environment.TickCount64 + 30_000;
+                        api.Logger.Warning("ServerMap native exploration save failed; client will retry: {0}", ex.Message);
+                    }
+                }
             });
+        api.Event.PlayerDisconnect += OnPlayerDisconnect;
         tick = api.Event.RegisterGameTickListener(_ => SyncPlayers(), 3000);
+    }
+    private void OnPlayerDisconnect(IServerPlayer player)
+    {
+        readyPlayers.Remove(player.PlayerUID); regionVersions.Remove(player.PlayerUID);
+        helloAt.Remove(player.PlayerUID); avatarChecked.Remove(player.PlayerUID);
+        serverExploration?.Forget(player);
+        server?.ModLoader.GetModSystem<ServerMapModSystem>()?.WebServer?.ClientAvatars?.ForgetConnection(player.PlayerUID);
     }
     private void SyncPlayers()
     {
         if (server == null || stop.IsCancellationRequested) return;
+        serverExploration?.Prune();
         var players = server.World.AllOnlinePlayers.OfType<IServerPlayer>().ToArray(); var live = players.Select(p => p.PlayerUID).ToHashSet();
         foreach (var uid in readyPlayers.Where(uid => !live.Contains(uid)).ToArray())
         {
@@ -65,11 +98,11 @@ public sealed class PlayerMapSyncSystem : ModSystem
     {
         var web = server?.ModLoader.GetModSystem<ServerMapModSystem>()?.WebServer;
         if (web == null || serverChannel == null) return;
-        var bounds = web.HiddenRegions.Where(r => r.HideInGame).SelectMany(r => new[] { r.MinX, r.MinZ, r.MaxX, r.MaxZ }).ToArray();
+        var bounds = web.HiddenRegions.Where(r => r.HideInGame).SelectMany(MapNotebookStore.PixelRects).SelectMany(r => new[] { (double)r.MinX, r.MinZ, r.MaxX, r.MaxZ }).ToArray();
         var version = JsonSerializer.Serialize(bounds);
         if (regionVersions.GetValueOrDefault(player.PlayerUID) != version)
         {
-            serverChannel.SendPacket(new ServerHiddenMapPacket { Bounds = bounds }, player); regionVersions[player.PlayerUID] = version;
+            serverChannel.SendPacket(new ServerHiddenMapPacket { Bounds = bounds, ExplorationProtocol = serverExploration != null ? MapExplorationProtocol.Version : 0 }, player); regionVersions[player.PlayerUID] = version;
         }
         var appearance = Appearance(player); if (appearance == null) return;
         // Show the disk cache immediately, but refresh once per connection to pick
@@ -92,8 +125,12 @@ public sealed class PlayerMapSyncSystem : ModSystem
         client = api;
         clientChannel = api.Network.RegisterChannel(Channel).RegisterMessageType<ClientMapReadyPacket>().RegisterMessageType<ServerHiddenMapPacket>()
             .RegisterMessageType<ServerAvatarRequestPacket>().RegisterMessageType<ClientAvatarChunkPacket>()
-            .SetMessageHandler<ServerHiddenMapPacket>(packet => api.Event.EnqueueMainThreadTask(() => { if (!stop.IsCancellationRequested) { hiddenMap?.Apply(packet); receivedRegions = true; } }, "servermap-hidden-sync"))
-            .SetMessageHandler<ServerAvatarRequestPacket>(packet => api.Event.EnqueueMainThreadTask(() => QueueCapture(packet), "servermap-avatar-request"));
+            .RegisterMessageType<ClientMapExplorationPacket>().RegisterMessageType<ServerMapExplorationAckPacket>()
+            .SetMessageHandler<ServerHiddenMapPacket>(packet => api.Event.EnqueueMainThreadTask(() => { if (!stop.IsCancellationRequested) { hiddenMap?.Apply(packet); receivedRegions = true; serverExplorationSupported = packet.ExplorationProtocol == MapExplorationProtocol.Version; } }, "servermap-hidden-sync"))
+            .SetMessageHandler<ServerAvatarRequestPacket>(packet => api.Event.EnqueueMainThreadTask(() => QueueCapture(packet), "servermap-avatar-request"))
+            .SetMessageHandler<ServerMapExplorationAckPacket>(packet => api.Event.EnqueueMainThreadTask(() => { if (!stop.IsCancellationRequested && connected && clientChannel is { Connected: true }) clientExploration?.Receive(packet); }, "servermap-exploration-ack"));
+        try { clientExploration = new ClientNativeExploration(api); }
+        catch (Exception ex) { api.Logger.Error("ServerMap native map generation observation unavailable: {0}", ex.Message); }
         hiddenMap = new ClientHiddenMap(api);
         headCapture = ClientHeadCapture.Start(api);
         tick = api.Event.RegisterGameTickListener(_ => ClientTick(), 200);
@@ -102,9 +139,18 @@ public sealed class PlayerMapSyncSystem : ModSystem
     {
         if (stop.IsCancellationRequested) return;
         if (clientChannel is not { Connected: true } || client?.World.Player?.Entity == null)
-        { connected = false; receivedRegions = false; outgoing = null; pendingCapture = null; hiddenMap?.Clear(); return; }
+        {
+            if (connected) clientExploration?.Reset();
+            connected = false; receivedRegions = false; serverExplorationSupported = false;
+            outgoing = null; pendingCapture = null; hiddenMap?.Clear(); return;
+        }
         if (!connected) { connected = true; nextHello = 0; }
-        if (!receivedRegions && Environment.TickCount64 >= nextHello) { clientChannel.SendPacket(new ClientMapReadyPacket()); nextHello = Environment.TickCount64 + 6000; }
+        if ((!receivedRegions || serverExplorationSupported && clientExploration is { Connected: false }) && Environment.TickCount64 >= nextHello)
+        {
+            clientChannel.SendPacket(new ClientMapReadyPacket { ExplorationProtocol = clientExploration != null ? MapExplorationProtocol.Version : 0, ExplorationClient = clientExploration?.ClientSession ?? "" });
+            nextHello = Environment.TickCount64 + 6000;
+        }
+        clientExploration?.Send(clientChannel, Environment.TickCount64);
         if (pendingCapture != null)
         {
             if (Environment.TickCount64 > captureDeadline) { ReportCaptureFailure(pendingCapture, "model-timeout"); pendingCapture = null; client.Logger.Warning("ServerMap avatar request expired while waiting for the native head mesh. Renderer={0}, shapeFresh={1}.", client.World.Player.Entity.Properties.Client.Renderer?.GetType().Name, client.World.Player.Entity.ShapeFresh); }
@@ -146,6 +192,8 @@ public sealed class PlayerMapSyncSystem : ModSystem
     public override void Dispose()
     {
         stop.Cancel(); if (tick != 0) { server?.Event.UnregisterGameTickListener(tick); client?.Event.UnregisterGameTickListener(tick); }
+        if (server != null) server.Event.PlayerDisconnect -= OnPlayerDisconnect;
+        serverExploration?.Dispose(); clientExploration?.Dispose();
         hiddenMap?.Dispose(); headCapture?.Dispose(); outgoing = null; pendingCapture = null;
     }
 }

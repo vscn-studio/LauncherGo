@@ -26,7 +26,7 @@ async function main() {
       if (url.pathname === '/api/v1/auth/me') return json({ authenticated: false });
       if (url.pathname === '/api/v1/announcement') return json({ html: '' });
       if (url.pathname === '/api/v1/render-progress') return json({ phase: 'idle' });
-      if (url.pathname.startsWith('/api/v1/tiles/')) return route.fulfill({ path: path.join(webRoot, 'assets/sky.png'), contentType: 'image/png' });
+      if (url.pathname.startsWith('/api/v1/tiles/')) return route.fulfill({ path: path.join(webRoot, 'assets/icons/spawn.png'), contentType: 'image/png' });
       if (url.pathname.startsWith('/api/')) return json([]);
       const file = path.resolve(webRoot, url.pathname === '/' ? 'index.html' : url.pathname.slice(1));
       assert.ok(file.startsWith(webRoot + path.sep));
