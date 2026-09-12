@@ -107,7 +107,6 @@
     const spotlightButton=iconButton('spotlightButton',text('聚焦','Spotlight'),['M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0','M3.6 15h10.55','M6.551 4.938l3.26 10.034','M17.032 4.636l-8.535 6.201','M20.559 14.51l-8.535 -6.201','M12.257 20.916l3.261 -10.034'],()=>{
       closePanels();spotlight.showModal();loadSpotlight();
     });
-    const spotlightLabel=node('span');spotlightButton.append(spotlightLabel);
     spotlightButton.dataset.i18nLabel='spotlight';spotlightButton.setAttribute('aria-haspopup','dialog');spotlightButton.setAttribute('aria-controls','spotlightDialog');
     let spotlightEpoch=0,spotlightOffset=0,spotlightBusy=false,spotlightDebounce;
     const avatarUrl=value=>/^api\/v1\/avatars\/[a-f0-9]{64}\.png$/.test(value||'')?api.replace(/\/api\/v1\/?$/,'')+'/'+value:'assets/icons/player.svg';
@@ -120,7 +119,7 @@
       const title=text('聚焦','Spotlight');
       spotlight.querySelector('header h2').textContent=title;spotlight.setAttribute('aria-label',title);
       spotlight.querySelector('.dialog-close').setAttribute('aria-label',text('关闭聚焦','Close Spotlight'));spotlight.querySelector('.dialog-close').title=text('关闭聚焦','Close Spotlight');
-      spotlightButton.title=title;spotlightButton.setAttribute('aria-label',title);spotlightLabel.textContent=title;
+      spotlightButton.title=title;spotlightButton.setAttribute('aria-label',title);
       spotlightSearch.placeholder=text('搜索玩家、地点或描述','Search players, places or descriptions');
       spotlightSearch.setAttribute('aria-label',spotlightSearch.placeholder);
       spotlightSubmit.textContent=text('搜索','Search');spotlightSort.setAttribute('aria-label',text('排序','Sort'));

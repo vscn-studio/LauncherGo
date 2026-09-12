@@ -197,8 +197,6 @@
 .spotlight-like:hover,.spotlight-like.liked { color:#ef8290!important;background:#ef82901a!important; }
 .spotlight-like.liked svg { fill:#ef8290; }
 .spotlight-more { display:block;margin:12px auto 0; }
-#mapActions #spotlightButton { display:flex;align-items:center;gap:4px;flex:0 0 auto;width:auto;padding-left:7px;padding-right:7px; }
-#mapActions #spotlightButton svg { flex:none; }
 @media(max-width:700px) {
   #spotlightDialog { width:100vw; }
   #spotlightDialog header { padding-left:48px;padding-right:48px; }
