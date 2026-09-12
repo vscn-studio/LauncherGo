@@ -1,15 +1,15 @@
-/* Moments, categorized administration and server-recorded administrator tracking. */
+/* Moments and categorized administration. */
 (() => {
   'use strict';
   const normalize = value => Array.isArray(value) ? value.map(normalize) : value && typeof value === 'object'
     ? Object.fromEntries(Object.entries(value).map(([key,v])=>[key[0].toLowerCase()+key.slice(1),normalize(v)])) : value;
-  function create({api,map,gameLatLng,getAuth,getLanguage,getMetadata,refreshPois,closePanels,beforeTrack}) {
+  function create({api,map,gameLatLng,getAuth,getLanguage,getMetadata,refreshPois,closePanels}) {
     const $=id=>document.getElementById(id), text=(zh,en)=>getLanguage()==='zh'?zh:en;
     const node=(tag,props={})=>Object.assign(document.createElement(tag),props);
     const action=(label,fn)=>{const b=node('button',{type:'button',textContent:label});b.onclick=fn;return b;};
     const request=async(path,body,method=body===undefined?'GET':'POST')=>{
       const response=await fetch(api+path,{method,cache:'no-store',signal:AbortSignal.timeout(15000),headers:body===undefined&&method==='GET'?{}:{'Content-Type':'application/json','X-ServerMap-Request':'1'},body:body===undefined?undefined:JSON.stringify(body)});
-      const result=await response.json();if(!response.ok){if(response.status===403&&path.startsWith('/admin/')){clearTrack();tracking.close();trackingButton.hidden=true;imageList.replaceChildren();$('manageModal').hidden=true;}throw Error(result.error||response.status);}return normalize(result);
+      const result=await response.json();if(!response.ok){if(response.status===403&&path.startsWith('/admin/')){imageList.replaceChildren();$('manageModal').hidden=true;}throw Error(result.error||response.status);}return normalize(result);
     };
     const report=(target,fn)=>async()=>{target.textContent='';try{await fn();}catch(error){target.textContent=error.message;}};
     const iconButton=(id,label,paths,fn)=>{
@@ -26,12 +26,14 @@
       let backdropDown=false;d.addEventListener('pointerdown',e=>backdropDown=outside(e));
       d.addEventListener('click',e=>{if(backdropDown&&outside(e))d.close();backdropDown=false;});return d;
     };
-    const languageDialog=dialog('languageDialog',text('语言','Language')),languageSelect=$('language'),languageLabel=document.querySelector('label[for="language"]');
-    const languageButton=iconButton('languageButton',text('语言','Language'),['M4 5h7','M9 3v2','M5 5c0 4 2 7 6 9','M4 14c4 -2 6 -5 6 -9','M12 20l4 -9l4 9','M19.1 18h-6.2'],()=>{closePanels();languageDialog.showModal();languageSelect.focus();});
-    languageButton.dataset.i18nLabel='languageName';languageButton.setAttribute('aria-haspopup','dialog');languageButton.setAttribute('aria-controls','languageDialog');languageButton.querySelector('svg').setAttribute('class','icon icon-tabler icon-tabler-language');
-    languageDialog.querySelector('h2').dataset.i18n='languageName';languageDialog.querySelector('.dialog-close').dataset.i18nLabel='close';
-    languageDialog.body.append(languageLabel,languageSelect);
-    languageSelect.addEventListener('change',()=>languageDialog.close());
+    const languageSelect=$('language'),languageLabel=document.querySelector('label[for="language"]');languageLabel.remove();languageSelect.hidden=true;
+    const languageMenu=node('div',{id:'languageMenu',hidden:true,role:'menu'});
+    for(const option of languageSelect.options){const item=action(option.textContent,()=>{languageSelect.value=option.value;languageSelect.dispatchEvent(new Event('change',{bubbles:true}));languageMenu.hidden=true;languageButton.setAttribute('aria-expanded','false');});item.setAttribute('role','menuitem');languageMenu.append(item);}
+    document.body.append(languageMenu);
+    const languageButton=iconButton('languageButton',text('语言','Language'),['M4 5h7','M9 3v2','M5 5c0 4 2 7 6 9','M4 14c4 -2 6 -5 6 -9','M12 20l4 -9l4 9','M19.1 18h-6.2'],()=>{closePanels();const open=languageMenu.hidden;languageMenu.hidden=!open;languageButton.setAttribute('aria-expanded',String(open));if(open){const rect=languageButton.getBoundingClientRect();languageMenu.style.top=rect.bottom+5+'px';languageMenu.style.left=Math.max(8,rect.right-languageMenu.offsetWidth)+'px';}});
+    languageButton.dataset.i18nLabel='languageName';languageButton.setAttribute('aria-haspopup','menu');languageButton.setAttribute('aria-controls','languageMenu');languageButton.setAttribute('aria-expanded','false');languageButton.querySelector('svg').setAttribute('class','icon icon-tabler icon-tabler-language');
+    languageButton.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();const open=languageMenu.hidden;languageMenu.hidden=!open;languageButton.setAttribute('aria-expanded',String(open));if(open){const rect=languageButton.getBoundingClientRect();languageMenu.style.display='block';languageMenu.style.top=`${rect.bottom+5}px`;languageMenu.style.left=`${Math.max(8,rect.right-180)}px`;}else languageMenu.style.display='none';});
+    document.addEventListener('pointerdown',event=>{if(!languageMenu.hidden&&!languageMenu.contains(event.target)&&!languageButton.contains(event.target)){languageMenu.hidden=true;languageButton.setAttribute('aria-expanded','false');}});
     const imageUrl=item=>ServerMapPoiImages.url(item.id,item.imageKey,0);
     const moments=dialog('momentsDialog',text('瞬间','Moments')),gallery=node('div',{className:'moments-grid'}),galleryStatus=node('p',{role:'status'}),more=action(text('加载更多','Load more'),()=>loadMoments(false));
     const gallerySearch=node('input',{type:'search',placeholder:text('搜索地点、描述、添加者','Search places, descriptions, authors'),'ariaLabel':text('搜索瞬间','Search moments')});
@@ -178,7 +180,7 @@
       const players=await request('/admin/online-players');if(!getAuth().admin)return;
       for(const p of players)playerSelect.append(node('option',{value:p.uid,textContent:p.name}));start.disabled=!players.length;await refreshHistory();
     }));
-    trackingButton.hidden=!getAuth().admin;
+    trackingButton.hidden=true;
     let polling=false;
     setInterval(async()=>{
       if(polling||!getAuth().admin||document.hidden)return;polling=true;
@@ -189,13 +191,12 @@
       }catch(error){trackStatus.textContent=error.message;}finally{polling=false;}
     },3000);
     function authChanged(){
-      trackingButton.hidden=!getAuth().admin;galleryEpoch++;imageEpoch++;historyEpoch++;trackEpoch++;
+      trackingButton.hidden=true;galleryEpoch++;imageEpoch++;historyEpoch++;trackEpoch++;
       if(!getAuth().admin){tracking.close();clearTrack();history.replaceChildren();playerSelect.replaceChildren();imageList.replaceChildren();$('manageModal').hidden=true;}
       if(moments.open)loadMoments();
     }
     function privacyChanged(){galleryEpoch++;imageEpoch++;$('poiImageViewer').close();if(moments.open)loadMoments();}
     function languageChanged(){
-      languageDialog.setAttribute('aria-label',languageSelect.title);
       for(const [b,zh,en] of [[momentsButton,'瞬间','Moments'],[trackingButton,'玩家轨迹跟踪','Player tracking']]){b.title=text(zh,en);b.setAttribute('aria-label',b.title);}
     }
     return {settings,payload,authChanged,privacyChanged,languageChanged};

@@ -78,12 +78,15 @@
     }
     const markerInfo=button('ⓘ',()=>showTooltip(markerInfo,getLanguage()==='zh'?'部分图标等待同步：管理员使用新版地图模组进入游戏后会自动同步。':'Some icons await sync: an admin must join the game with the updated map mod.'));
     markerInfo.className='notebook-info';markerInfo.hidden=true;markerInfo.setAttribute('aria-expanded','false');sections.myMarkers.heading.append(markerInfo);
-    const progressBox = el('div'); progressBox.id = 'notebookProgress'; document.querySelector('#sidebar').append(progressBox);
+    const progressBox = el('div'); progressBox.id = 'notebookProgress';
+    const websitePanel=document.querySelector('#contributorsPanel');
+    const assetNotice=websitePanel?.querySelector('.contributors-notice');
+    (assetNotice?.parentElement||websitePanel||document.querySelector('#sidebar')).insertBefore(progressBox,assetNotice||null);
     const progressTrack=el('div',{className:'notebook-progress-track'});progressTrack.setAttribute('role','group');progressBox.append(progressTrack);
     progressTrack.addEventListener('click',event=>{if(event.target===progressTrack&&progressTrack.dataset.empty==='true')showTooltip(progressTrack,progressTooltipContent('pending'));});
     progressTrack.addEventListener('keydown',event=>{if(progressTrack.dataset.empty==='true'&&(event.key==='Enter'||event.key===' ')){event.preventDefault();showTooltip(progressTrack,progressTooltipContent('pending'));}});
     const progressSegments={};for(const key of ['failed','pending','completed']){const segment=button('',()=>showTooltip(segment,progressTooltipContent(key)));segment.className=`notebook-progress-segment ${key}`;segment.setAttribute('aria-expanded','false');progressSegments[key]=segment;progressTrack.append(segment);}
-    const planButton = routeIconButton('planRoute', () => startRoute()); planButton.id = 'planRoute'; document.querySelector('#mapActions').prepend(planButton);
+    const planButton = routeIconButton('planRoute', () => mode === 'route' ? cancelMode() : startRoute()); planButton.id = 'planRoute'; document.querySelector('#mapActions').prepend(planButton);
     const toolbar = el('div', { hidden:true }); toolbar.id = 'notebookToolbar'; toolbar.setAttribute('aria-live','polite'); document.body.append(toolbar);
     const noticeBox = el('div', { hidden:true }); noticeBox.id = 'notebookNotice'; noticeBox.setAttribute('role','status'); document.body.append(noticeBox);
     const modal = el('div', { className:'modal-backdrop', hidden:true }); modal.id = 'notebookModal'; document.body.append(modal);

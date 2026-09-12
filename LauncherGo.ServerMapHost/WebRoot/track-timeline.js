@@ -4,7 +4,9 @@
   function create({container,onChange,getLanguage}) {
     const node=(tag,props={})=>Object.assign(document.createElement(tag),props);
     const text=(zh,en)=>getLanguage()==='zh'?zh:en;
-    const toolbar=node('div',{className:'time-axis-toolbar'}),play=node('button',{type:'button',textContent:'▶'}),duration=node('span',{className:'time-axis-duration'});
+    const toolbar=node('div',{className:'time-axis-toolbar'}),play=node('button',{type:'button'}),duration=node('span',{className:'time-axis-duration'});
+    const playIcon=(paused)=>{play.replaceChildren();const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('fill','none');svg.setAttribute('stroke','currentColor');svg.setAttribute('stroke-width','2');svg.setAttribute('stroke-linecap','round');svg.setAttribute('stroke-linejoin','round');svg.setAttribute('aria-hidden','true');const paths=paused?['M7 4v16l13-8z']:['M6 4h4v16H6z','M14 4h4v16h-4z'];for(const d of paths){const p=document.createElementNS(svg.namespaceURI,'path');p.setAttribute('d',d);svg.append(p);}play.append(svg);};
+    playIcon(true);
     const viewport=node('div',{className:'time-axis',tabIndex:0}),ruler=node('div',{className:'time-axis-ruler'}),activity=node('div',{className:'time-axis-activity'}),mountLane=node('div',{className:'time-axis-mounts'});
     const playhead=node('div',{className:'time-axis-playhead'}),stamp=node('span',{className:'time-axis-stamp'}),hover=node('span',{className:'time-axis-hover',hidden:true});
     viewport.setAttribute('role','slider');viewport.setAttribute('aria-label',text('轨迹时间轴，可拖动或使用方向键','Track timeline: drag or use arrow keys'));viewport.setAttribute('aria-orientation','horizontal');
@@ -67,12 +69,12 @@
       else if(event.key==='Home'||event.key==='End'){event.preventDefault();pause();seek(event.key==='Home'?start:end);setWindow(value-(viewEnd-viewStart)/2,value+(viewEnd-viewStart)/2);}
       else if(event.key===' '){event.preventDefault();play.click();}
     });
-    function pause(){playing=false;cancelAnimationFrame(frame);play.textContent='▶';play.setAttribute('aria-pressed','false');}
+    function pause(){playing=false;cancelAnimationFrame(frame);playIcon(true);play.setAttribute('aria-pressed','false');}
     function tick(now){
       if(!playing)return;const next=value+(now-lastFrame);lastFrame=now;seek(next);
       if(value>=end){pause();return;}if(value>viewEnd)setWindow(value,value+(viewEnd-viewStart));frame=requestAnimationFrame(tick);
     }
-    play.onclick=()=>{if(playing){pause();return;}if(end<=start)return;if(value>=end)seek(start);playing=true;play.textContent='Ⅱ';play.setAttribute('aria-pressed','true');lastFrame=performance.now();frame=requestAnimationFrame(tick);};
+    play.onclick=()=>{if(playing){pause();return;}if(end<=start)return;if(value>=end)seek(start);playing=true;playIcon(false);play.setAttribute('aria-pressed','true');lastFrame=performance.now();frame=requestAnimationFrame(tick);};
     new ResizeObserver(render).observe(viewport);
     function update(data,reset=false){
       const atEnd=value===end,oldValue=value,fullView=viewStart<=start&&viewEnd>=end;
