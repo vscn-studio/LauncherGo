@@ -5,7 +5,7 @@ using Vintagestory.API.Server;
 
 namespace ServerMap.Web;
 
-/// <summary>Permanent, server-authoritative exploration state for the web map.</summary>
+/// <summary>Persisted per-world exploration, including complete client-native map snapshots.</summary>
 public sealed class ExplorationStore : IDisposable
 {
     public const int CellSize = 32;
@@ -91,6 +91,29 @@ public sealed class ExplorationStore : IDisposable
                 throw;
             }
             return true;
+        }
+    }
+
+    /// <summary>Replace only this player's coverage after a complete native-cache transfer; never publish partial history.</summary>
+    public (bool Changed, bool Removed) ReplaceFromMap(IServerPlayer player, IEnumerable<long> mapCells)
+    {
+        if (string.IsNullOrEmpty(player.PlayerUID)) throw new ArgumentException("Player identity required.");
+        var replacement = new Entry { Cells = mapCells.ToHashSet(), Groups = GroupIds(player).ToHashSet() };
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            var previous = entries.GetValueOrDefault(player.PlayerUID);
+            if (previous != null && previous.Cells.SetEquals(replacement.Cells) && previous.Groups.SetEquals(replacement.Groups)) return (false, false);
+            var removed = previous != null && (!previous.Cells.IsSubsetOf(replacement.Cells) || !previous.Groups.SetEquals(replacement.Groups));
+            replacement.Version = (previous?.Version ?? 0) + 1;
+            entries[player.PlayerUID] = replacement;
+            try { SaveLocked(); }
+            catch
+            {
+                if (previous == null) entries.Remove(player.PlayerUID); else entries[player.PlayerUID] = previous;
+                throw;
+            }
+            return (true, removed);
         }
     }
 

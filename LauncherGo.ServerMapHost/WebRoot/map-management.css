@@ -58,6 +58,8 @@
 .ally-row { display:flex;align-items:center;gap:7px;padding:5px 0;border-top:1px solid #ffffff18; }
 .ally-row img { width:32px;height:32px;flex:none;object-fit:contain;image-rendering:pixelated; }
 .ally-name { flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.ally-pending-control { color:#d8bd78!important; }
+.ally-pending-control[data-pending="outgoing"] { color:var(--muted)!important;cursor:default;opacity:.65; }
 .ally-empty { color:var(--muted);margin:4px 0; }
 @media(pointer:coarse) { #alliesPanel button,#alliesForm input { min-height:40px; } }
 .map-dialog::backdrop { background:#000a;backdrop-filter:blur(3px); }
@@ -160,4 +162,49 @@
   aside.show { transform:translateX(0); }
   aside:hover { right:0!important;transform:translateX(0); }
   aside.show~#contributors { right:263px; }
+}
+
+/* Spotlight is a centered, full-height single-column moments feed. */
+#spotlightDialog { width:min(680px,100vw);height:100dvh;max-height:100dvh;margin:0 auto;border-radius:0;background:#151719f7; }
+#spotlightDialog::backdrop { background:#0009;backdrop-filter:blur(2px); }
+#spotlightDialog .map-dialog-body { padding:0 0 calc(18px + env(safe-area-inset-bottom)); }
+#spotlightDialog header { position:relative;justify-content:center;padding:10px 58px 10px;min-height:50px;background:#202326; }
+#spotlightDialog header h2 { flex:none;font-size:18px;letter-spacing:.08em;text-align:center; }
+#spotlightDialog header .dialog-close { position:absolute;top:3px;right:6px; }
+#spotlightDialog header .dialog-close svg { width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;pointer-events:none; }
+.spotlight-tools { display:flex;align-items:center;gap:6px;padding:8px 14px;border-bottom:1px solid #ffffff18;background:#1b1d1f; }
+.spotlight-tools input { flex:1;min-width:0;padding:8px 10px!important;background:#0f1112!important; }
+.spotlight-tools button { flex:none;padding:8px 10px; }
+.spotlight-sort { min-width:74px;padding:8px 5px!important;background:#0f1112!important; }
+.spotlight-status { margin:0;padding:8px 14px 0;color:var(--muted);font-size:12px;line-height:1.5; }
+.spotlight-list { display:flex;flex-direction:column;gap:0;padding:0; }
+.spotlight-card { display:grid;grid-template-columns:44px minmax(0,1fr);align-items:start;gap:12px;margin:0;padding:18px 18px 20px;border:0;border-bottom:1px solid #ffffff16;border-radius:0;background:transparent;box-shadow:none; }
+.spotlight-card .spotlight-avatar { grid-column:1;width:44px;height:44px;min-height:44px;border-radius:5px;object-fit:cover;image-rendering:auto;background:#30383d; }
+.spotlight-content { grid-column:2;min-width:0; }
+.spotlight-identity { display:flex;align-items:baseline;gap:8px;min-width:0;margin:-2px 0 7px; }
+.spotlight-identity strong { overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#87a9d2;font-size:14px; }
+.spotlight-identity time { color:var(--muted);font-size:11px;white-space:nowrap; }
+.spotlight-title { margin:0 0 5px;color:#f3f4f5;font-size:16px;line-height:1.35;overflow-wrap:anywhere; }
+.spotlight-description { margin:0 0 9px;color:#d6d8dc;font-size:13px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere; }
+.spotlight-image { display:block;width:min(460px,100%);padding:0!important;border:0!important;border-radius:4px!important;background:#101112!important;overflow:hidden;cursor:zoom-in; }
+.spotlight-image img { display:block;width:100%;height:auto;max-height:520px;object-fit:contain; }
+.spotlight-location { display:flex;align-items:center;gap:5px;margin-top:8px;color:#8edcf1;font-size:12px;min-height:20px; }
+.spotlight-location-icon { width:16px;height:16px;display:inline-block;background:currentColor;mask:url('assets/icons/marker.svg') center/contain no-repeat;-webkit-mask:url('assets/icons/marker.svg') center/contain no-repeat; }
+.spotlight-actions { display:flex;align-items:center;justify-content:flex-end;gap:8px;min-height:28px;margin-top:7px;padding-top:7px;border-top:1px solid #ffffff12; }
+.spotlight-feedback { flex:1;color:#efaaaa;font-size:11px;overflow-wrap:anywhere; }
+.spotlight-like { display:inline-flex;align-items:center;gap:3px;padding:4px 8px!important;border:0!important;background:transparent!important;color:var(--muted)!important;font-size:12px; }
+.spotlight-like svg { width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8; }
+.spotlight-like:hover,.spotlight-like.liked { color:#ef8290!important;background:#ef82901a!important; }
+.spotlight-like.liked svg { fill:#ef8290; }
+.spotlight-more { display:block;margin:12px auto 0; }
+#mapActions #spotlightButton { display:flex;align-items:center;gap:4px;flex:0 0 auto;width:auto;padding-left:7px;padding-right:7px; }
+#mapActions #spotlightButton svg { flex:none; }
+@media(max-width:700px) {
+  #spotlightDialog { width:100vw; }
+  #spotlightDialog header { padding-left:48px;padding-right:48px; }
+  #spotlightDialog header h2 { font-size:16px; }
+  .spotlight-tools { padding:7px 8px;gap:4px; }
+  .spotlight-tools button { padding:8px 7px; }
+  .spotlight-sort { min-width:62px;font-size:12px; }
+  .spotlight-card { padding:15px 12px 18px; }
 }

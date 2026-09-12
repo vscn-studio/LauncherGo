@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using ServerMap.Web;
 using Xunit;
 
@@ -58,6 +59,23 @@ public sealed class AllianceTests : IDisposable
         for(var i=0;i<AllianceStore.MaxAllies;i++)store.Join("alice",store.Snapshot("player-"+i).MapId);
         Assert.Throws<InvalidOperationException>(()=>store.Join("alice",store.Snapshot("overflow").MapId));
         Assert.Equal(AllianceStore.MaxAllies,store.Snapshot("alice").Allies.Length);
+    }
+    [Fact]
+    public void AllianceRequestsNeedRecipientApproval()
+    {
+        using var store=new AllianceStore(root);var bob=store.Snapshot("bob");store.Snapshot("alice");
+        store.Request("alice",bob.MapId);
+        Assert.False(store.IsAllied("alice","bob"));
+        Assert.False(store.SnapshotDetails("alice").Pending.Single(p=>p.Uid=="bob").Incoming);
+        Assert.True(store.SnapshotDetails("bob").Pending.Single(p=>p.Uid=="alice").Incoming);
+        store.Accept("bob","alice");Assert.True(store.IsAllied("alice","bob"));Assert.Empty(store.SnapshotDetails("bob").Pending);
+    }
+    [Fact]
+    public void PendingAllianceRequestsExpireAfterTenMinutes()
+    {
+        using var store=new AllianceStore(root);var bob=store.Snapshot("bob");store.Snapshot("alice");store.Request("alice",bob.MapId);
+        var json=JsonNode.Parse(File.ReadAllText(Path.Combine(root,"alliances.json")))!.AsObject();json["alice"]!["PendingOutgoing"]!["bob"] = DateTimeOffset.UtcNow.AddMinutes(-1).ToString("O");json["bob"]!["PendingIncoming"]!["alice"] = DateTimeOffset.UtcNow.AddMinutes(-1).ToString("O");File.WriteAllText(Path.Combine(root,"alliances.json"),json.ToJsonString());
+        using var reloaded=new AllianceStore(root);Assert.Empty(reloaded.SnapshotDetails("alice").Pending);Assert.Empty(reloaded.SnapshotDetails("bob").Pending);Assert.False(reloaded.IsAllied("alice","bob"));
     }
     public void Dispose(){if(Directory.Exists(root))Directory.Delete(root,true);}
 }

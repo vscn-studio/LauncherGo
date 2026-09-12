@@ -13,6 +13,8 @@ public sealed class ServerNativeExploration : IDisposable
         public RecentMapChunks Sent { get; } = new();
         public MapExplorationSession? Session { get; set; }
         public string ClientSession { get; set; } = "";
+        public MapHistorySession? History { get; set; }
+        public string HistoryWorld { get; set; } = "";
     }
     private static ServerNativeExploration? current;
     private readonly ICoreServerAPI api;
@@ -73,12 +75,17 @@ public sealed class ServerNativeExploration : IDisposable
         }
     }
 
-    public ServerMapExplorationAckPacket? Begin(IServerPlayer player, int version, string clientSession)
+    public ServerMapExplorationAckPacket? Begin(IServerPlayer player, int version, string clientSession, int historyProtocol = 0, string worldId = "")
     {
         if (version != MapExplorationProtocol.Version || !MapExplorationProtocol.ValidSession(clientSession) || Client(player) is not { } client) return null;
         var state = State(client);
-        if (state.Session == null || state.ClientSession != clientSession) { state.Session = new(); state.ClientSession = clientSession; }
-        return new() { Session = state.Session.Id, ClientSession = state.ClientSession };
+        if (state.Session == null || state.ClientSession != clientSession)
+        { state.Session = new(); state.ClientSession = clientSession; state.History = null; state.HistoryWorld = ""; }
+        if (state.History == null && historyProtocol == MapHistoryProtocol.Version && MapHistoryProtocol.ValidWorld(worldId)
+            && worldId == api.World.SavegameIdentifier)
+        { state.History = new(state.Session.Id, worldId); state.HistoryWorld = worldId; }
+        return new() { Session = state.Session.Id, ClientSession = state.ClientSession,
+            HistoryProtocol = state.History != null ? MapHistoryProtocol.Version : 0, WorldId = state.HistoryWorld };
     }
 
     // Vintage Story dispatches server mod channel handlers on the server game thread, alongside chunk sends.
@@ -89,8 +96,20 @@ public sealed class ServerNativeExploration : IDisposable
         var receipt = state.Session.Receive(packet.Session, packet.Sequence, packet.Dimension, packet.Cells, now,
             server.WorldMap.ChunkMapSizeX, server.WorldMap.ChunkMapSizeZ,
             cell => map.HasOwnExploration(player.PlayerUID, cell) || state.Sent.Contains(cell) || FullySent(client, cell),
-            cells => map.RecordVerifiedExploration(player, cells));
+            cells => { map.RecordVerifiedExploration(player, cells); state.History?.ObserveNative(cells); });
         return receipt == null ? null : new() { Session = receipt.Session, Sequence = receipt.Sequence, Accepted = receipt.Accepted, ClientSession = state.ClientSession };
+    }
+
+    public ServerMapHistoryAckPacket? ReceiveHistory(IServerPlayer player, ClientMapHistoryPacket packet, long now)
+    {
+        if (Client(player) is not { } client || !connections.TryGetValue(client, out var state) || state.History == null
+            || player.Entity?.Pos.Dimension != 0 || state.HistoryWorld != api.World.SavegameIdentifier || web() is not { } map) return null;
+        // Cached maps are intentionally client-trusted: current-session chunk delivery cannot prove historical exploration.
+        var receipt = state.History.Receive(new(packet.Session, packet.WorldId, packet.Snapshot, packet.Sequence, packet.Cells, packet.Complete),
+            packet.Dimension, now, server.WorldMap.ChunkMapSizeX, server.WorldMap.ChunkMapSizeZ,
+            cells => map.ReplaceExplorationFromMap(player, cells));
+        return receipt == null ? null : new() { Session = receipt.Session, Snapshot = receipt.Snapshot, Sequence = receipt.Sequence,
+            Complete = receipt.Complete, ClientSession = state.ClientSession };
     }
 
     public void Forget(IServerPlayer player)

@@ -25,6 +25,8 @@ public sealed partial class ServerMapWebServer : IDisposable
     private readonly ICoreServerAPI api; private readonly ServerMapConfig config; private readonly string root; private readonly string webRoot;
     private readonly WorldDatabaseReader reader; private readonly MapPalette materials; private readonly MapRenderer renderer; private readonly TilePyramidBuilder pyramid;
     private readonly MapAuthStore auth; private readonly PoiStore pois; private readonly AnnouncementStore announcements; private readonly ExplorationStore exploration; private readonly AllianceStore alliances;
+    private readonly MomentLikeStore momentLikes;
+    private readonly Timer allianceCleanup;
     private readonly SemaphoreSlim poiWrites = new(1, 1);
     private readonly PoiImageStore poiImages;
     private readonly CancellationTokenSource stop = new(); private readonly LiveEventHub events = new();
@@ -41,7 +43,7 @@ public sealed partial class ServerMapWebServer : IDisposable
 
     public ServerMapWebServer(ICoreServerAPI api, ServerMapConfig config, string root, WorldDatabaseReader reader, MapPalette materials, MapAuthStore auth, PoiStore pois, AnnouncementStore announcements)
     {
-        this.api = api; this.config = config; this.root = root; this.reader = reader; this.materials = materials; this.auth = auth; this.pois = pois; this.announcements = announcements; exploration = new ExplorationStore(root); alliances = new AllianceStore(root);
+        this.api = api; this.config = config; this.root = root; this.reader = reader; this.materials = materials; this.auth = auth; this.pois = pois; this.announcements = announcements; exploration = new ExplorationStore(root); alliances = new AllianceStore(root); momentLikes = new MomentLikeStore(root);
         poiImages = new PoiImageStore(Path.Combine(root, "poi-images"));
         trackStore = new PlayerTrackStore(Path.Combine(root, "player-tracks"));
         teleportQuota = new DailyTeleportQuota(Path.Combine(root, "teleport-quota.json"));
@@ -51,6 +53,7 @@ public sealed partial class ServerMapWebServer : IDisposable
         InitializeNotebook();
         InitializeAvatars();
         trackingListener = api.Event.RegisterGameTickListener(_ => CaptureTracks(), 1000);
+        allianceCleanup = new(_ => { if (stop.IsCancellationRequested) return; try { alliances.PruneExpired(); } catch (Exception ex) { api.Logger.Warning("ServerMap alliance request cleanup failed: {0}", ex.Message); } }, null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
         webRoot = ResolveWebRoot(api); renderer = new MapRenderer(reader, root, api.World.BlockAccessor.MapSizeY, materials); pyramid = new TilePyramidBuilder(root);
         foreach (var name in Renderers) { baseTiles[name] = LoadBaseTiles(name); layerVersions[name] = 1; }
         foreach (var region in baseTiles.Values.SelectMany(tiles => tiles.Keys)) knownRegions.TryAdd(region, 0);
@@ -182,6 +185,14 @@ public sealed partial class ServerMapWebServer : IDisposable
         if (exploration.RecordNativeChunks(player, cells)) Interlocked.Exchange(ref nativeExplorationChanged, 1);
     }
 
+    public void ReplaceExplorationFromMap(IServerPlayer player, IEnumerable<long> cells)
+    {
+        var result = exploration.ReplaceFromMap(player, cells);
+        // Shrinking old radius-based coverage revokes visibility/teleport access, including for allies.
+        if (result.Removed) Interlocked.Exchange(ref explorationGroupsChanged, 1);
+        else if (result.Changed) Interlocked.Exchange(ref nativeExplorationChanged, 1);
+    }
+
     private void RefreshExplorationGroups()
     {
         foreach (var player in api.World.AllOnlinePlayers.OfType<IServerPlayer>())
@@ -297,6 +308,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             var id = context.Request.QueryString["id"];
             var removed = pois.All.FirstOrDefault(p => p.Id == id);
             if (string.IsNullOrWhiteSpace(id) || !pois.Remove(id, principal.PlayerUid, principal.IsAdmin)) { NotFound(context); return; }
+            momentLikes.Clear(id);
             poiImages.Delete(removed?.ImageKey);
             events.Publish("layer", new { layer = "pois", version = layerVersions.AddOrUpdate("pois", 2, (_, old) => old + 1) }); Json(context, new { removed = true }, true); return;
         }
@@ -352,7 +364,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             }
             catch { poiImages.Delete(imageKey); throw; }
             if (result != PoiStore.SaveResult.Saved) poiImages.Delete(imageKey);
-            else if (replaceImage) poiImages.Delete(existing?.ImageKey);
+            else if (replaceImage) { poiImages.Delete(existing?.ImageKey); momentLikes.Clear(saved!.Id); }
             if (result == PoiStore.SaveResult.QuotaExceeded) { Error(context, 409, $"POI limit reached ({Math.Max(0, Management.PoiQuota)})"); return; }
             if (result == PoiStore.SaveResult.Forbidden) { Error(context, 403, "Cannot edit another player's POI"); return; }
             events.Publish("layer", new { layer = "pois", version = layerVersions.AddOrUpdate("pois", 2, (_, old) => old + 1) }); Json(context, saved!, true);
@@ -482,7 +494,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             version = 12,
             serverName = api.Server.Config.ServerName,
             updatedAt = startedAt,
-            serverMapVersion = "0.3.5",
+            serverMapVersion = "0.3.7",
             poiZoomRanges = true,
             tileVersion = typeof(ServerMapWebServer).Assembly.ManifestModule.ModuleVersionId.ToString("N"),
             colorVersion = materials.ClientColormapVersion,
@@ -506,7 +518,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             // Flat aliases keep the metadata easy to consume for lightweight
             // custom web roots that do not understand the nested objects.
             serverVersion = GameVersion.LongGameVersion,
-            mapVersion = "0.3.5",
+            mapVersion = "0.3.7",
             mapSize = $"{mapSizeX} × {mapSizeZ} × {mapSizeY}",
             cacheSizeBytes = cacheBytes,
             renderTimeMs = RenderMilliseconds,
@@ -549,13 +561,15 @@ public sealed partial class ServerMapWebServer : IDisposable
     private object Allies(MapAuthStore.Principal? principal)
     {
         if (principal == null) return new { enabled = Management.ShareExploration, members = Array.Empty<object>() };
-        var snapshot = alliances.Snapshot(principal.PlayerUid);
-        var members = snapshot.Allies.Select(uid =>
+        var snapshot = alliances.SnapshotDetails(principal.PlayerUid);
+        var relations = snapshot.Allies.Select(uid => new { uid, pending = (string?)null, pendingUntil = (DateTimeOffset?)null })
+            .Concat(snapshot.Pending.Select(request => new { uid = request.Uid, pending = (string?)(request.Incoming ? "incoming" : "outgoing"), pendingUntil = (DateTimeOffset?)request.ExpiresAt }));
+        var members = relations.Select(relation =>
         {
-            var player = api.World.AllOnlinePlayers.FirstOrDefault(p => p.PlayerUID == uid);
-            var key = ClientAvatars?.GetLastKey(uid) ?? alliances.Avatar(uid);
-            return new { uid, name = player?.PlayerName ?? auth.PlayerName(uid) ?? uid, online = player != null,
-                avatar = (player == null ? null : PlayerAvatar(player)) ?? (key == null ? null : "api/v1/avatars/" + key + ".png") };
+            var player = api.World.AllOnlinePlayers.FirstOrDefault(p => p.PlayerUID == relation.uid);
+            var key = ClientAvatars?.GetLastKey(relation.uid) ?? alliances.Avatar(relation.uid);
+            return new { uid = relation.uid, name = player?.PlayerName ?? auth.PlayerName(relation.uid) ?? relation.uid, online = player != null,
+                avatar = (player == null ? null : PlayerAvatar(player)) ?? (key == null ? null : "api/v1/avatars/" + key + ".png"), pending = relation.pending, pendingUntil = relation.pendingUntil };
         }).OrderBy(p => p.name).ToArray();
         return new { enabled = Management.ShareExploration, mapId = snapshot.MapId, members };
     }
@@ -574,7 +588,12 @@ public sealed partial class ServerMapWebServer : IDisposable
             if (action == "add")
             {
                 if (!Management.ShareExploration) { Error(context, 403, "Exploration sharing is disabled"); return; }
-                alliances.Join(principal.PlayerUid, Field("mapId"));
+                alliances.Request(principal.PlayerUid, Field("mapId"));
+            }
+            else if (action == "accept")
+            {
+                if (!Management.ShareExploration) { Error(context, 403, "Exploration sharing is disabled"); return; }
+                alliances.Accept(principal.PlayerUid, Field("uid"));
             }
             else if (action == "remove")
             {
@@ -582,7 +601,7 @@ public sealed partial class ServerMapWebServer : IDisposable
                 if (!alliances.Remove(principal.PlayerUid, Field("uid"))) { Error(context, 404, "Player is not joined"); return; }
             }
             else { Error(context, 400, "Invalid alliance action"); return; }
-            events.Publish("visibility", new { changed = true });
+            if (action != "add") events.Publish("visibility", new { changed = true });
             Json(context, Allies(principal), true);
         }
         catch (KeyNotFoundException ex) { Error(context, 404, ex.Message); }
@@ -904,7 +923,7 @@ public sealed partial class ServerMapWebServer : IDisposable
                 if (waypointListener != 0) { api.Event.UnregisterGameTickListener(waypointListener); waypointListener = 0; }
                 if (trackingListener != 0) { api.Event.UnregisterGameTickListener(trackingListener); trackingListener = 0; }
                 foreach (var track in trackStore.Active) trackStore.Stop(track.Id, "server-stopped");
-                stop.Cancel(); events.Dispose(); avatars?.Dispose(); ClientAvatars?.Dispose(); Mounts.Dispose(); exploration.Dispose(); alliances.Dispose();
+                stop.Cancel(); allianceCleanup.Dispose(); events.Dispose(); avatars?.Dispose(); ClientAvatars?.Dispose(); Mounts.Dispose(); exploration.Dispose(); alliances.Dispose();
                 try { listener?.Stop(); listener?.Close(); } catch { }
             }
             return maintenance;

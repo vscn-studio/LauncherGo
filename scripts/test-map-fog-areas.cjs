@@ -95,6 +95,7 @@ async function run() {
   assert.deepEqual(await markers(null), []);
   const bobId = (await json('/allies', cookies.bob)).mapId;
   for (const uid of ['alice', 'admin']) await call('/allies', cookies[uid], { action: 'add', mapId: bobId });
+  for (const uid of ['alice', 'admin']) await call('/allies', cookies.bob, { action: 'accept', uid });
   assert.deepEqual((await markers(cookies.alice)).find(m => m.id === coast.id).rects, clipped.rects, 'Offline ally works without own exploration');
   await call('/allies', cookies.alice, { action: 'remove', uid: 'bob' });
   assert.deepEqual(await markers(cookies.alice), []);
@@ -218,10 +219,23 @@ async function run() {
       await adminPage.locator('#areaMarkerModal [data-area-action="save"]').click();
       await adminPage.locator('#areaMarkerToolbar').waitFor({ state: 'hidden' });
       assert.deepEqual((await markers(cookies.admin)).find(m => m.id === coast.id).editRects, coast.rects);
+      // Completing a full native-cache snapshot corrects old excess exploration for the owner and allies.
+      const oldCells = (await fog(cookies.bob)).cells.map(cell => [cell.x, cell.z]);
+      const historyControl = path.join(path.dirname(process.env.MAP_TEST_CONTROL), 'explore-bob-history.test');
+      await fs.writeFile(historyControl, JSON.stringify([[nativeX, nativeZ]]));
+      await until(async () => (await fog(cookies.bob)).cells.length === 1);
+      assert.equal(await alpha('/tiles/basic/0/0_0.png', cookies.bob, 160, 160), 0, 'Old extra exploration survived full replacement');
+      assert.equal(await alpha('/tiles/basic/0/0_0.png', cookies.admin, 160, 160), 0, 'Ally kept revoked historical exploration');
+      await bobPage.locator(`.area-marker-overlay[data-area-id="${coast.id}"]`).waitFor({ state: 'hidden' });
+      await adminPage.locator(`.area-marker-overlay[data-area-id="${coast.id}"]`).waitFor({ state: 'hidden' });
+      await checkNativePixels(bobPage, true); await checkNativePixels(adminPage, true);
+      await fs.writeFile(historyControl, JSON.stringify(oldCells));
+      await until(async () => (await fog(cookies.bob)).cells.length === oldCells.length);
+      await bobPage.locator(`.area-marker-overlay[data-area-id="${coast.id}"]`).first().waitFor();
       assert.deepEqual(errors, []);
       if (process.env.MAP_SCREENSHOTS) { await fs.mkdir(process.env.MAP_SCREENSHOTS, { recursive: true }); await bobPage.screenshot({ path: path.join(process.env.MAP_SCREENSHOTS, `fog-area-${width}.png`) }); }
       for (const context of contexts) await context.close();
-      console.log(`PASS ${width}px: master checkbox, live settings, clipping, stale responses, native single-cell SSE/Host refresh without movement, ally updates and preserved admin drafts`);
+      console.log(`PASS ${width}px: master checkbox, clipping, native SSE/Host refresh, preserved drafts, full-history replacement and revoked ally visibility`);
     }
   } finally { await browser.close(); }
   // The account/session was created as admin, but the real game's offline

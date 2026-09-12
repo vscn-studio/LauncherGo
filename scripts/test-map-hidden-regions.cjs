@@ -210,7 +210,7 @@ async function checkSelection(page, width, cookie) {
   for (const region of [singleRegion, ...saved]) await call('/hidden-regions?id=' + region.id, cookie, undefined, 'DELETE');
   console.log(`PASS ${width}px: one-pixel mouse/touch, union, undo/redo, erase, pan, ONE record/label, drawing edits, cancel and holes`);
 }
-async function checkAlliesPanel(page,width,cookie,bobMapId){
+async function checkAlliesPanel(page,width,cookie,bobMapId,bobCookie,requesterUid='admin'){
   assert.equal(await page.locator('#alliesDialog').count(),0,'The old alliance modal is removed');
   await page.locator('#alliesButton').click();await page.locator('#alliesPanel').waitFor({state:'visible'});
   await page.waitForFunction(()=>document.querySelector('#ownMapId').value.length===32&&!document.querySelector('#allyJoin').disabled);
@@ -227,8 +227,13 @@ async function checkAlliesPanel(page,width,cookie,bobMapId){
   await page.locator('#allyMapId').fill(bobMapId);await page.locator('#allyMapId').press('Enter');
   await page.locator('.ally-row').waitFor({state:'visible'});
   assert.equal(await page.locator('.ally-name').textContent(),'bob');
+  assert.equal(await page.locator('.ally-row button').textContent(),'等待');
   await page.waitForFunction(()=>{const img=document.querySelector('.ally-row img');return img.complete&&img.naturalWidth>0&&img.src.includes('/api/v1/avatars/');});
-  const joined=await (await call('/allies',cookie)).json();assert.equal(joined.members.length,1);
+  const requested=await (await call('/allies',cookie)).json();assert.equal(requested.members.length,1);assert.equal(requested.members[0].pending,'outgoing');
+  await call('/allies',bobCookie,{action:'accept',uid:requesterUid});
+  await page.evaluate(()=>window.testEvents.dispatchEvent(new MessageEvent('visibility')));
+  await page.waitForFunction(()=>document.querySelector('.ally-row button')?.textContent==='删除');
+  const joined=await (await call('/allies',cookie)).json();assert.equal(joined.members.length,1);assert.equal(joined.members[0].pending,null);
   if(process.env.MAP_SCREENSHOTS)await page.screenshot({path:path.join(process.env.MAP_SCREENSHOTS,`allies-${width}.png`)});
   await page.locator('#alliesButton').click();assert.equal(await page.locator('#alliesPanel').isHidden(),true);
   await page.locator('#alliesButton').click();await page.locator('.ally-row').waitFor({state:'visible'});
@@ -236,9 +241,9 @@ async function checkAlliesPanel(page,width,cookie,bobMapId){
   await page.locator('.ally-row button').click();await page.locator('.ally-row').waitFor({state:'detached'});
   assert.equal((await (await call('/allies',cookie)).json()).members.length,0);
   await page.keyboard.press('Escape');assert.equal(await page.locator('#alliesPanel').isHidden(),true);
-  console.log(`PASS ${width}px: inline map-ID panel, placement, self-validation, Enter join, generated offline avatar, toggle and removal`);
+  console.log(`PASS ${width}px: inline map-ID panel, placement, self-validation, Enter request, approval, generated offline avatar and removal`);
 }
-async function checkBrowser(cookie, metadata, bobMapId) {
+async function checkBrowser(cookie, metadata, bobMapId, bobCookie) {
   const browser = await chromium.launch({ headless: true });
   try {
     for (const width of [1280, 390]) {
@@ -287,7 +292,7 @@ async function checkBrowser(cookie, metadata, bobMapId) {
       assert.deepEqual(errors, [], 'Authentication and visibility updates must not throw');
       console.log(`PASS ${width}px: transparent preview, toggle, reload, visibility updates`);
       await checkSelection(page, width, cookie);
-      await checkAlliesPanel(page, width, cookie, bobMapId);
+      await checkAlliesPanel(page, width, cookie, bobMapId, bobCookie);
       if(width===390){
         let release,arrived;const pending=new Promise(resolve=>arrived=resolve),hold=new Promise(resolve=>release=resolve);
         await page.route('**/api/v1/allies',async route=>{const response=await route.fetch();arrived();await hold;await route.fulfill({response});});
@@ -329,7 +334,7 @@ async function main() {
   const metadata = await (await call('/map/metadata')).json();
   await checkCompoundApi(cookies);
   const bobMapId=await checkAllianceApi(cookies,announcement,management);
-  await checkBrowser(cookies.admin, metadata,bobMapId);
+  await checkBrowser(cookies.admin, metadata,bobMapId,cookies.bob);
 }
 async function expectStatus(route,cookie,body,status,header=true){
   const response=await fetch(api+route,{method:'POST',headers:{Cookie:cookie||'','Content-Type':'application/json',...(header?{'X-ServerMap-Request':'1'}:{})},body:JSON.stringify(body)});
@@ -371,9 +376,10 @@ async function checkAllianceApi(cookies,announcement,management){
   const fog=async cookie=>(await (await call('/fog/regions?minX=150&minZ=150&maxX=180&maxZ=180',cookie)).json()).cells;
   const deadline=Date.now()+10000;while(!(await fog(cookies.bob)).length){assert.ok(Date.now()<deadline);await new Promise(resolve=>setTimeout(resolve,100));}
   assert.equal((await fog(cookies.alice)).length,0);
-  const joined=await (await call('/allies',cookies.alice,add)).json();assert.equal(joined.members.length,1);assert.equal(joined.members[0].online,false);
+  const requested=await (await call('/allies',cookies.alice,add)).json();assert.equal(requested.members.length,1);assert.equal(requested.members[0].pending,'outgoing');
+  const joined=await (await call('/allies',cookies.bob,{action:'accept',uid:'alice'})).json();assert.equal(joined.members.length,1);assert.equal(joined.members[0].pending,null);assert.equal(joined.members[0].online,false);
   assert.match(joined.members[0].avatar,/^api\/v1\/avatars\/[0-9a-f]{64}\.png$/);
-  assert.equal((await get(cookies.bob)).members[0].name,'alice');assert.ok((await fog(cookies.alice)).length);
+  assert.equal((await get(cookies.bob)).members[0].name,'alice');assert.equal((await get(cookies.bob)).members[0].pending,null);assert.ok((await fog(cookies.alice)).length);
   const tile=async cookie=>Buffer.from(await (await call('/tiles/basic/0/0_0.png',cookie)).arrayBuffer());
   assert.deepEqual(pixel(await tile(cookies.alice),160,160),terrain,'ID alliance actually shares offline exploration without a game group');
   await expectStatus('/allies',cookies.alice,add,409);
@@ -381,7 +387,7 @@ async function checkAllianceApi(cookies,announcement,management){
   await call('/allies',cookies.alice,{action:'remove',uid:'bob'});assert.equal((await get(cookies.bob)).members.length,0);
   await sharing(true);assert.deepEqual(pixel(await tile(cookies.alice),160,160),transparent,'Removal revokes shared visibility');
   assert.equal((await get(cookies.bob)).mapId,bob.mapId);
-  console.log('PASS HTTP: stable private map IDs, no invitations/candidates, offline sharing, validation, permissions, disabled sharing and symmetric removal');
+  console.log('PASS HTTP: stable private map IDs, request/approval flow, offline sharing, validation, permissions, disabled sharing and symmetric removal');
   return bob.mapId;
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

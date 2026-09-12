@@ -6,6 +6,8 @@ namespace ServerMap.Network;
 {
     [ProtoMember(1)] public int ExplorationProtocol { get; set; }
     [ProtoMember(2)] public string ExplorationClient { get; set; } = "";
+    [ProtoMember(3)] public int HistoryProtocol { get; set; }
+    [ProtoMember(4)] public string WorldId { get; set; } = "";
 }
 [ProtoContract] public sealed class ServerHiddenMapPacket
 {
@@ -43,4 +45,26 @@ namespace ServerMap.Network;
     [ProtoMember(2)] public long Sequence { get; set; }
     [ProtoMember(3)] public long[] Accepted { get; set; } = [];
     [ProtoMember(4)] public string ClientSession { get; set; } = "";
+    [ProtoMember(5)] public int HistoryProtocol { get; set; }
+    [ProtoMember(6)] public string WorldId { get; set; } = "";
+}
+
+[ProtoContract] public sealed class ClientMapHistoryPacket
+{
+    [ProtoMember(1)] public string Session { get; set; } = "";
+    [ProtoMember(2)] public string WorldId { get; set; } = "";
+    [ProtoMember(3)] public string Snapshot { get; set; } = "";
+    [ProtoMember(4)] public long Sequence { get; set; }
+    [ProtoMember(5)] public long[] Cells { get; set; } = [];
+    [ProtoMember(6)] public bool Complete { get; set; }
+    [ProtoMember(7)] public int Dimension { get; set; }
+}
+
+[ProtoContract] public sealed class ServerMapHistoryAckPacket
+{
+    [ProtoMember(1)] public string Session { get; set; } = "";
+    [ProtoMember(2)] public string Snapshot { get; set; } = "";
+    [ProtoMember(3)] public long Sequence { get; set; }
+    [ProtoMember(4)] public bool Complete { get; set; }
+    [ProtoMember(5)] public string ClientSession { get; set; } = "";
 }

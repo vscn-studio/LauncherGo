@@ -26,7 +26,7 @@
     });
     $('poiImageRemove').onclick=()=>{epoch++;selected=null;changed=true;$('poiImageInput').value='';$('poiImageError').textContent='';clearPreview();$('poiImageRemove').hidden=true;};
     $('poiImageViewerClose').onclick=()=>$('poiImageViewer').close();
-    const viewer=$('poiImageViewer'),outside=e=>{const r=viewer.getBoundingClientRect();return e.target===viewer&&(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom);};
+    const viewer=$('poiImageViewer'),outside=e=>{const r=$('poiImageFull').getBoundingClientRect();return e.target===viewer&&(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom);};
     let backdropDown=false;viewer.addEventListener('pointerdown',e=>backdropDown=outside(e));
     viewer.addEventListener('click',e=>{if(backdropDown&&outside(e))viewer.close();backdropDown=false;});
     $('poiImageViewer').addEventListener('close',()=>{$('poiImageFull').removeAttribute('src');});
@@ -34,8 +34,9 @@
     new MutationObserver(()=>{if($('poiModal').hidden)reset();}).observe($('poiModal'),{attributes:true,attributeFilter:['hidden']});
   }
   function setting(value){
-    enabled=value===true;$('poiImagesEnabledInput').checked=enabled;$('poiImageField').hidden=!enabled;
+    const previous=enabled;enabled=value===true;$('poiImagesEnabledInput').checked=enabled;$('poiImageField').hidden=!enabled;
     if(!enabled){reset();$('poiImageViewer').close();document.querySelectorAll('.poi-image-button').forEach(el=>el.remove());}
+    if(previous!==enabled)document.dispatchEvent(new CustomEvent('servermap-poi-images-changed',{detail:{enabled}}));
   }
   async function payload(){
     if(!enabled||!changed){if(enabled&&$('poiImageInput').files.length)throw Error($('poiImageError').textContent||t('poiImageLoading'));return {};}
@@ -48,7 +49,7 @@
     image.onerror=()=>{button.textContent=t('poiImageFailed');button.disabled=true;};
     button.onclick=()=>{if(enabled)view({id:feature.id,imageKey:key,name:feature.properties.name});};return button;
   }
-  function view(item){$('poiImageViewerError').textContent='';$('poiImageFull').alt=item.name||'';$('poiImageFull').src=url(item.id,item.imageKey,0);$('poiImageViewer').showModal();}
+  function view(item){if(!enabled)return;$('poiImageViewerError').textContent='';$('poiImageFull').alt=item.name||'';$('poiImageFull').src=url(item.id,item.imageKey,0);$('poiImageViewer').showModal();}
   function configure(settings={}){maxBytes=(settings.imageMaxMb??10)*1024*1024;allowedTypes=settings.imageTypes||['jpeg','png','webp','bmp'];$('poiImageInput').accept=allowedTypes.flatMap(t=>t==='jpeg'?['.jpg','.jpeg']:['.'+t]).join(',');const help=document.querySelector('[data-i18n="poiImageHelp"]');if(help)help.textContent=t('poiImageHelp');}
-  window.ServerMapPoiImages={init,reset,setting,configure,url,view,payload,thumbnail,messages,error:key=>messages[language()]?.[key]};
+  window.ServerMapPoiImages={init,reset,setting,configure,url,view,payload,thumbnail,messages,isEnabled:()=>enabled,error:key=>messages[language()]?.[key]};
 })();

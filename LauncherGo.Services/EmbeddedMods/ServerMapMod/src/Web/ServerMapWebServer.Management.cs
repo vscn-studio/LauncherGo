@@ -11,11 +11,12 @@ public sealed partial class ServerMapWebServer
     private MapManagementSettings Management => announcements.Current.Management ?? new() { PoiQuota = config.MaxPoisPerPlayer };
     private bool ManagementRequest(HttpListenerContext context, string path)
     {
-        if (path is not ("api/v1/moments" or "api/v1/admin/images" or "api/v1/admin/tracks" or "api/v1/admin/online-players" or "api/v1/admin/track-mount-image")) return false;
+        if (path is not ("api/v1/moments" or "api/v1/moments/like" or "api/v1/admin/images" or "api/v1/admin/tracks" or "api/v1/admin/online-players" or "api/v1/admin/track-mount-image")) return false;
         var principal = Principal(context.Request);
         var admin = path.StartsWith("api/v1/admin/", StringComparison.Ordinal);
         if (admin && principal?.IsAdmin != true) { Error(context, 403, "Admin login required"); return true; }
         var method = context.Request.HttpMethod;
+        if ((path is "api/v1/moments" or "api/v1/moments/like") && method != "GET" && principal == null) { Error(context, 401, "Login required"); return true; }
         if (method != "GET" && context.Request.Headers["X-ServerMap-Request"] != "1") { Error(context, 403, "Missing request header"); return true; }
         try
         {
@@ -26,16 +27,29 @@ public sealed partial class ServerMapWebServer
                 else { context.Response.Headers["X-Content-Type-Options"] = "nosniff"; context.Response.Headers["Vary"] = "Cookie"; ServeFile(context, image, "image/png", true); }
                 return true;
             }
-            if (path is "api/v1/moments" or "api/v1/admin/images")
+            if (path is "api/v1/moments" or "api/v1/moments/like" or "api/v1/admin/images")
             {
-                if (method == "GET")
+                if (method == "GET" && (path == "api/v1/moments" || path == "api/v1/admin/images"))
                 {
                     var query = context.Request.QueryString["q"] ?? "";
                     var points = pois.All.Where(p => p.ImageKey != null && (admin || announcements.Current.PoiImagesEnabled && !Management.Layer("pois").Forbidden && PoiVisible(principal, p)))
                         .Where(p => string.IsNullOrEmpty(query) || p.Name.Contains(query, StringComparison.OrdinalIgnoreCase) || p.Text.Contains(query, StringComparison.OrdinalIgnoreCase) || ImageAuthor(p).Contains(query, StringComparison.OrdinalIgnoreCase));
                     var skip = int.TryParse(context.Request.QueryString["skip"], out var offset) ? Math.Max(0, offset) : 0;
-                    var all = points.OrderByDescending(p => p.UpdatedAt).ToArray();
-                    Json(context, new { total = all.Length, items = all.Skip(skip).Take(100).Select(p => new { id = p.Id, name = p.Name, text = p.Text, author = ImageAuthor(p), imageKey = p.ImageKey, updatedAt = p.UpdatedAt }) }, true);
+                    var sort = context.Request.QueryString["sort"];
+                    var all = (sort?.Equals("likes", StringComparison.OrdinalIgnoreCase) == true
+                        ? points.OrderByDescending(p => momentLikes.Count(p.Id)).ThenByDescending(p => p.UpdatedAt)
+                        : points.OrderByDescending(p => p.UpdatedAt)).ToArray();
+                    Json(context, new { total = all.Length, items = all.Skip(skip).Take(100).Select(p => MomentView(p, principal)) }, true);
+                }
+                else if (method == "POST" && (path == "api/v1/moments/like" || path == "api/v1/moments"))
+                {
+                    using var document = ReadJson(context.Request);
+                    var id = document.RootElement.TryGetProperty("id", out var idValue) ? idValue.GetString() : context.Request.QueryString["id"];
+                    var point = pois.All.FirstOrDefault(p => p.Id == id && p.ImageKey != null && announcements.Current.PoiImagesEnabled && !Management.Layer("pois").Forbidden && PoiVisible(principal, p));
+                    if (point == null) { NotFound(context); return true; }
+                    var desired = document.RootElement.TryGetProperty("liked", out var likedValue) && likedValue.ValueKind is JsonValueKind.True or JsonValueKind.False ? likedValue.GetBoolean() : (bool?)null;
+                    var result = desired.HasValue ? momentLikes.Set(point.Id, principal!.PlayerUid, desired.Value) : momentLikes.Toggle(point.Id, principal!.PlayerUid);
+                    Json(context, new { liked = result.Liked, isLiked = result.Liked, likes = result.Count, likeCount = result.Count, id = point.Id }, true);
                 }
                 else if (admin && method == "DELETE")
                 {
@@ -48,6 +62,7 @@ public sealed partial class ServerMapWebServer
                         // Require the displayed key, so a stale manager cannot delete a replacement.
                         if (point.ImageKey != context.Request.QueryString["key"]) { Error(context, 409, "Image changed; refresh"); return true; }
                         pois.TrySave(point with { ImageKey = null, ImageAddedBy = null, ImageAddedByUid = null }, principal!.PlayerUid, Management.PoiQuota, true, out _, true);
+                        momentLikes.Clear(point.Id);
                         // Keep sanitized files for recovery; the detached key is no longer servable.
                         events.Publish("layer", new { layer = "pois", version = layerVersions.AddOrUpdate("pois", 2, (_, n) => n + 1) });
                         Json(context, new { removed = true }, true);
@@ -113,6 +128,40 @@ public sealed partial class ServerMapWebServer
         return true;
     }
     private string ImageAuthor(PoiStore.Poi point) => point.ImageAddedBy ?? auth.PlayerName(point.OwnerUid) ?? point.OwnerUid;
+    private string? MomentAvatar(PoiStore.Poi point)
+    {
+        var uid = point.ImageAddedByUid ?? point.OwnerUid;
+        var player = api.World.AllOnlinePlayers.FirstOrDefault(p => p.PlayerUID == uid);
+        if (player != null) return PlayerAvatar(player);
+        var key = ClientAvatars?.GetLastKey(uid) ?? alliances.Avatar(uid);
+        return key == null ? null : "api/v1/avatars/" + key + ".png";
+    }
+    private object MomentView(PoiStore.Poi point, MapAuthStore.Principal? principal)
+    {
+        var likes = momentLikes.Count(point.Id);
+        var liked = momentLikes.HasLiked(point.Id, principal?.PlayerUid);
+        var author = ImageAuthor(point);
+        var avatar = MomentAvatar(point);
+        return new
+        {
+            id = point.Id,
+            title = point.Name,
+            description = point.Text,
+            name = point.Name,
+            text = point.Text,
+            author,
+            playerName = author,
+            avatar,
+            playerAvatar = avatar,
+            imageKey = point.ImageKey,
+            updatedAt = point.UpdatedAt,
+            location = point.Name,
+            likes,
+            likeCount = likes,
+            liked,
+            isLiked = liked
+        };
+    }
     private void CaptureTracks()
     {
         RefreshExplorationGroups();

@@ -5,6 +5,7 @@
     <Reference Include="VintagestoryLib" HintPath="$(VINTAGE_STORY)/VintagestoryLib.dll" />
     <Reference Include="VSEssentials" HintPath="$(VINTAGE_STORY)/Mods/VSEssentials.dll" />
     <Reference Include="VSSurvivalMod" HintPath="$(VINTAGE_STORY)/Mods/VSSurvivalMod.dll" />
+    <Reference Include="Microsoft.Data.Sqlite" HintPath="$(VINTAGE_STORY)/Lib/Microsoft.Data.Sqlite.dll" />
     <Reference Include="ServerMap" HintPath="../../../LauncherGo.Services/EmbeddedMods/ServerMapMod/bin/Release/package/ServerMap.dll" />
   </ItemGroup>
 </Project>

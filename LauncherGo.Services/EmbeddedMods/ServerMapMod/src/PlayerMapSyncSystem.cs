@@ -40,6 +40,7 @@ public sealed class PlayerMapSyncSystem : ModSystem
             .RegisterMessageType<ServerAvatarRequestPacket>().RegisterMessageType<ClientAvatarChunkPacket>()
             // Append new packet IDs so the existing avatar/hidden-region protocol remains compatible.
             .RegisterMessageType<ClientMapExplorationPacket>().RegisterMessageType<ServerMapExplorationAckPacket>()
+            .RegisterMessageType<ClientMapHistoryPacket>().RegisterMessageType<ServerMapHistoryAckPacket>()
             .SetMessageHandler<ClientMapReadyPacket>((player, packet) =>
             {
                 var now = Environment.TickCount64;
@@ -47,7 +48,7 @@ public sealed class PlayerMapSyncSystem : ModSystem
                 helloAt[player.PlayerUID] = now + 5000; readyPlayers.Add(player.PlayerUID); regionVersions.Remove(player.PlayerUID); avatarChecked.Remove(player.PlayerUID);
                 api.Logger.Notification("ServerMap player-data client connected: {0}.", player.PlayerUID);
                 SyncPlayer(player);
-                if (serverExploration?.Begin(player, packet.ExplorationProtocol, packet.ExplorationClient) is { } hello) serverChannel?.SendPacket(hello, player);
+                if (serverExploration?.Begin(player, packet.ExplorationProtocol, packet.ExplorationClient, packet.HistoryProtocol, packet.WorldId) is { } hello) serverChannel?.SendPacket(hello, player);
             })
             .SetMessageHandler<ClientAvatarChunkPacket>((player, packet) =>
             {
@@ -69,6 +70,22 @@ public sealed class PlayerMapSyncSystem : ModSystem
                     {
                         explorationErrorAt = Environment.TickCount64 + 30_000;
                         api.Logger.Warning("ServerMap native exploration save failed; client will retry: {0}", ex.Message);
+                    }
+                }
+            })
+            .SetMessageHandler<ClientMapHistoryPacket>((player, packet) =>
+            {
+                if (stop.IsCancellationRequested) return;
+                try
+                {
+                    if (serverExploration?.ReceiveHistory(player, packet, Environment.TickCount64) is { } ack) serverChannel?.SendPacket(ack, player);
+                }
+                catch (Exception ex)
+                {
+                    if (Environment.TickCount64 >= explorationErrorAt)
+                    {
+                        explorationErrorAt = Environment.TickCount64 + 30_000;
+                        api.Logger.Warning("ServerMap historical exploration save failed; previous exploration is unchanged and the client will retry: {0}", ex.Message);
                     }
                 }
             });
@@ -126,9 +143,11 @@ public sealed class PlayerMapSyncSystem : ModSystem
         clientChannel = api.Network.RegisterChannel(Channel).RegisterMessageType<ClientMapReadyPacket>().RegisterMessageType<ServerHiddenMapPacket>()
             .RegisterMessageType<ServerAvatarRequestPacket>().RegisterMessageType<ClientAvatarChunkPacket>()
             .RegisterMessageType<ClientMapExplorationPacket>().RegisterMessageType<ServerMapExplorationAckPacket>()
+            .RegisterMessageType<ClientMapHistoryPacket>().RegisterMessageType<ServerMapHistoryAckPacket>()
             .SetMessageHandler<ServerHiddenMapPacket>(packet => api.Event.EnqueueMainThreadTask(() => { if (!stop.IsCancellationRequested) { hiddenMap?.Apply(packet); receivedRegions = true; serverExplorationSupported = packet.ExplorationProtocol == MapExplorationProtocol.Version; } }, "servermap-hidden-sync"))
             .SetMessageHandler<ServerAvatarRequestPacket>(packet => api.Event.EnqueueMainThreadTask(() => QueueCapture(packet), "servermap-avatar-request"))
-            .SetMessageHandler<ServerMapExplorationAckPacket>(packet => api.Event.EnqueueMainThreadTask(() => { if (!stop.IsCancellationRequested && connected && clientChannel is { Connected: true }) clientExploration?.Receive(packet); }, "servermap-exploration-ack"));
+            .SetMessageHandler<ServerMapExplorationAckPacket>(packet => api.Event.EnqueueMainThreadTask(() => { if (!stop.IsCancellationRequested && connected && clientChannel is { Connected: true }) clientExploration?.Receive(packet); }, "servermap-exploration-ack"))
+            .SetMessageHandler<ServerMapHistoryAckPacket>(packet => api.Event.EnqueueMainThreadTask(() => { if (!stop.IsCancellationRequested && connected && clientChannel is { Connected: true }) clientExploration?.ReceiveHistory(packet); }, "servermap-history-ack"));
         try { clientExploration = new ClientNativeExploration(api); }
         catch (Exception ex) { api.Logger.Error("ServerMap native map generation observation unavailable: {0}", ex.Message); }
         hiddenMap = new ClientHiddenMap(api);
@@ -147,7 +166,9 @@ public sealed class PlayerMapSyncSystem : ModSystem
         if (!connected) { connected = true; nextHello = 0; }
         if ((!receivedRegions || serverExplorationSupported && clientExploration is { Connected: false }) && Environment.TickCount64 >= nextHello)
         {
-            clientChannel.SendPacket(new ClientMapReadyPacket { ExplorationProtocol = clientExploration != null ? MapExplorationProtocol.Version : 0, ExplorationClient = clientExploration?.ClientSession ?? "" });
+            clientChannel.SendPacket(new ClientMapReadyPacket { ExplorationProtocol = clientExploration != null ? MapExplorationProtocol.Version : 0,
+                ExplorationClient = clientExploration?.ClientSession ?? "", HistoryProtocol = clientExploration != null ? MapHistoryProtocol.Version : 0,
+                WorldId = client.World.SavegameIdentifier });
             nextHello = Environment.TickCount64 + 6000;
         }
         clientExploration?.Send(clientChannel, Environment.TickCount64);

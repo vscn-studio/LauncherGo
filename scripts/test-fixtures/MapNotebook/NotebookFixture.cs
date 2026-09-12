@@ -95,6 +95,19 @@ public sealed class NotebookFixture : ModSystem
                 web.RecordVerifiedExploration(player, [ServerMap.Network.MapExplorationProtocol.Cell(x, z)]);
                 lastNativeControl = value;
             }, 250);
+            var historyControl = Path.Combine((string)Field("dataRoot"), "explore-bob-history.test");
+            string? lastHistoryControl = null;
+            api.Event.RegisterGameTickListener(_ => {
+                if (!File.Exists(historyControl)) return;
+                var value = File.ReadAllText(historyControl); if (value == lastHistoryControl) return;
+                int[][]? cells;
+                try { cells = System.Text.Json.JsonSerializer.Deserialize<int[][]>(value); }
+                catch (System.Text.Json.JsonException) { return; }
+                if (cells == null || cells.Any(cell => cell.Length != 2)) return;
+                var player = DispatchProxy.Create<IServerPlayer, TestPlayer>(); ((TestPlayer)(object)player).Name = "bob";
+                web.ReplaceExplorationFromMap(player, cells.Select(cell => ServerMap.Network.MapExplorationProtocol.Cell(cell[0], cell[1])));
+                lastHistoryControl = value;
+            }, 250);
             long clientAvatarTick = 0;
             clientAvatarTick = api.Event.RegisterGameTickListener(_ => {
                 var key = clientAvatars.GetKey("avatar-fixture", "head-fixture"); if (key == null) return;
