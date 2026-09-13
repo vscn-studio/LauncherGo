@@ -6,7 +6,7 @@ using ServerMap.Util;
 
 namespace ServerMap.Web;
 
-/// <summary>Only solicited, sender-owned head snapshots are accepted; rendering is single-worker.</summary>
+/// <summary>Only solicited, sender-owned avatar snapshots are accepted; rendering is single-worker.</summary>
 public sealed class ClientAvatarStore : IDisposable
 {
     public const int ChunkSize = 48 * 1024;
@@ -40,7 +40,9 @@ public sealed class ClientAvatarStore : IDisposable
         catch (Exception ex) { log("Avatar index could not be loaded: " + ex.Message); }
     }
     private static bool ValidKey(string? key) => key?.Length == 64 && key.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
-    public static string AppearanceKey(string uid, byte[] skin) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("client-head-v3-front/" + uid + "/").Concat(skin).ToArray()));
+    // Bump the namespace for the lowered fixed torso crop so cached images from
+    // earlier head/torso layouts are never reused.
+    public static string AppearanceKey(string uid, byte[] skin) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("client-avatar-v8-lowered-torso-crop/" + uid + "/").Concat(skin).ToArray()));
     public string? GetKey(string uid, string appearance) { lock (gate) return saved.TryGetValue(uid, out var entry) && entry.Appearance == appearance ? entry.Image : null; }
     public string? GetLastKey(string uid) { lock (gate) return saved.GetValueOrDefault(uid)?.Image; }
     public string GetStatus(string uid, string? appearance)
@@ -65,7 +67,7 @@ public sealed class ClientAvatarStore : IDisposable
             }
             if (stop.IsCancellationRequested || !refresh && GetKey(uid, appearance) != null || retryAt.GetValueOrDefault(uid) > now || pending.ContainsKey(uid) || pending.Count >= 8 || saved.Count >= 512 && !saved.ContainsKey(uid)) return null;
             var token = Guid.NewGuid().ToString("N"); pending[uid] = new(appearance, token, now + 90_000); retryAt[uid] = now + 120_000;
-            log($"Avatar head mesh requested. Player={uid}."); return token;
+            log($"Avatar head/torso mesh requested. Player={uid}."); return token;
         }
     }
     public bool ReportFailure(string uid, string token, string error, long now)

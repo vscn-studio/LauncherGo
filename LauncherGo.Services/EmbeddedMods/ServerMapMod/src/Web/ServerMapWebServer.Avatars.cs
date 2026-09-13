@@ -13,7 +13,7 @@ public sealed partial class ServerMapWebServer
     private void InitializeAvatars()
     {
         ClientAvatars = new ClientAvatarStore(Path.Combine(root, "client-avatars"), message => api.Logger.Notification("ServerMap {0}", message));
-        api.Logger.Notification("ServerMap client-model avatars enabled; head mesh and cropped textures will be requested from connected map-mod clients.");
+        api.Logger.Notification("ServerMap client-model avatars enabled; head/torso mesh and cropped textures will be requested from connected map-mod clients.");
         try
         {
             var path = string.IsNullOrWhiteSpace(config.AvatarAssetsPath) ? Path.Combine(root, "avatar-layers") : Path.GetFullPath(config.AvatarAssetsPath);

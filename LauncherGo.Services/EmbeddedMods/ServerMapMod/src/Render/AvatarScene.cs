@@ -3,7 +3,7 @@ using System.Numerics;
 
 namespace ServerMap.Render;
 
-/// <summary>Bounded head-only mesh and cropped RGBA textures, never executable model files.</summary>
+/// <summary>Bounded avatar mesh and cropped RGBA textures, never executable model files.</summary>
 public sealed class AvatarScene
 {
     public const int MaxBytes = 3 * 1024 * 1024, MaxVertices = 12000, MaxPixels = 512 * 1024;
@@ -11,6 +11,13 @@ public sealed class AvatarScene
     public sealed record Vertex(float X, float Y, float Z, float U, float V, int Texture);
     public Texture[] Textures { get; init; } = [];
     public Vertex[] Vertices { get; init; } = [];
+    /// <summary>
+    /// Projected Y coordinate of the anatomical crop line.  The client derives
+    /// this from the unclothed LowerTorso/UpperTorso joints, so clothing and arm geometry
+    /// cannot move the bottom edge of the portrait.  NaN keeps v1 scenes
+    /// backwards-compatible and falls back to their geometric minimum.
+    /// </summary>
+    public float BottomCutProjection { get; init; } = float.NaN;
 
     public byte[] Pack()
     {
@@ -19,10 +26,11 @@ public sealed class AvatarScene
         using (var gzip = new GZipStream(output, CompressionLevel.Fastest, true))
         using (var writer = new BinaryWriter(gzip))
         {
-            writer.Write(1); writer.Write(Textures.Length);
+            writer.Write(2); writer.Write(Textures.Length);
             foreach (var t in Textures) { writer.Write(t.Width); writer.Write(t.Height); writer.Write(t.Rgba); }
             writer.Write(Vertices.Length);
             foreach (var v in Vertices) { writer.Write(v.X); writer.Write(v.Y); writer.Write(v.Z); writer.Write(v.U); writer.Write(v.V); writer.Write(v.Texture); }
+            writer.Write(BottomCutProjection);
         }
         var bytes = output.ToArray();
         if (bytes.Length > MaxBytes) throw new InvalidDataException("Avatar transfer too large");
@@ -41,7 +49,8 @@ public sealed class AvatarScene
             output.Write(buffer, 0, count);
         }
         output.Position = 0; using var reader = new BinaryReader(output);
-        if (reader.ReadInt32() != 1) throw new InvalidDataException("Avatar format");
+        var version = reader.ReadInt32();
+        if (version is not (1 or 2)) throw new InvalidDataException("Avatar format");
         var textures = new Texture[Bound(reader.ReadInt32(), 1, 128)]; var pixels = 0;
         for (var i = 0; i < textures.Length; i++)
         {
@@ -52,13 +61,15 @@ public sealed class AvatarScene
         }
         var vertices = new Vertex[Bound(reader.ReadInt32(), 3, MaxVertices)];
         for (var i = 0; i < vertices.Length; i++) vertices[i] = new(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadInt32());
+        var bottomCut = version >= 2 ? reader.ReadSingle() : float.NaN;
         if (output.Position != output.Length) throw new InvalidDataException("Trailing avatar data");
-        var scene = new AvatarScene { Textures = textures, Vertices = vertices }; scene.Validate(); return scene;
+        var scene = new AvatarScene { Textures = textures, Vertices = vertices, BottomCutProjection = bottomCut }; scene.Validate(); return scene;
     }
     private static int Bound(int n, int min, int max) => n >= min && n <= max ? n : throw new InvalidDataException("Avatar bounds");
     public void Validate(int maxVertices = MaxVertices, int maxPixels = MaxPixels)
     {
         Bound(Textures.Length, 1, 128); Bound(Vertices.Length, 3, maxVertices);
+        if (!float.IsNaN(BottomCutProjection) && (!float.IsFinite(BottomCutProjection) || Math.Abs(BottomCutProjection) > 200)) throw new InvalidDataException("Avatar crop anchor");
         if (Vertices.Length % 3 != 0 || Textures.Sum(t => (long)t.Width * t.Height) > maxPixels) throw new InvalidDataException("Avatar limits");
         foreach (var t in Textures) { Bound(t.Width, 1, 512); Bound(t.Height, 1, 512); if (t.Rgba.Length != t.Width * t.Height * 4) throw new InvalidDataException("Avatar pixels"); }
         foreach (var v in Vertices)
@@ -73,19 +84,43 @@ public sealed class AvatarScene
     {
         Validate(); const int size = 256;
         // The native Seraph face points toward -X (eyes sit on the west face).
-        // Look along +X: screen-right is +Z, up is +Y, nearer depth is smaller X.
-        // No extra yaw/pitch, and no horizontal mirror of the player's face.
-        var points = Vertices.Select(v => new Vector3(v.Z, v.Y, v.X)).ToArray();
+        // Use the same slightly elevated three-quarter view as the reference
+        // avatars: the top and one side of the cuboid head remain visible while
+        // the face is still the dominant plane.  The camera is on the -X,+Z
+        // corner, looking down by a small pitch; this is an orthographic view,
+        // so player proportions stay stable at every marker size.
+        // These angles reproduce the reference's visible top/side edge slopes
+        // while keeping the front face wide enough for the portrait crop.
+        const float yaw = 12f * MathF.PI / 180f;
+        const float pitch = 18f * MathF.PI / 180f;
+        var sinYaw = MathF.Sin(yaw); var cosYaw = MathF.Cos(yaw);
+        var sinPitch = MathF.Sin(pitch); var cosPitch = MathF.Cos(pitch);
+        var points = Vertices.Select(v => new Vector3(
+            sinYaw * v.X + cosYaw * v.Z,
+            cosYaw * sinPitch * v.X + cosPitch * v.Y - sinYaw * sinPitch * v.Z,
+            cosPitch * cosYaw * v.X - sinPitch * v.Y - cosPitch * sinYaw * v.Z)).ToArray();
         var minX = points.Min(p => p.X); var maxX = points.Max(p => p.X); var minY = points.Min(p => p.Y); var maxY = points.Max(p => p.Y);
-        var extent = Math.Max(maxX - minX, maxY - minY); if (extent < .00001) throw new InvalidDataException("Empty avatar geometry");
-        var scale = 228 / extent; var cx = (minX + maxX) / 2; var cy = (minY + maxY) / 2;
-        for (var i = 0; i < points.Length; i++) points[i] = new((points[i].X - cx) * scale + 128, 128 - (points[i].Y - cy) * scale, points[i].Z);
+        // A v2 client supplies a fixed anatomical line.  Geometry below it is
+        // intentionally allowed to remain in the scene: the software rasterizer
+        // clips it at the image boundary, producing one perfectly level edge.
+        var bottom = float.IsFinite(BottomCutProjection) && BottomCutProjection < maxY - .00001f
+            ? BottomCutProjection : minY;
+        var extent = Math.Max(maxX - minX, maxY - bottom); if (extent < .00001) throw new InvalidDataException("Empty avatar geometry");
+        // Keep the established uniform model scale.  The crop line controls
+        // how much torso is shown; it must not implicitly zoom the avatar.
+        var scale = 228 / extent; var cx = (minX + maxX) / 2;
+        // The fixed anatomical line is flush with the final image row.  Unlike
+        // a min-vertex anchor this remains stable when sleeves, armor, or arms
+        // extend lower than the selected upper-body crop.
+        const float screenBottom = size;
+        for (var i = 0; i < points.Length; i++) points[i] = new((points[i].X - cx) * scale + 128, screenBottom - (points[i].Y - bottom) * scale, points[i].Z);
         var rgba = new byte[size * size * 4]; var depth = Enumerable.Repeat(float.PositiveInfinity, size * size).ToArray(); long work = 0;
         static float Edge(Vector3 a, Vector3 b, float x, float y) => (x - a.X) * (b.Y - a.Y) - (y - a.Y) * (b.X - a.X);
         for (var i = 0; i < points.Length; i += 3)
         {
             token.ThrowIfCancellationRequested(); var a = points[i]; var b = points[i + 1]; var c = points[i + 2]; var area = Edge(a, b, c.X, c.Y);
             if (Math.Abs(area) < .00001) continue;
+            if (Math.Min(a.Y, Math.Min(b.Y, c.Y)) > screenBottom) continue;
             var x0 = Math.Clamp((int)Math.Floor(Math.Min(a.X, Math.Min(b.X, c.X))), 0, 255); var x1 = Math.Clamp((int)Math.Ceiling(Math.Max(a.X, Math.Max(b.X, c.X))), 0, 255);
             var y0 = Math.Clamp((int)Math.Floor(Math.Min(a.Y, Math.Min(b.Y, c.Y))), 0, 255); var y1 = Math.Clamp((int)Math.Ceiling(Math.Max(a.Y, Math.Max(b.Y, c.Y))), 0, 255);
             work += (x1 - x0 + 1) * (y1 - y0 + 1); if (work > 12_000_000) throw new InvalidDataException("Avatar raster budget");

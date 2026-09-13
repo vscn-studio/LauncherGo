@@ -55,11 +55,11 @@ public sealed class ClientAvatarTests : IDisposable
         Textures = [new(1, 1, [r, 120, 90, 255])],
         Vertices = [new(0, -1, -1, 0, 0, 0), new(0, -1, 1, 1, 0, 0), new(0, 1, 1, 1, 1, 0), new(0, -1, -1, 0, 0, 0), new(0, 1, 1, 1, 1, 0), new(0, 1, -1, 0, 1, 0)]
     };
-    [Fact] public void PortraitFacesNegativeXWithoutSideViewTiltOrMirroring()
+    [Fact] public void PortraitUsesAngledThreeQuarterViewAndBottomAlignment()
     {
         var front = Scene().Vertices.Select(v => v with { X = -1 }).ToArray();
         var back = front.Select(v => v with { X = 1, Texture = 1 }).ToArray();
-        var side = front.Select(v => v with { X = v.Z, Z = -1, Texture = 2 }).ToArray();
+        var side = front.Select(v => v with { X = v.Z, Z = 1, Texture = 2 }).ToArray();
         var scene = new AvatarScene { Textures = [new(2, 1, [255,0,0,255, 255,255,0,255]), new(1,1,[0,0,255,255]), new(1,1,[0,255,0,255])], Vertices = [..back, ..side, ..front] };
         var png = scene.Render();
         using var compressed = new MemoryStream();
@@ -73,20 +73,23 @@ public sealed class ClientAvatarTests : IDisposable
         using var zlib = new ZLibStream(compressed, CompressionMode.Decompress);
         var pixels = new byte[256 * (256 * 4 + 1)]; zlib.ReadExactly(pixels);
         int Pixel(int x, int y) => y * (256 * 4 + 1) + 1 + x * 4;
-        Assert.Equal(0, pixels[Pixel(60,128)+1]); // Low Z stays on the left (red).
-        Assert.True(pixels[Pixel(195,128)+1] > 0); // High Z stays on the right (yellow).
+        var hasFront = false; var hasSide = false; var maxOpaqueY = -1;
         for (var y = 0; y < 256; y++) for (var x = 0; x < 256; x++)
         {
             var p = Pixel(x,y);
             if (pixels[p+3] == 0) continue;
-            Assert.True(pixels[p] > 0); Assert.Equal(0, pixels[p+2]); // No green side or blue back.
+            maxOpaqueY = Math.Max(maxOpaqueY, y);
+            hasFront |= pixels[p] > 0 && pixels[p+2] == 0;
+            hasSide |= pixels[p] == 0 && pixels[p+1] > 0 && pixels[p+2] == 0;
         }
-        foreach (var (x,y) in new[] { (20,20), (235,20), (20,235), (235,235) }) Assert.Equal(255, pixels[Pixel(x,y)+3]);
+        Assert.True(hasFront); // The -X face remains dominant.
+        Assert.True(hasSide); // A three-quarter angle exposes the side plane.
+        Assert.Equal(255, maxOpaqueY); // The projected bottom is flush with the PNG bottom.
     }
-    [Fact] public void FrontPortraitInvalidatesPreviousSidePortraitCacheKey()
+    [Fact] public void TorsoPortraitInvalidatesPreviousHeadPortraitCacheKey()
     {
         var skin = new byte[] {1,2,3};
-        var old = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("client-head-v2/alice/").Concat(skin).ToArray()));
+        var old = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("client-head-v5-angled-front/alice/").Concat(skin).ToArray()));
         Assert.NotEqual(old, ClientAvatarStore.AppearanceKey("alice", skin));
     }
     [Fact] public void SceneRoundTripRendersDeterministicBoundedPng()
@@ -96,6 +99,18 @@ public sealed class ClientAvatarTests : IDisposable
         Assert.Equal(256, BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(16, 4)));
         Assert.Equal(256, BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(20, 4)));
         Assert.Equal(png, scene.Render()); Assert.NotEqual(png, Scene(40).Render());
+    }
+    [Fact] public void FixedCropAnchorClipsLowerGeometryWithoutMovingTheBottomEdge()
+    {
+        var source = Scene();
+        var baseScene = new AvatarScene { Textures = source.Textures, Vertices = source.Vertices, BottomCutProjection = 0 };
+        var lower = new AvatarScene.Vertex(0, -8, -1, 0, 0, 0);
+        var lower2 = new AvatarScene.Vertex(0, -8, 1, 1, 0, 0);
+        var lower3 = new AvatarScene.Vertex(0, -7, 1, 1, 1, 0);
+        var extended = new AvatarScene { Textures = baseScene.Textures, BottomCutProjection = 0, Vertices = [.. baseScene.Vertices, lower, lower2, lower3] };
+        var png = baseScene.Render();
+        Assert.Equal(png, extended.Render());
+        Assert.Equal(0, AvatarScene.Unpack(baseScene.Pack()).BottomCutProjection);
     }
     [Fact] public void SceneRejectsInvalidVerticesTexturesAndOversizedInflation()
     {

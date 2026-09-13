@@ -174,7 +174,7 @@ public sealed class PlayerMapSyncSystem : ModSystem
         clientExploration?.Send(clientChannel, Environment.TickCount64);
         if (pendingCapture != null)
         {
-            if (Environment.TickCount64 > captureDeadline) { ReportCaptureFailure(pendingCapture, "model-timeout"); pendingCapture = null; client.Logger.Warning("ServerMap avatar request expired while waiting for the native head mesh. Renderer={0}, shapeFresh={1}.", client.World.Player.Entity.Properties.Client.Renderer?.GetType().Name, client.World.Player.Entity.ShapeFresh); }
+            if (Environment.TickCount64 > captureDeadline) { ReportCaptureFailure(pendingCapture, "model-timeout"); pendingCapture = null; client.Logger.Warning("ServerMap avatar request expired while waiting for the native head/torso mesh. Renderer={0}, shapeFresh={1}.", client.World.Player.Entity.Properties.Client.Renderer?.GetType().Name, client.World.Player.Entity.ShapeFresh); }
             else if (ClientHeadCapture.Ready(client)) { var request = pendingCapture; pendingCapture = null; Capture(request); }
         }
         for (var i = 0; i < 2 && outgoing is { Count: > 0 }; i++) clientChannel.SendPacket(outgoing.Dequeue());
@@ -183,7 +183,7 @@ public sealed class PlayerMapSyncSystem : ModSystem
     {
         if (client == null || stop.IsCancellationRequested || capturing || pendingCapture != null || Environment.TickCount64 < nextCapture || request.Token.Length != 32 || request.Appearance.Length != 64) return;
         pendingCapture = request; captureDeadline = Environment.TickCount64 + 30_000;
-        client.Logger.Notification("ServerMap avatar request received; native head mesh ready={0}.", ClientHeadCapture.Ready(client));
+        client.Logger.Notification("ServerMap avatar request received; native head/torso mesh ready={0}.", ClientHeadCapture.Ready(client));
         if (!ClientHeadCapture.Ready(client)) client.World.Player?.Entity?.MarkShapeModified();
     }
     private void Capture(ServerAvatarRequestPacket request)
@@ -200,7 +200,7 @@ public sealed class PlayerMapSyncSystem : ModSystem
                 if (!connected || client.World.Player != player || Appearance(player) != localAppearance) { ReportCaptureFailure(request, "appearance-changed"); return; }
                 var bytes = task.Result; var chunks = (bytes.Length + ClientAvatarStore.ChunkSize - 1) / ClientAvatarStore.ChunkSize;
                 outgoing = new Queue<ClientAvatarChunkPacket>(Enumerable.Range(0, chunks).Select(i => new ClientAvatarChunkPacket { Token = request.Token, Index = i, Total = chunks, Data = bytes.Skip(i * ClientAvatarStore.ChunkSize).Take(ClientAvatarStore.ChunkSize).ToArray() }));
-                client.Logger.Notification("ServerMap head model and cropped textures queued: {0} bytes, {1} chunks.", bytes.Length, chunks);
+                client.Logger.Notification("ServerMap avatar model and cropped textures queued: {0} bytes, {1} chunks.", bytes.Length, chunks);
             }, "servermap-avatar-transfer"), CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
         }
         catch (Exception ex) { capturing = false; client.Logger.Warning("ServerMap avatar capture failed: {0}", ex.Message); ReportCaptureFailure(request, "capture-failed"); }

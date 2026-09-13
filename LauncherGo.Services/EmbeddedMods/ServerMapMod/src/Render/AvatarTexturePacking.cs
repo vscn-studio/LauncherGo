@@ -8,7 +8,8 @@ public static class AvatarTexturePacking
     private sealed class Page { public List<Row> Rows = []; public int Width, Height; }
     private sealed record Placement(int Page, int X, int Y);
 
-    public static AvatarScene Pack(IReadOnlyList<AvatarScene.Texture> sources, IReadOnlyList<AvatarScene.Vertex> vertices, int maxVertices = AvatarScene.MaxVertices, int maxPixels = AvatarScene.MaxPixels)
+    public static AvatarScene Pack(IReadOnlyList<AvatarScene.Texture> sources, IReadOnlyList<AvatarScene.Vertex> vertices,
+        int maxVertices = AvatarScene.MaxVertices, int maxPixels = AvatarScene.MaxPixels, float bottomCutProjection = float.NaN)
     {
         if (sources.Count < 1 || sources.Count > maxVertices || vertices.Count > maxVertices ||
             sources.Sum(t => (long)t.Width * t.Height) > maxPixels)
@@ -52,6 +53,7 @@ public static class AvatarTexturePacking
                 U = (at.X + Math.Clamp(v.U * source.Width, .5f, source.Width - .5f)) / target.Width,
                 V = (at.Y + Math.Clamp(v.V * source.Height, .5f, source.Height - .5f)) / target.Height };
         }).ToArray();
-        var scene = new AvatarScene { Textures = packed, Vertices = remapped }; scene.Validate(maxVertices, maxPixels); return scene;
+        var scene = new AvatarScene { Textures = packed, Vertices = remapped, BottomCutProjection = bottomCutProjection };
+        scene.Validate(maxVertices, maxPixels); return scene;
     }
 }
