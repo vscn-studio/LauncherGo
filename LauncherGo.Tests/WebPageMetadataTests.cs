@@ -20,6 +20,24 @@ public sealed class WebPageMetadataTests
         Assert.Equal(html, site.ApplyToHtml(html));
     }
 
+    [Fact]
+    public void InjectsCustomCodeOnceAndEscapesClosingTags()
+    {
+        const string template = "<head><!-- site-metadata:start --><!-- site-metadata:end --><style>body { color: black; }</style></head><body>map</body>";
+        var site = new WebPageMetadata { CustomCss = "body { color: red; } .example::after { content: '</style>'; }", CustomJs = "window.siteReady = '</script><div>'; // <!-- <script>" };
+        var html = site.ApplyToHtml(template);
+        Assert.Contains("content: '<\\/style>'", html);
+        Assert.True(html.IndexOf("id=\"siteCustomCss\"", StringComparison.Ordinal) > html.IndexOf("color: black", StringComparison.Ordinal));
+        Assert.True(html.IndexOf("id=\"siteCustomJs\"", StringComparison.Ordinal) > html.IndexOf("<body>map", StringComparison.Ordinal));
+        Assert.DoesNotContain("</script><div>", html);
+        Assert.Equal(1, html.Split("id=\"siteCustomCss\"", StringSplitOptions.None).Length - 1);
+        Assert.Equal(1, html.Split("id=\"siteCustomJs\"", StringSplitOptions.None).Length - 1);
+        Assert.Equal(html, site.ApplyToHtml(html));
+        var cleared = new WebPageMetadata().ApplyToHtml(html);
+        Assert.DoesNotContain("siteCustomCss", cleared);
+        Assert.DoesNotContain("siteCustomJs", cleared);
+    }
+
     [Theory]
     [InlineData("javascript:alert(1)")]
     [InlineData("data:image/svg+xml,test")]
@@ -36,6 +54,8 @@ public sealed class WebPageMetadataTests
         Assert.Throws<ArgumentException>(() => new WebPageMetadata { Description = new string('x', 501) }.Normalize());
         Assert.Throws<ArgumentException>(() => new WebPageMetadata { Keywords = new string('x', 501) }.Normalize());
         Assert.Throws<ArgumentException>(() => new WebPageMetadata { FaviconUrl = new string('x', 2049) }.Normalize());
+        Assert.Throws<ArgumentException>(() => new WebPageMetadata { CustomCss = new string('x', 100_001) }.Normalize());
+        Assert.Throws<ArgumentException>(() => new WebPageMetadata { CustomJs = new string('x', 100_001) }.Normalize());
     }
 
     [Fact]
@@ -49,7 +69,7 @@ public sealed class WebPageMetadataTests
             File.WriteAllText(path, "{\"Html\":\"old\",\"ServerWebsite\":\"https://example.com\",\"UpdatedBy\":\"admin\",\"UpdatedAt\":\"2026-09-09T00:00:00Z\"}");
             var store = new AnnouncementStore(path);
             Assert.Equal("ServerMap", store.Current.Site.Title);
-            var site = new WebPageMetadata { Title = "社区地图", Description = "服务器地图", Keywords = "地图,玩家", FaviconUrl = "https://example.com/favicon.ico" };
+            var site = new WebPageMetadata { Title = "社区地图", Description = "服务器地图", Keywords = "地图,玩家", FaviconUrl = "https://example.com/favicon.ico", CustomCss = ".map-marker { opacity: .8; }", CustomJs = "document.body.dataset.custom = '1';" };
             store.Save("news", "https://example.com", "admin", site);
             store = new AnnouncementStore(path);
             Assert.Equal(site, store.Current.Site);

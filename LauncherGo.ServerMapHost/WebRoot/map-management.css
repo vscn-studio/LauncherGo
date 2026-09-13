@@ -197,6 +197,8 @@
 .spotlight-like:hover,.spotlight-like.liked { color:#ef8290!important;background:#ef82901a!important; }
 .spotlight-like.liked svg { fill:#ef8290; }
 .spotlight-more { display:block;margin:12px auto 0; }
+.custom-code-help { display:block;margin:-4px 0 10px;color:var(--muted);font-size:11px;line-height:1.5; }
+#customCssInput,#customJsInput { min-height:140px;font:12px/1.5 Consolas,"SFMono-Regular",monospace;tab-size:2; }
 @media(max-width:700px) {
   #spotlightDialog { width:100vw; }
   #spotlightDialog header { padding-left:48px;padding-right:48px; }

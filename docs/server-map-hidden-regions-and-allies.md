@@ -69,6 +69,8 @@
 
 ## 验证
 
+`scripts/test-map-fog-navigation.cjs` 使用 4096 个地图区域的模拟数据，对比普通玩家、管理员绕过及匿名用户的缩放拖拽。网页直接显示服务端已遮蔽的瓦片，导航时不再请求 `/fog/regions`、展开覆盖区块或创建透明矩形；仍验证新增探索、可见性变更、退出登录和迷雾开关会重新加载底图。可设置 `MAP_TEST_INDEX` 与 `MAP_FOG_PROFILE_ONLY=1` 使用旧页面对比主线程长任务。
+
 `MapHistorySyncTests` 覆盖超过 65536 个区块的完整传输、分批确认、重试、取消、快照中断／替换、错误世界和失败最终保存。`MapTeleport/MapHistoryChecks.cs` 使用真实原生 `MapDB` 创建缓存，验证只读分页、原生坐标编码、坏数据过滤、并发写入、自动客户端上传及真实服务端的原子替换／回滚。`test-map-fog-areas.cjs` 同时验证完整替换后本人和盟友的旧范围与区域标记自动收回。
 
 `MapExplorationSyncTests` 覆盖同步队列、重试、批次和授权边界；`scripts/test-fixtures/MapTeleport` 还直接调用本机游戏的原生生成方法和 `ConnectedClient.SetChunkSent()`，验证真实 Harmony 挂钩、整列检查、保存失败回滚和重连隔离。`test-map-fog-areas.cjs` 验证浏览器不移动时的单区块增量、邻格保持迷雾、盟友刷新及编辑草稿保留；`test-map-teleport-ui.cjs` 验证新增探索不会取消传送确认。

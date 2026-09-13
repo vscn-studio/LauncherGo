@@ -199,7 +199,8 @@
     nav.setAttribute('role','tablist');
     const site=section('site',text('网站与公告','Website & news')),teleport=section('teleport',text('传送配置','Teleport')),uploads=section('uploads',text('图片上传配置','Image uploads')),images=section('images',text('图片管理','Manage images')),layerSettings=section('layers',text('图层与样式','Layers & styles')),quotas=section('quotas',text('玩家额度','Player quotas')),fogSettings=section('fog',text('战争迷雾','Fog of war'));
     function move(id,target){const input=$(id);if(!input)return;const wrapper=input.closest('label');if(wrapper){target.append(wrapper);return;}const label=form.querySelector('label[for="'+id+'"]');if(label)target.append(label);target.append(input);}
-    for(const id of ['announcementInput','websiteInput','siteTitleInput','siteDescriptionInput','siteKeywordsInput','siteFaviconInput'])move(id,site);
+    for(const id of ['announcementInput','websiteInput','siteTitleInput','siteDescriptionInput','siteKeywordsInput','siteFaviconInput','customCssInput','customJsInput'])move(id,site);
+    for(const [id,key] of [['customCssInput','customCssHelp'],['customJsInput','customJsHelp']]){const help=form.querySelector('[data-i18n="'+key+'"]');if(help)$(id).after(help);}
     for(const id of ['mountedTeleportInput','playerGearTeleportInput','teleportItemCodeInput','teleportItemsPerJumpInput','teleportEffectsInput'])move(id,teleport);
     teleport.append($('teleportEffectInputs'));const hint=form.querySelector('[data-i18n="teleportEffectsHint"]');if(hint)teleport.append(hint);
     move('poiImagesEnabledInput',uploads);

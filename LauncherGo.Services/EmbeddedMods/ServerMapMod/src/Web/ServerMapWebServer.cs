@@ -279,6 +279,15 @@ public sealed partial class ServerMapWebServer : IDisposable
                 if (teleportSettings != null && api.World.GetItem(new AssetLocation(teleportSettings.ItemCode)) == null
                     && api.World.GetBlock(new AssetLocation(teleportSettings.ItemCode)) == null)
                     throw new ArgumentException("Unknown teleport item code");
+                if (site != null)
+                {
+                    var currentSite = announcements.Current.Site ?? new WebPageMetadata();
+                    site = site with
+                    {
+                        CustomCss = siteValue.TryGetProperty("customCss", out _) ? site.CustomCss : currentSite.CustomCss,
+                        CustomJs = siteValue.TryGetProperty("customJs", out _) ? site.CustomJs : currentSite.CustomJs
+                    };
+                }
                 var value = announcements.Save(html, website, principal.PlayerName, site, playerTeleport, teleportSettings, poiImagesEnabled, mountedTeleport, management);
                 events.Publish("layer", new { layer = "pois", version = layerVersions.AddOrUpdate("pois", 2, (_, old) => old + 1) });
                 events.Publish("settings", new { mountedTeleportEnabled = value.MountedTeleportEnabled, poiImagesEnabled = value.PoiImagesEnabled, playerGearTeleportEnabled = value.PlayerGearTeleportEnabled, playerTeleport = value.PlayerTeleport, management = Management });
