@@ -197,7 +197,7 @@
     function section(id,label){const s=node('section',{hidden:true}),b=action(label,()=>selectSection(id));b.setAttribute('role','tab');b.setAttribute('aria-controls','management-'+id);s.id='management-'+id;s.setAttribute('role','tabpanel');nav.append(b);content.append(s);sections[id]={s,b};return s;}
     function selectSection(id){for(const [key,{s,b}] of Object.entries(sections)){s.hidden=key!==id;b.setAttribute('aria-selected',String(key===id));}if(id==='images')loadImages();}
     nav.setAttribute('role','tablist');
-    const site=section('site',text('网站与公告','Website & news')),teleport=section('teleport',text('传送配置','Teleport')),uploads=section('uploads',text('图片上传配置','Image uploads')),images=section('images',text('图片管理','Manage images')),layerSettings=section('layers',text('图层与样式','Layers & styles')),quotas=section('quotas',text('玩家额度','Player quotas')),fogSettings=section('fog',text('战争迷雾','Fog of war'));
+    const site=section('site',text('网站与公告','Website & news')),teleport=section('teleport',text('传送配置','Teleport')),uploads=section('uploads',text('图片上传配置','Image uploads')),images=section('images',text('图片管理','Manage images')),layerSettings=section('layers',text('图层与样式','Layers & styles')),roadsSettings=section('roads',text('道路配置','Road configuration')),quotas=section('quotas',text('玩家额度','Player quotas')),fogSettings=section('fog',text('战争迷雾','Fog of war'));
     function move(id,target){const input=$(id);if(!input)return;const wrapper=input.closest('label');if(wrapper){target.append(wrapper);return;}const label=form.querySelector('label[for="'+id+'"]');if(label)target.append(label);target.append(input);}
     for(const id of ['announcementInput','websiteInput','siteTitleInput','siteDescriptionInput','siteKeywordsInput','siteFaviconInput','customCssInput','customJsInput'])move(id,site);
     for(const [id,key] of [['customCssInput','customCssHelp'],['customJsInput','customJsHelp']]){const help=form.querySelector('[data-i18n="'+key+'"]');if(help)$(id).after(help);}
@@ -225,7 +225,7 @@
     fogLanguage();
     const layerRows={},table=node('table',{className:'management-grid'}),head=node('tr');
     for(const label of [text('图层','Layer'),text('默认','Default'),text('禁止','Block'),text('强制','Force'),text('倍率','Scale')])head.append(node('th',{textContent:label}));table.append(head);
-    for(const [id,zh,en] of [['players','玩家','Players'],['mounts','坐骑','Mounts'],['spawn','出生点','Spawn'],['claims','领地文字','Claim labels'],['claim-areas','领地区域','Claim areas'],['chunks','已生成区域','Regions'],['translocators','传送器','Translocators'],['pois','地点标记','Places']]){
+    for(const [id,zh,en] of [['players','玩家','Players'],['mounts','坐骑','Mounts'],['spawn','出生点','Spawn'],['claims','领地文字','Claim labels'],['claim-areas','领地区域','Claim areas'],['chunks','已生成区域','Regions'],['translocators','传送器','Translocators'],['pois','地点标记','Places'],['roads','道路','Roads']]){
       const row=node('tr');row.append(node('td',{textContent:text(zh,en)}));const fields={};
       for(const key of ['defaultVisible','forbidden','forced','scale']){
         if(key==='scale'&&!['players','mounts','translocators'].includes(id)){row.append(node('td',{className:'no-layer-scale',textContent:'—'}));continue;}
@@ -236,7 +236,12 @@
       fields.forbidden.onchange=()=>{if(fields.forbidden.checked)fields.forced.checked=false;};fields.forced.onchange=()=>{if(fields.forced.checked)fields.forbidden.checked=false;};
       layerRows[id]=fields;table.append(row);
     }
-    layerSettings.append(table,node('p',{className:'management-note',textContent:text('默认勾选用于尚未保存个人偏好的图层；禁止与强制开启不能同时启用。倍率范围 0.1–10，默认 1。','Defaults apply when no personal preference exists. Blocked and forced cannot both be selected. Scale range: 0.1–10, default 1.')}));
+    layerSettings.append(table,node('p',{className:'management-note',textContent:text('默认勾选用于尚未保存个人偏好的图层；禁止与强制开启不能同时启用。倍率范围 0.1–10，默认 1。道路图层不使用倍率设置。','Defaults apply when no personal preference exists. Blocked and forced cannot both be selected. Scale range: 0.1–10, default 1. Roads do not use a scale setting.')}));
+    const roadCodes=node('textarea',{id:'roadBlockCodes',rows:'3',required:true,spellcheck:false,placeholder:'chiseltools:pathedchiseledblock, game:stonepath-free'});
+    const deepRoadScan=node('input',{id:'deepRoadScan',type:'checkbox'}),deepRoadLabel=node('label',{htmlFor:'deepRoadScan',className:'setting-checkbox'});
+    const relayDepth=numberField(roadsSettings,'roadRelayDepth',text('识别中继深度','Relay depth'),1,16,2);
+    roadsSettings.append(node('label',{htmlFor:'roadBlockCodes',textContent:text('道路方块 Code','Road block Codes')}),roadCodes,deepRoadLabel,node('p',{className:'management-note',textContent:text('多个 Code 可用逗号、空格或换行分隔。默认只识别地表；深层识别从道路端点和边缘，以末端道路方块自身高度向上、向下检查，并沿发现的道路继续中继。颜色会按已配置道路的实际速度范围从白到黄显示。','Separate codes with commas, spaces, or new lines. Surface blocks are scanned by default; deep scanning checks upward and downward from the last road block height, then relays along discovered roads. Colors use the actual speed range of configured roads, from white to yellow.')}));
+    deepRoadLabel.replaceChildren(deepRoadScan,document.createTextNode(text('深层识别道路','Deep-scan roads')));
     const imageSearch=node('input',{type:'search',placeholder:text('搜索添加者、地点标记名称、描述','Search author, place name, description')}),imageList=node('div'),imageStatus=node('p',{role:'status'}),imageMore=action(text('加载更多','Load more'),()=>loadImages(false));images.append(imageSearch,imageStatus,imageList,imageMore);
     let imageEpoch=0,imageOffset=0;
     async function loadImages(reset=true){
@@ -259,8 +264,9 @@
       imageTypesInput.value=(value.imageTypes||['jpeg','png','webp','bmp']).join(', ');imageTypesInput.setCustomValidity('');
       fogEnabled.checked=value.fogEnabled??true;shareExploration.checked=!!value.shareExploration;adminsBypassFog.checked=value.adminsBypassFog??true;alliesButton.hidden=!getAuth().authenticated;
       for(const [id,fields] of Object.entries(layerRows)){const rule=value.layers?.[id]||{};fields.defaultVisible.checked=rule.defaultVisible??['players','mounts','spawn','pois'].includes(id);fields.forbidden.checked=!!rule.forbidden;fields.forced.checked=!!rule.forced;if(fields.scale)fields.scale.value=rule.scale??1;}
+      const roads=value.roads||{};roadCodes.value=(roads.blockCodes||['chiseltools:pathedchiseledblock','game:stonepath-free']).join('\n');deepRoadScan.checked=roads.deepScan===true;relayDepth.value=roads.relayDepth??2;
     }
-    function payload(){const imageTypes=[...new Set(imageTypesInput.value.toLowerCase().split(/[\s,;，；]+/).filter(Boolean).map(t=>t.replace(/^\./,'').replace(/^jpg$/,'jpeg').replace(/^apng$/,'png')))];if(!imageTypes.length||imageTypes.length>32||imageTypes.some(t=>!/^[a-z][a-z0-9]{0,15}$/.test(t))){selectSection('uploads');const message=text('请输入图片类型名称，用逗号或空格分隔','Enter image format names separated with commas or spaces');imageTypesInput.setCustomValidity(message);imageTypesInput.reportValidity();throw Error(message);}return {imageTypes,imageMaxMb:Number(maxMb.value),poiQuota:Number(poiQuota.value),dailyTeleports:Number(daily.value),fogEnabled:fogEnabled.checked,shareExploration:shareExploration.checked,adminsBypassFog:adminsBypassFog.checked,layers:Object.fromEntries(Object.entries(layerRows).map(([id,r])=>[id,{defaultVisible:r.defaultVisible.checked,forbidden:r.forbidden.checked,forced:r.forced.checked,scale:r.scale?Number(r.scale.value):1}]))};}
+    function payload(){const imageTypes=[...new Set(imageTypesInput.value.toLowerCase().split(/[\s,;，；]+/).filter(Boolean).map(t=>t.replace(/^\./,'').replace(/^jpg$/,'jpeg').replace(/^apng$/,'png')))];if(!imageTypes.length||imageTypes.length>32||imageTypes.some(t=>!/^[a-z][a-z0-9]{0,15}$/.test(t))){selectSection('uploads');const message=text('请输入图片类型名称，用逗号或空格分隔','Enter image format names separated with commas or spaces');imageTypesInput.setCustomValidity(message);imageTypesInput.reportValidity();throw Error(message);}const blockCodes=[...new Set(roadCodes.value.split(/[\s,;，；]+/).map(code=>code.trim().toLowerCase()).filter(Boolean))];if(!blockCodes.length||blockCodes.some(code=>! /^[a-z0-9][a-z0-9_.-]*:[a-z0-9][a-z0-9_.-]*$/i.test(code))){selectSection('roads');const message=text('请输入有效的道路方块 Code','Enter valid road block Codes');roadCodes.setCustomValidity(message);roadCodes.reportValidity();throw Error(message);}roadCodes.setCustomValidity('');return {imageTypes,imageMaxMb:Number(maxMb.value),poiQuota:Number(poiQuota.value),dailyTeleports:Number(daily.value),fogEnabled:fogEnabled.checked,shareExploration:shareExploration.checked,adminsBypassFog:adminsBypassFog.checked,roads:{blockCodes,deepScan:deepRoadScan.checked,relayDepth:Number(relayDepth.value)},layers:Object.fromEntries(Object.entries(layerRows).map(([id,r])=>[id,{defaultVisible:r.defaultVisible.checked,forbidden:r.forbidden.checked,forced:r.forced.checked,scale:r.scale?Number(r.scale.value):1}]))};}
     settings();selectSection('site');
 
     const tracking=dialog('trackDialog',text('玩家轨迹跟踪','Player tracking')),controls=node('div',{className:'tracking-controls'}),playerSelect=node('select',{id:'trackPlayer'}),duration=node('input',{id:'trackSeconds',type:'number',min:'1',max:'86400',value:'3600'}),trackStatus=node('p',{role:'status'}),historySearch=node('input',{type:'search',placeholder:text('搜索玩家或日期','Search player or date')}),history=node('div',{className:'track-history'});
@@ -341,7 +347,7 @@
     }
     function privacyChanged(){imageEpoch++;$('poiImageViewer').close();void loadAllies();if(spotlight.open)loadSpotlight();}
     function languageChanged(){
-      renderAllies();fogLanguage();
+      renderAllies();fogLanguage();deepRoadLabel.replaceChildren(deepRoadScan,document.createTextNode(text('深层识别道路','Deep-scan roads')));sections.roads.b.textContent=text('道路配置','Road configuration');
       spotlightLanguage();
       for(const [b,zh,en] of [[trackingButton,'玩家轨迹跟踪','Player tracking'],[alliesButton,'结盟','Allies']]){b.title=text(zh,en);b.setAttribute('aria-label',b.title);}
     }

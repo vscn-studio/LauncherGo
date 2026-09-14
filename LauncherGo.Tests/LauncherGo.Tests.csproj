@@ -33,6 +33,7 @@
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\PlayerTeleportSettings.cs" Link="ServerMap\PlayerTeleportSettings.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\AnnouncementStore.cs" Link="ServerMap\AnnouncementStore.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\MapManagementSettings.cs" Link="ServerMap\MapManagementSettings.cs" />
+    <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\RoadIndex.Geometry.cs" Link="ServerMap\RoadIndex.Geometry.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Web\TeleportAccess.cs" Link="ServerMap\TeleportAccess.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Network\MapExplorationSync.cs" Link="ServerMap\MapExplorationSync.cs" />
     <Compile Include="..\LauncherGo.Services\EmbeddedMods\ServerMapMod\src\Network\MapHistorySync.cs" Link="ServerMap\MapHistorySync.cs" />

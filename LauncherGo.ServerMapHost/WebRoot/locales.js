@@ -77,6 +77,7 @@
     'layer.chunks': ['Созданные регионы','Generierte Regionen','Régions générées','Regiones generadas','Wygenerowane regiony','Regiões geradas'],
     'layer.translocators': ['Транслокаторы','Translokatoren','Translocateurs','Translocalizadores','Translokatory','Translocadores'],
     'layer.pois': ['Места','Orte','Lieux','Lugares','Miejsca','Locais'],
+    'layer.roads': ['Дороги','Straßen','Routes','Carreteras','Drogi','Estradas'],
     'layer.mounts': ['Транспорт и животные','Reittiere und Fahrzeuge','Montures et véhicules','Monturas y vehículos','Wierzchowce i pojazdy','Montarias e veículos'],
     myMarkers: ['Игровые метки','Spielmarkierungen','Repères du jeu','Marcadores del juego','Znaczniki z gry','Marcadores do jogo'],
     myRoutes: ['Мои треки','Meine Tracks','Mes tracés','Mis trazados','Moje ślady','Meus traçados'],

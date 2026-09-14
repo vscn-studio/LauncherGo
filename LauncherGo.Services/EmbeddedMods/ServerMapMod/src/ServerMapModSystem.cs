@@ -316,6 +316,9 @@ public sealed class ServerMapModSystem : ModSystem
     {
         if (disposed || cache == null) return;
         db?.Clear(); if (saveAdapter != null) lastError = null;
+        // Buried roads can change without changing any surface pixel. Notify
+        // after the save/read-cache fence, even when no surface merge follows.
+        if (frozen.Count > 0) web?.InvalidateRoads(publish: true);
         foreach (var group in frozen.GroupBy(pair => { var p = pair.Key.Split('_'); return new ChunkKey(int.Parse(p[0]) >> 4, 0, int.Parse(p[2]) >> 4); }))
         {
             var columns = new Dictionary<int, long>();

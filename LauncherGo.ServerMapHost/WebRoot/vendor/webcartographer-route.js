@@ -131,13 +131,26 @@
     // initial budget, tighten it whenever a cheaper route to the destination is
     // found, and stop as soon as the destination is settled.
     //
-    // Returns {path, types, allPts, walkDist, jumps} or null if unreachable.
-    function computeRouteCore(pts, pairs, start, end, jumpCost) {
+    // options.roadAware enables explicit [from, to, speed] road edges returned
+    // by addRoadsToGraph. Unpaved walking never receives a road multiplier.
+    // Returns {path, types, allPts, walkDist, jumps, travelCost}.
+    function computeRouteCore(pts, pairs, start, end, jumpCost, options) {
         if (jumpCost === undefined) jumpCost = 0;
+        options = options || {};
         let jc = function (u) { return Array.isArray(jumpCost) ? (jumpCost[u] || 0) : jumpCost; };
         let n = pts.length;
         let allPts = pts.concat([{x: start[0], y: start[1], h: start[2] || 0}, {x: end[0], y: end[1], h: end[2] || 0}]);
         let S = n, E = n + 1, N = n + 2;
+        let roads = new Map();
+        if (options.roadAware) {
+            for (const [a, b, speed] of options.roadEdges || []) {
+                if (!(a >= 0 && a < n && b >= 0 && b < n && speed > 0 && isFinite(speed))) continue;
+                if (!roads.has(a)) roads.set(a, []);
+                if (!roads.has(b)) roads.set(b, []);
+                roads.get(a).push([b, speed]);
+                roads.get(b).push([a, speed]);
+            }
+        }
 
         let dist = new Array(N).fill(Infinity);
         let prev = new Array(N).fill(-1);
@@ -148,8 +161,12 @@
         let grid = buildGrid(allPts);
         // Upper bound on the answer: the straight-line walk from start to end.
         let bound = Math.hypot(start[0] - end[0], start[1] - end[1], (start[2] || 0) - (end[2] || 0));
+        dist[E] = bound;
+        prev[E] = S;
+        prevType[E] = 'walk';
         let heap = new MinHeap();
         heap.push(0, S);
+        heap.push(bound, E);
 
         while (heap.size()) {
             let top = heap.pop();
@@ -160,7 +177,7 @@
             visited[u] = true;
 
             // Translocator jump (only for endpoint nodes)
-            if (u < n) {
+            if (u < n && pairs[u] !== undefined) {
                 let v = pairs[u];
                 let nd = du + jc(u);
                 if (nd < dist[v] && nd <= bound) {
@@ -171,13 +188,27 @@
                     heap.push(nd, v);
                 }
             }
-            // Walk to every node within the remaining budget.
             let pu = allPts[u];
+            // A fast road edge may be longer than the remaining ordinary
+            // walking radius. Relax it separately so spatial pruning cannot
+            // discard a valid accelerated step near the destination.
+            for (const [v, speed] of roads.get(u) || []) {
+                if (visited[v]) continue;
+                let pv = allPts[v];
+                let nd = du + Math.hypot(pu.x - pv.x, pu.y - pv.y, (pu.h || 0) - (pv.h || 0)) / speed;
+                if (nd < dist[v] && nd <= bound) {
+                    dist[v] = nd;
+                    prev[v] = u;
+                    prevType[v] = 'walk';
+                    heap.push(nd, v);
+                }
+            }
+            // Ordinary walking can enter or leave a road at any graph node.
             gridQuery(grid, pu.x, pu.y, bound - du, function (v) {
                 if (v === u || visited[v]) return;
                 let pv = allPts[v];
                 let dx = pu.x - pv.x, dy = pu.y - pv.y, dh = (pu.h || 0) - (pv.h || 0);
-                let nd = du + Math.sqrt(dx * dx + dy * dy + dh * dh);
+                let nd = du + Math.hypot(dx, dy, dh);
                 if (nd < dist[v] && nd <= bound) {
                     dist[v] = nd;
                     prev[v] = u;
@@ -209,7 +240,57 @@
                 walkDist += Math.hypot(a.x - b.x, a.y - b.y, (a.h || 0) - (b.h || 0));
             }
         }
-        return {path, types, allPts, walkDist, jumps};
+        return {path, types, allPts, walkDist, jumps, travelCost: dist[E]};
+    }
+
+    // Keep all branches, turns and grade changes, but coalesce straight runs.
+    // Access nodes at most 16 blocks apart allow joining/leaving a road in the
+    // middle without putting every scanned block in the complete walk graph.
+    function addRoadsToGraph(graph, features) {
+        const lines = [], counts = new Map(), nodeIndex = new Map(), edges = [];
+        const key = p => p.x + ',' + p.y + ',' + p.h;
+        const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.h - b.h);
+        for (const feature of features) {
+            if (feature.geometry?.type !== 'LineString') continue;
+            const points = [];
+            for (const coordinate of feature.geometry.coordinates || []) {
+                const p = {x: Number(coordinate[0]), y: Number(coordinate[1]), h: Number(coordinate[2] ?? 0)};
+                // Never bridge over a malformed point in a road.
+                if (![p.x, p.y, p.h].every(Number.isFinite)) { points.length = 0; break; }
+                if (!points.length || key(p) !== key(points[points.length - 1])) points.push(p);
+            }
+            if (points.length < 2) continue;
+            const speed = Number(feature.properties?.speedMultiplier);
+            lines.push({points, speed: Number.isFinite(speed) && speed > 0 ? speed : 1});
+            for (const p of points) counts.set(key(p), (counts.get(key(p)) || 0) + 1);
+        }
+        function addNode(p) {
+            const k = key(p);
+            if (!nodeIndex.has(k)) {
+                nodeIndex.set(k, graph.pts.length);
+                graph.pts.push(p);
+            }
+            return nodeIndex.get(k);
+        }
+        for (const {points, speed} of lines) {
+            let previous = points[0], previousIndex = addNode(previous);
+            for (let i = 1; i < points.length; i++) {
+                const p = points[i], a = points[i - 1], b = points[i + 1];
+                const turns = b && Math.abs(distance(a, p) + distance(p, b) - distance(a, b)) > 1e-7;
+                if (b && !turns && counts.get(key(p)) === 1 && distance(previous, p) < 16) continue;
+                const steps = Math.max(1, Math.ceil(distance(previous, p) / 16));
+                for (let step = 1; step <= steps; step++) {
+                    const t = step / steps;
+                    const next = step === steps ? p : {x: previous.x + (p.x - previous.x) * t,
+                        y: previous.y + (p.y - previous.y) * t, h: previous.h + (p.h - previous.h) * t};
+                    const nextIndex = addNode(next);
+                    if (previousIndex !== nextIndex) edges.push([previousIndex, nextIndex, speed]);
+                    previousIndex = nextIndex;
+                }
+                previous = p;
+            }
+        }
+        return edges;
     }
 
     // Single-source shortest travel distances from `start` to every graph node
@@ -332,6 +413,7 @@
 
     return {
         computeRouteCore: computeRouteCore,
+        addRoadsToGraph: addRoadsToGraph,
         computeSourceDistances: computeSourceDistances,
         buildGraphFromSegments: buildGraphFromSegments,
         fmtGameCoord: fmtGameCoord

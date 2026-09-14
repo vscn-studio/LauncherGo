@@ -21,7 +21,7 @@ public sealed partial class ServerMapWebServer : IDisposable
 {
     private static readonly byte[] TransparentTile = PngEncoder.Encode(TilePyramidBuilder.TileSize, TilePyramidBuilder.TileSize, new byte[TilePyramidBuilder.TileSize * TilePyramidBuilder.TileSize * 4]);
     private static readonly string[] Renderers = ["basic", "sepia"];
-    private static readonly string[] Layers = ["players", "mounts", "spawn", "claims", "claim-areas", "chunks", "translocators", "pois"];
+    private static readonly string[] Layers = ["players", "mounts", "spawn", "claims", "claim-areas", "chunks", "translocators", "pois", "roads"];
     private readonly ICoreServerAPI api; private readonly ServerMapConfig config; private readonly string root; private readonly string webRoot;
     private readonly WorldDatabaseReader reader; private readonly MapPalette materials; private readonly MapRenderer renderer; private readonly TilePyramidBuilder pyramid;
     private readonly MapAuthStore auth; private readonly PoiStore pois; private readonly AnnouncementStore announcements; private readonly ExplorationStore exploration; private readonly AllianceStore alliances;
@@ -34,6 +34,7 @@ public sealed partial class ServerMapWebServer : IDisposable
     private readonly ConcurrentDictionary<(int X, int Z), byte> knownRegions = new();
     private readonly ConcurrentDictionary<string, long> layerVersions = new(StringComparer.OrdinalIgnoreCase);
     private readonly TranslocatorIndex translocators;
+    private readonly RoadIndex roads;
     private readonly object maintenanceGate = new();
     private Task maintenance = Task.CompletedTask;
     private bool maintenanceStarted;
@@ -48,6 +49,7 @@ public sealed partial class ServerMapWebServer : IDisposable
         trackStore = new PlayerTrackStore(Path.Combine(root, "player-tracks"));
         teleportQuota = new DailyTeleportQuota(Path.Combine(root, "teleport-quota.json"));
         translocators = new TranslocatorIndex(Path.Combine(root, "translocators.json"), message => api.Logger.Warning(message));
+        roads = new RoadIndex(api, root, reader, materials);
         notebook = new MapNotebookStore(Path.Combine(root, "web-notebook.json"));
         areaMarkers = new AreaMarkerStore(Path.Combine(root, "area-markers.json"));
         InitializeNotebook();
@@ -290,6 +292,8 @@ public sealed partial class ServerMapWebServer : IDisposable
                 }
                 var value = announcements.Save(html, website, principal.PlayerName, site, playerTeleport, teleportSettings, poiImagesEnabled, mountedTeleport, management);
                 events.Publish("layer", new { layer = "pois", version = layerVersions.AddOrUpdate("pois", 2, (_, old) => old + 1) });
+                roads.Invalidate();
+                events.Publish("layer", new { layer = "roads", version = layerVersions.AddOrUpdate("roads", 2, (_, old) => old + 1) });
                 events.Publish("settings", new { mountedTeleportEnabled = value.MountedTeleportEnabled, poiImagesEnabled = value.PoiImagesEnabled, playerGearTeleportEnabled = value.PlayerGearTeleportEnabled, playerTeleport = value.PlayerTeleport, management = Management });
                 return value;
             });
@@ -622,6 +626,12 @@ public sealed partial class ServerMapWebServer : IDisposable
     private object Layer(string name, string? bbox, MapAuthStore.Principal? principal)
     {
         if (Management.Layer(name.ToLowerInvariant()).Forbidden) return new { type = "FeatureCollection", version = layerVersions[name], features = Array.Empty<object>() };
+        // Anonymous viewers with fog enabled receive no feature geometry. Do
+        // this check before the potentially expensive road scan as well as in
+        // VisibleFeatures, otherwise a public request could force a full tile
+        // walk only to discard every result.
+        if (name.Equals("roads", StringComparison.OrdinalIgnoreCase) && principal == null && Management.FogEnabled)
+            return new { type = "FeatureCollection", version = layerVersions[name], features = Array.Empty<object>() };
         var bounds = ParseBounds(bbox); var features = new List<object>();
         if (name.Equals("players", StringComparison.OrdinalIgnoreCase) && config.PublicPlayers && principal != null)
         {
@@ -660,6 +670,14 @@ public sealed partial class ServerMapWebServer : IDisposable
         else if (name.Equals("chunks", StringComparison.OrdinalIgnoreCase)) foreach (var region in baseTiles["sepia"].Keys) { var minX = region.X * 512d; var minZ = region.Z * 512d; var maxX = minX + 512; var maxZ = minZ + 512; if (Intersects(minX, minZ, maxX, maxZ, bounds)) features.Add(new { type = "Feature", id = $"region-{region.X}-{region.Z}", geometry = new { type = "Polygon", coordinates = new[] { new[] { new[] { minX, minZ }, new[] { maxX, minZ }, new[] { maxX, maxZ }, new[] { minX, maxZ }, new[] { minX, minZ } } } }, properties = new { state = "generated", kind = "chunk" } }); }
         else if (name.Equals("translocators", StringComparison.OrdinalIgnoreCase)) AddTranslocators(features, bounds, principal);
         else if (name.Equals("mounts", StringComparison.OrdinalIgnoreCase)) AddMounts(features, bounds, principal);
+        else if (name.Equals("roads", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var segment in roads.Query(bounds, Management.Roads ?? new MapManagementSettings.RoadSettings(), knownRegions.Keys,
+                (x, z) => CanView(principal, x, z)))
+                features.Add(new { type = "Feature", id = segment.Id,
+                    geometry = new { type = "LineString", coordinates = segment.Coordinates },
+                    properties = new { code = segment.Code, speedMultiplier = segment.SpeedMultiplier, color = segment.Color, roadGroup = segment.GroupId, kind = "road" } });
+        }
         else if (name.Equals("pois", StringComparison.OrdinalIgnoreCase))
             foreach (var poi in pois.All)
                 if (InBounds(poi.X, poi.Z, bounds) && PoiVisible(principal, poi)) features.Add(PointFeature(poi.Id, poi.X, poi.Z, new { name = poi.Name, text = poi.Text, color = poi.Color, rotation = poi.Rotation, minZoom = poi.MinZoom, maxZoom = poi.MaxZoom, imageKey = announcements.Current.PoiImagesEnabled ? poi.ImageKey : null, poiType = poi.Type, kind = "poi", editable = principal != null && (principal.IsAdmin || principal.PlayerUid == poi.OwnerUid) }));
@@ -836,6 +854,10 @@ public sealed partial class ServerMapWebServer : IDisposable
             if (changed)
             {
                 surface.Generation = work.Revision; surface.ContentVersion = Guid.NewGuid().ToString("N"); surface.Save(path);
+                // Road recognition reads the durable surface cache. Invalidate
+                // it only after the replacement is safely written so a request
+                // cannot observe a half-merged region.
+                InvalidateRoads(publish: true);
             }
             // Durable regional replacement precedes patch cleanup and task acknowledgement.
             foreach (var patch in patches) File.Delete(patch);
@@ -878,6 +900,11 @@ public sealed partial class ServerMapWebServer : IDisposable
         }
     }
     public void NotifyColormapApplied() => events.Publish("colormap", new { month = materials.ClientColormapMonth, version = materials.ClientColormapVersion });
+    public void InvalidateRoads(bool publish = false)
+    {
+        roads.Invalidate();
+        if (publish) events.Publish("layer", new { layer = "roads", version = layerVersions.AddOrUpdate("roads", 2, (_, old) => old + 1) });
+    }
     public IEnumerable<ChunkKey> ExistingRegions => knownRegions.Keys.Select(p => new ChunkKey(p.X, 0, p.Z)).ToArray();
     public void RestoreRegions(IEnumerable<ChunkKey> regions) { knownRegions.Clear(); foreach (var key in regions) NoteRegion(key); }
     public void NoteRegion(ChunkKey key) => knownRegions.TryAdd((key.X, key.Z), 0);

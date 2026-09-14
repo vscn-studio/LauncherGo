@@ -19,6 +19,7 @@ AppDomain.CurrentDomain.AssemblyResolve += (_, request) =>
 Checks.Run();
 MountedChecks.Run();
 AreaMarkerChecks.Run();
+RoadChecks.Run();
 ExplorationChecks.Run();
 MapHistoryChecks.Run();
 static class Checks
