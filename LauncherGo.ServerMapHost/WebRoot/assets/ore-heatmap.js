@@ -118,6 +118,15 @@ window.createOreHeatmap = function ({ gameLatLng, relativePoint, language, chang
       root.append(column);
     }
     const width=Math.max(40,codes.length*28), iconHeight=columnsHeight;
+    // Keep the DOM box exactly identical to Leaflet's icon box. Without an
+    // explicit size, a one-column flex container has an intrinsic width that
+    // differs from iconSize, so the anchor shifts on zoom/re-layout.
+    root.style.width=width+'px';
+    root.style.height=iconHeight+'px';
+    root.style.boxSizing='border-box';
+    root.style.position='absolute';
+    root.style.left='0';
+    root.style.top='0';
     // A feature represents one chunk rectangle. Keep one immutable geographic
     // anchor for the whole column group; never average search centers from
     // different depth records, which made the marker drift as new probes arrived.
