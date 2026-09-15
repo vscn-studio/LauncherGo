@@ -114,15 +114,16 @@ window.createOreHeatmap = function ({ gameLatLng, relativePoint, language, chang
       });
       column.onmouseenter=()=>focus(code); column.onmouseleave=()=>focus(pinned);
       column.onfocus=()=>focus(code); column.onblur=()=>focus(pinned);
-      column.onclick=event=>{event.stopPropagation(); pinned=pinned===code?null:code; focus(pinned); root.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.ore===pinned))); marker.setPopupContent(popup(ordered,code)); marker.openPopup();};
+      column.onclick=event=>{event.stopPropagation(); if(pinned===code){ pinned=null; focus(null); root.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed','false')); marker.closePopup(); return; } pinned=code; focus(pinned); root.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.ore===pinned))); marker.setPopupContent(popup(ordered,code)); marker.openPopup();};
       root.append(column);
     }
-    const width=Math.max(40,codes.length*28), iconHeight=columnsHeight+24;
+    const width=Math.max(40,codes.length*28), iconHeight=columnsHeight;
     // A feature represents one chunk rectangle. Keep one immutable geographic
     // anchor for the whole column group; never average search centers from
     // different depth records, which made the marker drift as new probes arrived.
     const center=gameLatLng((coords[0][0]+coords[2][0])/2,(coords[0][1]+coords[2][1])/2);
     const marker=L.marker(center,{icon:L.divIcon({className:'ore-columns',html:root,iconSize:[width,iconHeight],iconAnchor:[width/2,iconHeight/2]}),keyboard:false}).bindPopup(popup(ordered));
+    marker.on('popupclose',()=>{ pinned=null; focus(null); root.querySelectorAll('button').forEach(button=>button.setAttribute('aria-pressed','false')); });
     let activeMap;
     function zoom() {
       const a=activeMap.latLngToLayerPoint(gameLatLng(coords[0][0],coords[0][1])), b=activeMap.latLngToLayerPoint(gameLatLng(coords[2][0],coords[2][1]));

@@ -90,12 +90,15 @@
     #languageMenu { position:fixed;z-index:1500;min-width:180px;padding:4px;background:var(--glass);border:var(--border);box-shadow:var(--shadow);backdrop-filter:blur(6px); } #languageMenu[hidden] { display:none!important; } #languageMenu button { display:block;width:100%;padding:7px 10px;text-align:left;color:var(--text);background:transparent;border:0;border-radius:3px;cursor:pointer; } #languageMenu button:hover { background:var(--hover); }
     #oreHeatmapControls { position:fixed;z-index:1200;top:10px;right:54px;width:min(280px,calc(100vw - 76px));margin:0;padding:10px 10px 9px;border:var(--border);border-radius:4px;font-size:12px;background:var(--glass);box-shadow:var(--shadow);backdrop-filter:blur(6px); }
     #oreHeatmapControls[hidden] { display:none; }
+    #languageMenu { border-radius:6px; }
     @media(min-width:701px) and (pointer:fine) { aside.show~#oreHeatmapControls,aside:hover~#oreHeatmapControls { right:310px; } }
     @media(max-width:700px), (pointer:coarse) { #oreHeatmapControls { top:112px;right:8px;width:min(280px,calc(100vw - 32px));max-height:calc(100dvh - 170px);overflow:auto;z-index:1000; } }
     #oreHeatmapControls label { display:block;margin:0 0 3px;color:var(--muted);line-height:1.2; }
     #oreHeatmapControls select { display:block;width:100%;min-width:0;margin:0 0 8px;padding:5px;background:#252525;color:var(--text);border:var(--border); }
+    #oreHeatmapControls select { border-radius:5px; }
     #oreHeatmapControls .ore-depth { display:flex;gap:5px;margin:0 0 8px; }
     #oreHeatmapControls .ore-depth input { width:50%;min-width:0;padding:5px;background:#252525;color:var(--text);border:var(--border); }
+    #oreHeatmapControls .ore-depth input { border-radius:5px; }
     .ore-legend { display:grid;grid-template-columns:1fr 1fr;gap:3px 8px;padding-top:1px; }
     .ore-legend span { display:flex;align-items:center;gap:5px; }
     .ore-legend i { display:inline-block;width:12px;height:12px;border:1px solid #aaa; }
