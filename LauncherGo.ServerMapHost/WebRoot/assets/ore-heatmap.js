@@ -39,13 +39,15 @@ window.createOreHeatmap = function ({ gameLatLng, relativePoint, language, chang
     const box=document.createElement('div'); box.className='ore-reading-popup';
     const title=document.createElement('b'); title.textContent=(code?name(code)+' · ':'')+nameMode(samples[0].mode); box.append(title);
     for (const sample of samples) {
+      const ores=(sample.ores||[]).filter(ore=>!code||ore.code===code);
+      // Empty intervals clear that depth segment but are intentionally omitted
+      // from the popup; the popup contains positive observations only.
+      if (!ores.length) continue;
       const row=document.createElement('section');
       if (sample.mode==='node') {
         const local=relativePoint({x:sample.sampleX,z:sample.sampleZ});
         const range=document.createElement('div'); range.className='ore-reading-range'; range.textContent='Y '+(sample.sampleY-sample.radius)+'–'+(sample.sampleY+sample.radius)+' · O ('+Math.round(local.x)+', '+sample.sampleY+', '+Math.round(local.z)+') · R '+sample.radius; row.append(range);
       }
-      const ores=(sample.ores||[]).filter(ore=>!code||ore.code===code);
-      if (!ores.length) { const empty=document.createElement('div'); empty.className='ore-reading-empty'; empty.textContent=zh()?'该次搜索未检出所选矿物':'Selected ore not detected in this observation'; row.append(empty); }
       for (const ore of ores) {
         const line=document.createElement('div'); line.textContent=name(ore.code)+' · '+(sample.mode==='node'
           ? ore.blocks+' '+(zh()?'个矿块':'blocks') : (labels()[ore.density]||'')+' · '+Number(ore.partsPerThousand).toFixed(2)+'‰'); row.append(line);
@@ -73,7 +75,10 @@ window.createOreHeatmap = function ({ gameLatLng, relativePoint, language, chang
     let pinned=null;
     function focus(code) { root.classList.toggle('has-focus',!!code); root.querySelectorAll('.ore-column').forEach(column=>column.classList.toggle('selected',column.dataset.ore===code)); }
     const ordered=[...samples].sort((a,b)=>(b.sampleY||0)-(a.sampleY||0));
-    const rowCount=node?Math.max(1,Math.floor((ordered[0].sampleY-ordered.at(-1).sampleY)/16)+1):1;
+    const minDepth=node?Math.min(...ordered.map(sample=>sample.sampleY-sample.radius)):0;
+    const maxDepth=node?Math.max(...ordered.map(sample=>sample.sampleY+sample.radius)):1;
+    const depthSpan=Math.max(1,maxDepth-minDepth);
+    const rowCount=node?Math.max(1,Math.ceil(depthSpan/16)):1;
     const columnsHeight=node?Math.min(192,Math.max(48,rowCount*24)):84;
     for (const code of codes) {
       const column=document.createElement('button'); column.type='button'; column.className='ore-column'; column.dataset.ore=code;
@@ -83,9 +88,11 @@ window.createOreHeatmap = function ({ gameLatLng, relativePoint, language, chang
       ordered.forEach(sample=>{
         const ore=(sample.ores||[]).find(o=>o.code===code), segment=document.createElement('span'); segment.className='ore-column-segment';
         const amount=node?levels(ore):ore?.density||0;
-        const bottom=node?(Math.floor(sample.sampleY/16)-Math.floor(ordered.at(-1).sampleY/16))/rowCount*100:0;
-        segment.style.cssText='bottom:'+bottom+'%;height:'+(node?100/rowCount:Math.max(3,amount/7*100))+'%;background:'+(node?nodeColors:colors)[amount]+';opacity:'+(amount?1:.24);
-        segment.title=name(code)+' · '+(node?'Y '+(sample.sampleY-sample.radius)+'–'+(sample.sampleY+sample.radius)+' · '+(ore?.blocks||0)+' '+(zh()?'个矿块':'blocks'):(labels()[amount]||''))+' · '+time(sample.sampledAt);
+        const bottom=node?((sample.sampleY-sample.radius-minDepth)/depthSpan*100):0;
+        const height=node?((sample.radius*2)/depthSpan*100):Math.max(3,amount/7*100);
+        const hasOre=!!ore && amount>0;
+        segment.style.cssText='bottom:'+bottom+'%;height:'+height+'%;background:'+(hasOre?nodeColors[amount]:'transparent')+';opacity:'+(hasOre?1:0)+';pointer-events:'+(hasOre?'auto':'none');
+        if (hasOre) segment.title=name(code)+' · Y '+(sample.sampleY-sample.radius)+'–'+(sample.sampleY+sample.radius)+' · '+ore.blocks+' '+(zh()?'个矿块':'blocks')+' · '+time(sample.sampledAt);
         segment.dataset.sampleY=sample.sampleY??''; column.append(segment);
       });
       column.onmouseenter=()=>focus(code); column.onmouseleave=()=>focus(pinned);
@@ -93,7 +100,10 @@ window.createOreHeatmap = function ({ gameLatLng, relativePoint, language, chang
       column.onclick=event=>{event.stopPropagation(); pinned=pinned===code?null:code; focus(pinned); root.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.ore===pinned))); marker.setPopupContent(popup(ordered,code)); marker.openPopup();};
       root.append(column);
     }
-    const width=Math.max(40,codes.length*28), center=gameLatLng((coords[0][0]+coords[2][0])/2,(coords[0][1]+coords[2][1])/2);
+    const width=Math.max(40,codes.length*28);
+    const centers=samples.filter(sample=>Number.isFinite(sample.sampleX)&&Number.isFinite(sample.sampleZ));
+    const anchor=centers.length?{x:centers.reduce((sum,s)=>sum+s.sampleX,0)/centers.length,z:centers.reduce((sum,s)=>sum+s.sampleZ,0)/centers.length}:{x:(coords[0][0]+coords[2][0])/2,z:(coords[0][1]+coords[2][1])/2};
+    const center=gameLatLng(anchor.x,anchor.z);
     const marker=L.marker(center,{icon:L.divIcon({className:'ore-columns',html:root,iconSize:[width,columnsHeight+24],iconAnchor:[width/2,columnsHeight+24]}),keyboard:false}).bindPopup(popup(ordered));
     let activeMap;
     function zoom() {
