@@ -9,7 +9,7 @@ package, or the repository LICENSE file when distributed with LauncherGo.
 
 ServerMap 为 Vintage Story 提供浏览器地图、玩家位置、领地、传送器、地点标记、公告和路径测量功能。网页资源由 LauncherGo.ServerMapHost 独立提供，模组仅负责读取世界数据并提供本地 API。
 
-当前版本（ServerMap 0.3.9 / LauncherGo 2.7.2）：
+当前版本（ServerMap 0.4.0 / LauncherGo 2.7.3-pre.1）：
 - 玩家头像改为参考原版模型的斜上方三分之四视角，保留头部、颈部、躯干和双臂；腿部、手持物锚点及下半身服装不会进入头像。
 - 头像底部使用独立于服装和手臂长度的固定解剖裁切线，裁切线与 256×256 图片底边齐平，不会因服装高度或下垂手臂改变缩放和底部位置。
 - 头像传输格式升级为 v2 并刷新缓存命名空间；客户端与服务端都需更新至 0.3.9，旧头像会在外观重新采集后自动替换。
