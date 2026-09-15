@@ -80,13 +80,20 @@ window.createOreHeatmap = function ({ gameLatLng, relativePoint, language, chang
     const color=(node?nodeColors:colors)[level], coords=item.geometry.coordinates[0];
     const polygon=L.geoJSON(item,{coordsToLatLng:c=>gameLatLng(c[0],c[1]),style:{color,fillColor:color,fillOpacity:level?.38:.08,weight:level?.5:1,dashArray:node?'3 3':null},
       onEachFeature:(_,layer)=>layer.bindPopup(popup(effectiveSamples))});
-    const group=L.layerGroup([polygon]), codes=[...new Set(effectiveSamples.flatMap(s=>(s.ores||[]).map(o=>o.code)))];
+    const group=L.layerGroup([polygon]);
     // Density readings remain a colored area only.  The 3D columns are reserved
     // for node (ore-vein) searches, where each segment represents a Y search band.
     if (!node) {
       group.on('add', () => polygon.bringToBack());
       return group;
     }
+    const allCodes=[...new Set(effectiveSamples.flatMap(s=>(s.ores||[]).map(o=>o.code)))];
+    // Keep the map readable when no ore filter is selected: columns are ranked
+    // by the largest observed block count and capped at the six strongest ores.
+    const codes=select.value ? allCodes.filter(code=>code===select.value) : allCodes
+      .sort((a,b)=>Math.max(...effectiveSamples.map(s=>(s.ores||[]).find(o=>o.code===b)?.blocks||0))
+        -Math.max(...effectiveSamples.map(s=>(s.ores||[]).find(o=>o.code===a)?.blocks||0)))
+      .slice(0,6);
     if (!codes.length) { group.on('add',()=>polygon.bringToBack()); return group; }
     const root=document.createElement('div'); root.className='ore-columns-inner'; root.dataset.mode=node?'node':'density';
     let pinned=null;
