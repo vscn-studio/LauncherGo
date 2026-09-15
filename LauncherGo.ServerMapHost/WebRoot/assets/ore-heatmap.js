@@ -122,7 +122,9 @@ window.createOreHeatmap = function ({ gameLatLng, relativePoint, language, chang
     // anchor for the whole column group; never average search centers from
     // different depth records, which made the marker drift as new probes arrived.
     const center=gameLatLng((coords[0][0]+coords[2][0])/2,(coords[0][1]+coords[2][1])/2);
-    const marker=L.marker(center,{icon:L.divIcon({className:'ore-columns',html:root,iconSize:[width,iconHeight],iconAnchor:[width/2,iconHeight/2]}),keyboard:false}).bindPopup(popup(ordered));
+    // The chunk centre is the fixed base point: the column grows upward from
+    // this coordinate, so a single column cannot appear lower than the anchor.
+    const marker=L.marker(center,{icon:L.divIcon({className:'ore-columns',html:root,iconSize:[width,iconHeight],iconAnchor:[width/2,iconHeight]}),keyboard:false}).bindPopup(popup(ordered));
     marker.on('popupclose',()=>{ pinned=null; focus(null); root.querySelectorAll('button').forEach(button=>button.setAttribute('aria-pressed','false')); });
     let activeMap;
     function zoom() {
