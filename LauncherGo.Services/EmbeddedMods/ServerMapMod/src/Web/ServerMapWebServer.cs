@@ -117,6 +117,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             if (path == "api/v1/settings") { Json(context, Settings(), true); return; }
             if (path == "api/v1/layers/manifest") { Json(context, Manifest()); return; }
             if (path.Equals("api/v1/layers/mineral-heatmap", StringComparison.OrdinalIgnoreCase)) { HandleOreHeatmap(context); return; }
+            if (path == "api/v1/ore-probes") { HandleOreProbes(context); return; }
             if (path.StartsWith("api/v1/layers/", StringComparison.OrdinalIgnoreCase)) { var name = path[14..]; if (!Layers.Contains(name, StringComparer.OrdinalIgnoreCase)) { NotFound(context); return; } Json(context, Layer(name, context.Request.QueryString["bbox"], Principal(context.Request)), true); return; }
             if (path == "api/v1/fog/regions") { ServeFogRegions(context); return; }
             if (path.StartsWith("api/v1/fog/", StringComparison.OrdinalIgnoreCase)) { ServeFogTile(context, path[11..]); return; }
@@ -509,7 +510,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             version = 12,
             serverName = api.Server.Config.ServerName,
             updatedAt = startedAt,
-            serverMapVersion = "0.4.1",
+            serverMapVersion = "0.4.2",
             poiZoomRanges = true,
             tileVersion = typeof(ServerMapWebServer).Assembly.ManifestModule.ModuleVersionId.ToString("N"),
             colorVersion = materials.ClientColormapVersion,
@@ -533,7 +534,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             // Flat aliases keep the metadata easy to consume for lightweight
             // custom web roots that do not understand the nested objects.
             serverVersion = GameVersion.LongGameVersion,
-            mapVersion = "0.4.1",
+            mapVersion = "0.4.2",
             mapSize = $"{mapSizeX} × {mapSizeZ} × {mapSizeY}",
             cacheSizeBytes = cacheBytes,
             renderTimeMs = RenderMilliseconds,

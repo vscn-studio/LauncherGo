@@ -59,10 +59,11 @@ async function main(){
       const map=await page.locator('#map').boundingBox();
       await page.locator('#sidebar').evaluate(el=>el.style.visibility='hidden');
       await page.locator('#sidebarShade').evaluate(el=>el.style.pointerEvents='none');
+      await page.locator('#oreHeatmapControls').evaluate(el=>el.style.pointerEvents='none');
       await page.mouse.click(map.width/2+16,map.height/2+16);
       await page.locator('.leaflet-popup-content').waitFor();
       assert.match(await page.locator('.leaflet-popup-content').innerText(),/铜.*4.20‰/);
-      assert.match(await page.locator('.leaflet-popup-content').innerText(),/采样时间/);
+      assert.doesNotMatch(await page.locator('.leaflet-popup-content').innerText(),/采样[：时间]|Sampled/);
       await page.locator('.leaflet-popup-close-button').click();
       await page.waitForFunction(()=>!document.querySelector('.leaflet-popup-content'));
       await page.locator('#sidebar').evaluate(el=>el.style.visibility='');
@@ -84,9 +85,15 @@ async function main(){
         for(const stream of streams)stream.write('event: layer\ndata: {"layer":"mineral-heatmap"}\n\n');
         await pending;
       };
-      truncated=true;await refresh();await page.waitForFunction(()=>document.querySelector('.ore-note').textContent.includes('放大'));
-      truncated=false;empty=true;await refresh();await page.waitForFunction(()=>document.querySelector('.ore-note').textContent.includes('尚无'));
-      fail=true;await refresh();await page.waitForFunction(()=>document.querySelector('.ore-note').textContent.includes('加载失败'));
+      // Empty/error responses must clear the previously interactive density area.
+      truncated=true;await refresh();
+      truncated=false;empty=true;await refresh();
+      await page.locator('#sidebar').evaluate(el=>el.style.visibility='hidden');
+      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      await page.mouse.click(map.width/2+16,map.height/2+16);
+      assert.equal(await page.locator('.leaflet-popup-content').count(),0);
+      fail=true;await refresh();await page.waitForFunction(()=>document.querySelectorAll('#oreHeatmapSelect option').length<=2);
+      await page.locator('#sidebar').evaluate(el=>el.style.visibility='');
       fail=false;empty=false;await refresh();
       await page.locator('#language').selectOption('en',{force:true});
       await page.waitForFunction(()=>document.querySelector('#oreHeatmapSelect option:checked').textContent==='Cassiterite');

@@ -15,12 +15,18 @@ public sealed class OreHeatmapStore
     {
         public int AmountLevel => Blocks <= 0 ? 0 : Blocks < 10 ? 1 : Blocks < 20 ? 2 : Blocks < 40 ? 3 : Blocks < 80 ? 4 : Blocks < 160 ? 5 : 6;
     }
+    public sealed record OreBlock(string Code, int X, int Y, int Z);
     public sealed record Sample(int ChunkX, int ChunkZ, DateTimeOffset SampledAt, OreValue[] Ores,
-        string Mode = "density", int? SampleY = null, int Radius = 0, double? SampleX = null, double? SampleZ = null, NodeValue[]? Nodes = null);
+        string Mode = "density", int? SampleY = null, int Radius = 0, double? SampleX = null, double? SampleZ = null, NodeValue[]? Nodes = null,
+        string? OwnerUid = null, string? OwnerName = null, string? Id = null, OreBlock[]? Blocks = null);
     private sealed record StoredData(int Version, int ChunkSize, Sample[] Samples, int BandSize = 16);
     public sealed record Cell(int ChunkX, int ChunkZ, double MinX, double MinZ, double MaxX, double MaxZ,
         int Density, DateTimeOffset SampledAt, OreValue[] Ores, string Mode, int? SampleY, int Radius,
-        double? SampleX, double? SampleZ, NodeValue[] Nodes);
+        double? SampleX, double? SampleZ, NodeValue[] Nodes, string Id, string? OwnerUid, string? OwnerName, OreBlock[]? Blocks);
+    public sealed record DepthCount(int Y, int Blocks);
+    public sealed record OreColumn(string Code, int Total, DepthCount[] Layers);
+    public sealed record DepthRange(int MinY, int MaxY);
+    public sealed record Histogram(int MinY, int MaxY, int Step, bool Incomplete, DepthRange[] Coverage, OreColumn[] Columns);
     public sealed record Result(Cell[] Cells, string[] OreCodes, long Version, bool Truncated);
     public const int MaxQueryCells = 10000;
     public const int BandSize = 16;
@@ -30,10 +36,8 @@ public sealed class OreHeatmapStore
     private readonly string path;
     private readonly int chunkSize;
     private readonly Action<string> log;
-    // Node observations are keyed by their actual vertical interval. Using only
-    // the centre Y band caused non-overlapping searches in the same band to
-    // overwrite one another.
-    private readonly Dictionary<(int X, int Z, string Mode, int MinY, int MaxY), Sample> samples = new();
+    // Each player's exact probe remains independent, including within one chunk.
+    private readonly Dictionary<(double X, double Z, string Mode, int Y, int Radius, string Owner), Sample> samples = new();
     private long version = 1;
     private bool dirty;
 
@@ -44,7 +48,7 @@ public sealed class OreHeatmapStore
         if (!File.Exists(path)) return;
         // Fail explicitly on corrupt data; do not silently overwrite it with an empty store.
         var saved = JsonSerializer.Deserialize<StoredData>(File.ReadAllText(path));
-        if (saved == null || saved.Version is not (1 or 2) || saved.ChunkSize != chunkSize || saved.BandSize != BandSize || saved.Samples == null)
+        if (saved == null || saved.Version is not (1 or 2 or 3 or 4) || saved.ChunkSize != chunkSize || saved.BandSize != BandSize || saved.Samples == null)
             throw new InvalidDataException("Unsupported mineral heatmap file: " + path);
         foreach (var sample in saved.Samples)
         {
@@ -56,11 +60,12 @@ public sealed class OreHeatmapStore
                 || sample.SampleX is double sx && (!Coordinate(sx) || Math.Floor(sx / chunkSize) != sample.ChunkX)
                 || sample.SampleZ is double sz && (!Coordinate(sz) || Math.Floor(sz / chunkSize) != sample.ChunkZ)
                 || sample.Mode == "node" && (sample.SampleY == null || sample.SampleX == null || sample.SampleZ == null
-                    || sample.Radius is < 1 or > MaxNodeRadius || sample.Nodes == null || sample.Nodes.Any(v => !ValidNode(v, sample.Radius))))
+                    || sample.Radius is < 1 or > MaxNodeRadius || sample.Nodes == null || sample.Nodes.Any(v => !ValidNode(v, sample.Radius))
+                    || !ValidBlocks(sample.Blocks, sample.SampleX.Value, sample.SampleY.Value, sample.SampleZ.Value, sample.Radius, sample.Nodes)))
                 throw new InvalidDataException("Invalid mineral heatmap sample: " + path);
-            samples[Key(sample)] = sample;
+            samples[Key(sample)] = sample with { Id = sample.Id ?? Guid.NewGuid().ToString("N") };
         }
-        dirty = saved.Version == 1;
+        dirty = saved.Version < 4;
     }
 
     private static bool ValidOre(OreValue? value) => value != null && !string.IsNullOrWhiteSpace(value.Code)
@@ -68,6 +73,15 @@ public sealed class OreHeatmapStore
         && double.IsFinite(value.PartsPerThousand) && value.PartsPerThousand >= 0;
 
     private static bool Coordinate(double value) => double.IsFinite(value) && value >= int.MinValue && value <= int.MaxValue;
+    private static bool ValidBlocks(OreBlock[]? blocks, double x, int y, double z, int radius, NodeValue[] nodes)
+    {
+        if (blocks == null) return true; // Legacy/incomplete counts cannot establish per-Y amounts.
+        if (blocks.Length > Math.Pow(radius * 2 + 1, 3) || blocks.Any(b => b == null || string.IsNullOrWhiteSpace(b.Code)
+            || b.Code.Length > 256 || b.Y is < 0 or > 65535 || Math.Abs(b.X - x) > radius || Math.Abs((long)b.Y - y) > radius || Math.Abs(b.Z - z) > radius)
+            || blocks.Select(b => (b.X, b.Y, b.Z)).Distinct().Count() != blocks.Length) return false;
+        var counts = blocks.GroupBy(b => b.Code).ToDictionary(g => g.Key, g => g.Count());
+        return nodes.Where(n => n.Blocks > 0).Count() == counts.Count && nodes.All(n => counts.GetValueOrDefault(n.Code) == n.Blocks);
+    }
     private static bool ValidNode(NodeValue? value, int radius) => value != null && !string.IsNullOrWhiteSpace(value.Code)
         && value.Code.Length <= 256 && value.Blocks >= 0 && value.Blocks <= Math.Pow(radius * 2 + 1, 3);
 
@@ -82,36 +96,48 @@ public sealed class OreHeatmapStore
         lock (gate)
         {
             var sample = new Sample(chunkX, chunkZ, sampledAt, values, SampleY: surfaceY, SampleX: x, SampleZ: z);
-            samples[Key(sample)] = sample;
+            samples[Key(sample)] = sample with { Id = samples.GetValueOrDefault(Key(sample))?.Id ?? Guid.NewGuid().ToString("N") };
             version++; dirty = true;
         }
         return true;
     }
 
-    public bool RecordNode(double x, int y, double z, int radius, IEnumerable<NodeValue> ores, DateTimeOffset sampledAt)
+    public bool RecordNode(double x, int y, double z, int radius, IEnumerable<NodeValue> ores, DateTimeOffset sampledAt,
+        string? ownerUid = null, string? ownerName = null, OreBlock[]? blocks = null)
     {
         if (!Coordinate(x) || !Coordinate(z) || y is < 0 or > 65535 || radius is < 1 or > MaxNodeRadius
             || !Coordinate(x - radius) || !Coordinate(x + radius) || !Coordinate(z - radius) || !Coordinate(z + radius)) return false;
         var values = ores.ToArray();
         if (values.Any(value => !ValidNode(value, radius)) || values.Select(v => v.Code).Distinct().Count() != values.Length
-            || values.Sum(v => (long)v.Blocks) > Math.Pow(radius * 2 + 1, 3)) return false;
+            || values.Sum(v => (long)v.Blocks) > Math.Pow(radius * 2 + 1, 3) || !ValidBlocks(blocks, x, y, z, radius, values)) return false;
         var cx = (int)Math.Floor(x / chunkSize); var cz = (int)Math.Floor(z / chunkSize);
-        var sample = new Sample(cx, cz, sampledAt, [], "node", y, radius, x, z, values.Where(v => v.Blocks > 0).OrderByDescending(v => v.Blocks).ToArray());
-        lock (gate) { samples[Key(sample)] = sample; version++; dirty = true; }
+        var sample = new Sample(cx, cz, sampledAt, [], "node", y, radius, x, z, values.Where(v => v.Blocks > 0).OrderByDescending(v => v.Blocks).ToArray(), ownerUid, ownerName, Blocks: blocks?.ToArray());
+        lock (gate) { samples[Key(sample)] = sample with { Id = samples.GetValueOrDefault(Key(sample))?.Id ?? Guid.NewGuid().ToString("N") }; version++; dirty = true; }
         return true;
     }
 
     public static int DepthBand(int y) => (int)Math.Floor(y / (double)BandSize);
 
-    private static (int X, int Z, string Mode, int MinY, int MaxY) Key(Sample sample)
+    public int RemoveNodePoint(string ownerUid, double x, double z, bool isAdmin = false)
     {
-        if (sample.Mode != "node" || sample.SampleY == null) return (sample.ChunkX, sample.ChunkZ, sample.Mode, 0, 0);
-        return (sample.ChunkX, sample.ChunkZ, sample.Mode,
-            sample.SampleY.Value - sample.Radius, sample.SampleY.Value + sample.Radius);
+        if (string.IsNullOrWhiteSpace(ownerUid)) return 0;
+        lock (gate)
+        {
+            var keys = samples.Where(pair => pair.Value.Mode == "node" && (isAdmin || pair.Value.OwnerUid == ownerUid)
+                && pair.Value.SampleX == x && pair.Value.SampleZ == z).Select(pair => pair.Key).ToArray();
+            foreach (var key in keys) samples.Remove(key);
+            if (keys.Length > 0) { version++; dirty = true; }
+            return keys.Length;
+        }
     }
 
+    private static (double X, double Z, string Mode, int Y, int Radius, string Owner) Key(Sample sample) => sample.Mode == "node"
+        ? (sample.SampleX!.Value, sample.SampleZ!.Value, sample.Mode, sample.SampleY!.Value, sample.Radius, sample.OwnerUid ?? "")
+        : (sample.ChunkX, sample.ChunkZ, sample.Mode, 0, 0, "");
+
     public Result Query((double MinX, double MinZ, double MaxX, double MaxZ) bounds, string? selectedOre,
-        Func<double, double, double, double, bool>? visible = null, string? mode = null, int? minY = null, int? maxY = null)
+        Func<double, double, double, double, bool>? visible = null, string? mode = null, int? minY = null, int? maxY = null,
+        double? pointX = null, double? pointZ = null)
     {
         lock (gate)
         {
@@ -119,11 +145,16 @@ public sealed class OreHeatmapStore
             var truncated = false;
             foreach (var sample in samples.Values)
             {
+                if (pointX != null && sample.SampleX != pointX || pointZ != null && sample.SampleZ != pointZ) continue;
                 if (!string.IsNullOrEmpty(mode) && !string.Equals(sample.Mode, mode, StringComparison.OrdinalIgnoreCase)) continue;
                 if (sample.Mode == "node" && (minY != null && sample.SampleY + sample.Radius < minY || maxY != null && sample.SampleY - sample.Radius > maxY)) continue;
                 var minX = sample.ChunkX * (double)chunkSize; var minZ = sample.ChunkZ * (double)chunkSize;
                 var maxX = minX + chunkSize; var maxZ = minZ + chunkSize;
-                if (maxX < bounds.MinX || minX > bounds.MaxX || maxZ < bounds.MinZ || minZ > bounds.MaxZ) continue;
+                if (sample.Mode == "node")
+                {
+                    if (sample.SampleX < bounds.MinX || sample.SampleX > bounds.MaxX || sample.SampleZ < bounds.MinZ || sample.SampleZ > bounds.MaxZ) continue;
+                }
+                else if (maxX < bounds.MinX || minX > bounds.MaxX || maxZ < bounds.MinZ || minZ > bounds.MaxZ) continue;
                 if (visible != null && !visible(minX, minZ, maxX, maxZ)) continue;
                 // Every chunk and hidden region intersecting the search volume must be authorized.
                 if (sample.Mode == "node" && visible != null && !visible(sample.SampleX!.Value - sample.Radius,
@@ -136,10 +167,49 @@ public sealed class OreHeatmapStore
                 var density = values.Length == 0 ? 0 : values.Max(value => value.Density);
                 if (cells.Count >= MaxQueryCells) { truncated = true; continue; }
                 cells.Add(new Cell(sample.ChunkX, sample.ChunkZ, minX, minZ, maxX, maxZ, density, sample.SampledAt, values,
-                    sample.Mode, sample.SampleY, sample.Radius, sample.SampleX, sample.SampleZ, nodes));
+                    sample.Mode, sample.SampleY, sample.Radius, sample.SampleX, sample.SampleZ, nodes, sample.Id!, sample.OwnerUid, sample.OwnerName, sample.Blocks));
             }
             return new Result(cells.ToArray(), codes.OrderBy(code => code, StringComparer.Ordinal).ToArray(), version, truncated);
         }
+    }
+
+    // Only authorized, unfiltered cells may be passed here. A newer empty reading
+    // supersedes older ore inside its full XYZ volume, not merely its Y interval.
+    public static Histogram AggregateNodePoint(IEnumerable<Cell> cells, string? ore = null, int? minY = null, int? maxY = null)
+    {
+        var ordered = cells.Where(c => c.Mode == "node").OrderByDescending(c => c.SampledAt).ThenBy(c => c.Id, StringComparer.Ordinal).ToArray();
+        if (ordered.Length == 0) return new(0, 0, 6, false, [], []);
+        var low = Math.Max(minY ?? 0, ordered.Min(c => c.SampleY!.Value - c.Radius));
+        var high = Math.Min(maxY ?? 65535, ordered.Max(c => c.SampleY!.Value + c.Radius));
+        var newer = new Dictionary<int, List<Cell>>();
+        var seen = new HashSet<(int X, int Y, int Z)>();
+        var found = new List<OreBlock>();
+        var coverage = new HashSet<int>();
+        foreach (var cell in ordered)
+        {
+            foreach (var block in cell.Blocks ?? [])
+            {
+                if (block.Y < low || block.Y > high || !seen.Add((block.X, block.Y, block.Z))) continue;
+                if (newer.TryGetValue(block.Y, out var above) && above.Any(c => Math.Abs(block.X - c.SampleX!.Value) <= c.Radius && Math.Abs(block.Z - c.SampleZ!.Value) <= c.Radius)) continue;
+                if (string.IsNullOrEmpty(ore) || block.Code == ore) found.Add(block);
+            }
+            for (var y = Math.Max(low, cell.SampleY!.Value - cell.Radius); y <= Math.Min(high, cell.SampleY.Value + cell.Radius); y++)
+            {
+                if (!newer.TryGetValue(y, out var atY)) newer[y] = atY = [];
+                atY.Add(cell);
+                if (cell.Blocks != null) coverage.Add(y);
+            }
+        }
+        var ranges = new List<DepthRange>();
+        foreach (var y in coverage.Order())
+        {
+            if (ranges.Count > 0 && ranges[^1].MaxY + 1 == y) ranges[^1] = ranges[^1] with { MaxY = y };
+            else ranges.Add(new(y, y));
+        }
+        var columns = found.GroupBy(b => b.Code).Select(g => new OreColumn(g.Key, g.Count(),
+            g.GroupBy(b => b.Y).OrderBy(y => y.Key).Select(y => new DepthCount(y.Key, y.Count())).ToArray()))
+            .OrderByDescending(c => c.Total).ThenBy(c => c.Code, StringComparer.Ordinal).ToArray();
+        return new(low, Math.Max(low, high), ordered[0].Radius, ordered.Any(c => c.Blocks == null), ranges.ToArray(), columns);
     }
 
     public void Save()
@@ -151,7 +221,7 @@ public sealed class OreHeatmapStore
             lock (gate)
             {
                 if (!dirty) return;
-                snapshot = new StoredData(2, chunkSize, samples.Values.ToArray());
+                snapshot = new StoredData(4, chunkSize, samples.Values.ToArray());
                 savedVersion = version;
             }
             try

@@ -1,0 +1,34 @@
+.ore-probe-marker { background:none;border:0;display:grid;place-items:center; }
+.ore-probe-dot { display:block;width:10px;height:10px;border:2px solid #ecedf0;border-radius:50%;background:var(--ore-color);box-shadow:0 1px 5px #000b; }
+.ore-probe-marker:focus-visible .ore-probe-dot,.ore-probe-marker:hover .ore-probe-dot { outline:2px solid #f2bd65;outline-offset:3px; }
+.leaflet-tooltip.ore-depth-tooltip { position:absolute;z-index:1400;opacity:1;padding:8px;background:#18181af5;border:var(--border);border-radius:4px;color:var(--text);box-shadow:var(--shadow);white-space:normal;pointer-events:auto;font:500 12px/1.4 Inter,system-ui,sans-serif; }
+.ore-depth-tooltip:before { display:none; }
+.leaflet-oreProbeActions-pane { z-index:1400; }
+.ore-probe-popup .leaflet-popup-content-wrapper { background:#18181af5;border:var(--border);border-radius:4px;box-shadow:var(--shadow); }
+.ore-probe-popup .leaflet-popup-tip { background:#18181af5;box-shadow:var(--shadow); }
+.ore-depth-scroll { max-width:min(430px,calc(100vw - 48px));overflow-x:auto;overflow-y:hidden;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#626268 #18181a; }
+.ore-depth-plot { display:grid;gap:0;min-width:130px;width:max-content;position:relative;padding-bottom:10px; }
+.ore-depth-axis { position:sticky;left:0;z-index:2;background:#18181a;color:var(--muted); }
+.ore-depth-heading { position:sticky;top:0;z-index:3;box-sizing:border-box;height:48px;display:flex;flex-direction:column;justify-content:center;gap:3px;text-align:center;padding:4px;background:#18181a; }
+.ore-depth-heading b { font-size:12px;line-height:1.2;overflow-wrap:anywhere;max-height:30px;overflow:auto;font-weight:500; }
+.ore-depth-total { color:var(--text);font-weight:600;font-variant-numeric:tabular-nums; }
+.ore-depth-axis-body { position:relative;height:var(--plot-height);margin-top:8px;border-right:1px solid #626268; }
+.ore-depth-tick { position:absolute;right:8px;font:11px/14px Inter,system-ui,sans-serif;font-variant-numeric:tabular-nums;color:var(--muted); }
+.ore-depth-major { color:var(--text);font-weight:600; }
+.ore-depth-tick:after { content:'';position:absolute;right:-8px;top:50%;width:4px;border-top:1px solid #626268; }
+.ore-depth-bar { position:relative;height:var(--plot-height);width:32px;margin:8px auto 0;background:repeating-linear-gradient(135deg,#202022 0px,#202022 3px,#37373b 3px,#37373b 4px);outline:1px solid #ffffff24; }
+.ore-depth-coverage { position:absolute;left:0;right:0;background:#38383e; }
+.ore-depth-cell { position:absolute;left:0;right:0;box-sizing:border-box;border-bottom:1px solid #18181a66; }
+.ore-depth-cell:hover { outline:1px solid white;z-index:1; }
+.ore-depth-break { position:absolute;left:0;right:0;height:10px;background:#18181a;color:var(--muted);font:12px/10px Inter,system-ui,sans-serif;text-align:center; }
+.ore-depth-note { display:block;max-width:260px;margin-top:2px;color:var(--muted);font-size:10px; }
+.ore-depth-pages { display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;color:var(--muted);font-variant-numeric:tabular-nums; }
+.ore-depth-status { display:block;max-width:260px;color:var(--muted);font-size:12px; }
+.ore-depth-chart > .ore-depth-status { margin-top:6px; }
+.ore-probe-menu { max-width:250px;color:var(--text);font:500 12px/1.4 Inter,system-ui,sans-serif; }
+.leaflet-popup-content .ore-probe-menu p { margin:0 16px 10px 0; }
+.ore-delete-confirm { width:100%;color:#e49b9b; }
+.ore-delete-confirm:hover:not(:disabled) { background:#e49b9b18; }
+.ore-delete-confirm:disabled { cursor:wait; }
+.ore-delete-status { display:block;font-size:12px;margin-top:6px;color:var(--muted); }
+.ore-delete-status:empty { display:none; }

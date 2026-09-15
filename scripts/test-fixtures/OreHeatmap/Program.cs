@@ -103,7 +103,7 @@ internal static class Program
         Field(mod, "sapi", serverApi); Field(web, "api", serverApi);
         var oreMap = new ModSystemOreMap(); Field(oreMap, "api", serverApi);
         var entity = new EntityPlayer();
-        var player = (IServerPlayer)Stub.Create(typeof(IServerPlayer), (method, _) => method.Name switch { "get_Entity" => entity, "get_PlayerUID" => "player", _ => null });
+        var player = (IServerPlayer)Stub.Create(typeof(IServerPlayer), (method, _) => method.Name switch { "get_Entity" => entity, "get_PlayerUID" => "player", "get_PlayerName" => "Player", "HasPrivilege" => false, _ => null });
         var patchType = typeof(ServerMapModSystem).Assembly.GetType("ServerMap.Network.OreMapCapturePatch", true)!;
         var target = AccessTools.Method(typeof(ModSystemOreMap), "DidProbe");
         var harmony = new Harmony("servermap.tests.ore");
@@ -149,6 +149,9 @@ internal static class Program
         var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Check(json.RootElement.GetProperty("features").GetArrayLength() == 3, "heatmap HTTP response missing samples");
         Check(json.RootElement.GetProperty("features")[0].GetProperty("geometry").GetProperty("type").GetString() == "Polygon", "heatmap geometry is not polygon");
+        var nodeFeature = json.RootElement.GetProperty("features").EnumerateArray().Single(f => f.GetProperty("properties").GetProperty("mode").GetString() == "node");
+        Check(nodeFeature.GetProperty("geometry").GetProperty("type").GetString() == "Point"
+            && nodeFeature.GetProperty("geometry").GetProperty("coordinates")[0].GetDouble() == 16, "node must use the exact probe point");
         var manifest = JsonDocument.Parse(await (await Request(HttpMethod.Get, "api/v1/layers/manifest")).Content.ReadAsStringAsync());
         Check(manifest.RootElement.GetProperty("layers").EnumerateArray().Any(layer => layer.GetProperty("id").GetString() == "mineral-heatmap" && !layer.GetProperty("visible").GetBoolean()), "manifest missing optional heatmap");
         Check(store.Query((-100, -100, 100, 100), null).Version == countBefore, "HTTP changed server records");
@@ -174,6 +177,146 @@ internal static class Program
         var hidden = otherWorld.Query((-1, -1, 1e6, 100), null, (x, z, xx, zz) => x == 320000);
         Check(hidden.Cells.Length == 1 && !hidden.Truncated, "invisible cells consumed query limit");
         Check(otherWorld.Query((-1, -1, 1e6, 100), null, (_, _, _, _) => false).OreCodes.Length == 0, "hidden catalog leaked");
+
+        // Coordinate snapshots preserve exact ore Y; legacy totals never become layer counts.
+        var probePath = Path.Combine(directory, "probes.json");
+        var probes = new OreHeatmapStore(probePath, 32, logs.Add);
+        foreach (var oldVersion in new[] { 1, 2, 3 })
+        {
+            var legacyPath = Path.Combine(directory, $"legacy-{oldVersion}.json");
+            var legacySample = oldVersion == 1 ? new OreHeatmapStore.Sample(0, 0, now, copper)
+                : new OreHeatmapStore.Sample(0, 0, now, [], "node", 114, 6, 8, 8, [new("silver", 3)]);
+            var legacyJson = JsonSerializer.Serialize(new { Version = oldVersion, ChunkSize = 32, Samples = new[] { legacySample }, BandSize = 16 });
+            // Obsolete fields from the removed UI can still occur in a v3 save.
+            if (oldVersion == 3) legacyJson = legacyJson.Replace("\"Blocks\":null", "\"Blocks\":null,\"Section\":{\"X\":\"222\",\"Z\":\"333\"}");
+            File.WriteAllText(legacyPath, legacyJson);
+            var migrated = new OreHeatmapStore(legacyPath, 32, logs.Add);
+            var legacy = migrated.Query((0, 0, 32, 32), null).Cells.Single();
+            Check(!string.IsNullOrEmpty(legacy.Id) && legacy.OwnerUid == null && legacy.Blocks == null, "migration fabricated owner or block positions");
+            if (oldVersion > 1) Check(OreHeatmapStore.AggregateNodePoint([legacy]).Incomplete && OreHeatmapStore.AggregateNodePoint([legacy]).Columns.Length == 0, "legacy totals fabricated layers");
+            migrated.Save();
+            Check(JsonDocument.Parse(File.ReadAllText(legacyPath)).RootElement.GetProperty("Version").GetInt32() == 4
+                && new OreHeatmapStore(legacyPath, 32, logs.Add).Query((0, 0, 32, 32), null).Cells.Single().Id == legacy.Id, "migration identity not persisted");
+            Check(!File.ReadAllText(legacyPath).Contains("Section"), "obsolete terrain data persisted");
+        }
+        OreHeatmapStore.NodeValue[] silver = [new("silver", 3)];
+        OreHeatmapStore.OreBlock[] blocks = [new("silver", 7, 113, 8), new("silver", 8, 113, 8), new("silver", 8, 114, 8)];
+        Check(probes.RecordNode(8, 114, 8, 6, silver, now, "player", "Player", blocks), "coordinate snapshot rejected");
+        var original = probes.Query((0, 0, 32, 32), null).Cells.Single().Id;
+        probes.RecordNode(8, 114, 8, 6, silver, now.AddSeconds(1), "player", "Player", blocks);
+        Check(probes.Query((0, 0, 32, 32), null).Cells.Single().Id == original, "updating a sample changed its identity");
+        probes.RecordNode(9, 114, 8, 6, silver, now, "player", "Player", blocks);
+        probes.RecordNode(8, 113, 8, 6, silver, now, "player", "Player", blocks);
+        probes.RecordNode(8, 114, 8, 6, silver, now, "other", "Other", blocks);
+        probes.RecordNode(8, 114, 8, 6, silver, now); // Historical ownerless record.
+        Check(probes.Query((0, 0, 32, 32), null).Cells.Length == 5, "neighbor or other-owner probe overwritten");
+        Check(!probes.RecordNode(8, 114, 8, 6, silver, now, "player", "Player", [blocks[0]]), "mismatched total accepted");
+        Check(!probes.RecordNode(8, 114, 8, 6, silver, now, "player", "Player", [blocks[0], blocks[0], blocks[1]]), "duplicate coordinates accepted");
+        Check(!probes.RecordNode(8, 114, 8, 6, silver, now, "player", "Player", [blocks[0], blocks[1], new("silver", 20, 114, 8)]), "out-of-volume position accepted");
+        probes.Save();probes = new OreHeatmapStore(probePath, 32, logs.Add);
+        Check(probes.Query((0, 0, 32, 32), null).Cells.Single(c => c.Id == original).Blocks!.SequenceEqual(blocks), "coordinates did not persist");
+        Check(probes.RemoveNodePoint("", 8, 8) == 0 && probes.RemoveNodePoint("admin", 8, 8) == 0, "unprivileged deletion accepted");
+
+        var exact = new OreHeatmapStore(Path.Combine(directory, "exact.json"), 32, logs.Add);
+        void Probe(int y, int radius, int seconds, params OreHeatmapStore.OreBlock[] positions) => Check(exact.RecordNode(8, y, 8, radius,
+            positions.GroupBy(b => b.Code).Select(g => new OreHeatmapStore.NodeValue(g.Key, g.Count())), now.AddSeconds(seconds), "player", "Player", positions), "test snapshot rejected");
+        OreHeatmapStore.Histogram Histogram(string? ore = null, int? low = null, int? high = null) =>
+            OreHeatmapStore.AggregateNodePoint(exact.Query((8, 8, 8, 8), null, mode: "node").Cells, ore, low, high);
+        // A/B/C and B/C/D each report 3. The combined volume contains 4 distinct blocks.
+        var a = new OreHeatmapStore.OreBlock("silver", 8, 120, 8);
+        var b = new OreHeatmapStore.OreBlock("silver", 7, 113, 8);
+        var c = new OreHeatmapStore.OreBlock("silver", 8, 113, 8);
+        var d = new OreHeatmapStore.OreBlock("silver", 8, 107, 8);
+        Probe(114, 6, 1, a, b, c);Probe(113, 6, 2, b, c, d);
+        var histogram = Histogram();
+        Check(histogram.Columns.Single().Total == 4 && histogram.Columns.Single().Layers.Single(l => l.Y == 113).Blocks == 2
+            && histogram.Step == 6, "overlap deduplication, real Y or tick spacing incorrect");
+        Check(Histogram("silver", 113, 114).Columns.Single().Total == 2, "height filter did not count actual ore Y");
+        // A newer narrow scan clears only its XYZ volume, not all same-Y blocks.
+        Probe(113, 1, 3);
+        Check(Histogram().Columns.Single().Total == 2, "new empty scan failed to remove old ore in its volume");
+        Probe(107, 1, 4, new OreHeatmapStore.OreBlock("copper", 8, 107, 8));
+        Check(Histogram().Columns.Length == 2 && Histogram("silver").Columns.Single().Total == 1, "ore replacement/filter resurrected old ore");
+        Probe(80, 1, 5, new OreHeatmapStore.OreBlock("copper", 8, 80, 8));
+        Check(Histogram().Coverage.Length == 2, "unprobed vertical gap was marked scanned");
+        var widthTest = new OreHeatmapStore(Path.Combine(directory, "width.json"), 32, logs.Add);
+        widthTest.RecordNode(8, 114, 8, 6, [new("silver", 2)], now, "player", "Player",
+            [new("silver", 8, 114, 8), new("silver", 13, 114, 8)]);
+        widthTest.RecordNode(8, 114, 8, 1, [], now.AddSeconds(1), "player", "Player", []);
+        Check(OreHeatmapStore.AggregateNodePoint(widthTest.Query((8, 8, 8, 8), null).Cells).Columns.Single().Total == 1,
+            "narrow scan wrongly cleared far ore on the same Y");
+
+        Field(web, "oreHeatmap", probes);Policy(new() { FogEnabled = false });
+        var detail = JsonDocument.Parse(await (await Request(HttpMethod.Get, "api/v1/ore-probes?x=8&z=8")).Content.ReadAsStringAsync());
+        Check(detail.RootElement.GetProperty("columns")[0].GetProperty("total").GetInt32() == 3
+            && detail.RootElement.GetProperty("incomplete").GetBoolean(), "API fabricated total from legacy or overlapping samples");
+        Check(!detail.RootElement.TryGetProperty("samples", out _) && !detail.RootElement.TryGetProperty("section", out _), "removed detail payload remains");
+        Check((await Request(HttpMethod.Delete, "api/v1/ore-probes?x=8&z=8")).StatusCode == HttpStatusCode.Unauthorized, "anonymous delete accepted");
+        Check((await Request(HttpMethod.Post, "api/v1/ore-probes?x=8&z=8")).StatusCode == HttpStatusCode.MethodNotAllowed, "client probe upload accepted");
+        Check((await Request(HttpMethod.Get, "api/v1/ore-probes?x=8&z=8&minY=bad")).StatusCode == HttpStatusCode.BadRequest, "invalid Y accepted");
+        var auth = new MapAuthStore(Path.Combine(directory, "probe-auth.json"));auth.SetPassword(player, "test-password");Field(web, "auth", auth);
+        var session = auth.Login("Player", "test-password")!.Value.SessionId;
+        client.DefaultRequestHeaders.Add("Cookie", "servermap_auth=" + session);
+        Check((await Request(HttpMethod.Delete, "api/v1/ore-probes?x=8&z=8")).StatusCode == HttpStatusCode.Forbidden, "CSRF header not enforced");
+        client.DefaultRequestHeaders.Add("X-ServerMap-Request", "1");
+        Check((await Request(HttpMethod.Delete, "api/v1/ore-probes?x=bad&z=8")).StatusCode == HttpStatusCode.BadRequest, "invalid delete accepted");
+        Check((await Request(HttpMethod.Delete, "api/v1/ore-probes?x=8&z=8")).IsSuccessStatusCode, "owner delete failed");
+        Check((await Request(HttpMethod.Delete, "api/v1/ore-probes?x=8&z=8")).StatusCode == HttpStatusCode.NotFound, "owner deleted others' samples");
+        var remaining = new OreHeatmapStore(probePath, 32, logs.Add).Query((0, 0, 32, 32), null).Cells;
+        Check(remaining.Length == 3 && remaining.Count(c => c.SampleX == 8 && c.OwnerUid == "player") == 0, "owner deletion touched neighbor or another owner");
+        notebook.SaveRegion(null, "probe hidden", 7, 7, 8, 8);
+        detail = JsonDocument.Parse(await (await Request(HttpMethod.Get, "api/v1/ore-probes?x=8&z=8")).Content.ReadAsStringAsync());
+        Check(detail.RootElement.GetProperty("columns").GetArrayLength() == 0, "hidden ore positions leaked into histogram");
+        Policy(new() { FogEnabled = false, Layers = new() { ["mineral-heatmap"] = new(Forbidden: true) } });
+        Check((await Request(HttpMethod.Get, "api/v1/ore-probes?x=8&z=8")).StatusCode == HttpStatusCode.Forbidden, "forbidden detail leaked");
+        var adminPlayer = (IServerPlayer)Stub.Create(typeof(IServerPlayer), (method, _) => method.Name switch
+            { "get_PlayerUID" => "admin", "get_PlayerName" => "Admin", "HasPrivilege" => true, _ => null });
+        auth.SetPassword(adminPlayer, "test-password");client.DefaultRequestHeaders.Remove("Cookie");
+        client.DefaultRequestHeaders.Add("Cookie", "servermap_auth=" + auth.Login("Admin", "test-password")!.Value.SessionId);
+        Policy(new() { FogEnabled = false });
+        Check((await Request(HttpMethod.Delete, "api/v1/ore-probes?x=8&z=8")).IsSuccessStatusCode, "admin could not delete foreign and legacy records");
+        remaining = new OreHeatmapStore(probePath, 32, logs.Add).Query((0, 0, 32, 32), null).Cells;
+        Check(remaining.Length == 1 && remaining[0].SampleX == 9, "admin deletion failed to preserve adjacent probe point");
+
+        // Capture actual coordinates; duplicate fluid/solid callbacks count a position once.
+        var captured = new OreHeatmapStore(Path.Combine(directory, "captured.json"), 32, logs.Add);Field(web, "oreHeatmap", captured);
+        var rock = new Block { BlockMaterial = EnumBlockMaterial.Stone,
+            Attributes = Vintagestory.API.Datastructures.JsonObject.FromJson("{\"propickable\":true}") };
+        var oreBlock = new Block { BlockMaterial = EnumBlockMaterial.Ore, Variant = new(new Dictionary<string, string> { ["type"] = "silver" }) };
+        var air = new Block { BlockMaterial = EnumBlockMaterial.Air };
+        var water = new Block { BlockMaterial = EnumBlockMaterial.Water };
+        var incompleteCapture = false;
+        var accessor = Stub.Create(typeof(IBlockAccessor), (method, args) =>
+        {
+            if (method.Name.StartsWith("get_MapSize")) return 1024;
+            if (method.Name == "GetBlock") return rock;
+            if (method.Name == "WalkBlocks")
+            {
+                var visit = (Action<Block, int, int, int>)args![2]!;
+                for (var y = 113; y <= 115; y++) for (var z = 7; z <= 9; z++) for (var x = 7; x <= 9; x++)
+                {
+                    if (incompleteCapture && y == 115) continue;
+                    if (x == 8 && y == 115 && z == 8) visit(water, x, y, z);
+                    visit(y == 114 && (x == 7 && z == 8 || x == 8 && z == 7) ? oreBlock : air, x, y, z);
+                }
+            }
+            return null;
+        });
+        var captureWorld = (IWorldAccessor)Stub.Create(typeof(IWorldAccessor), (method, _) => method.Name switch
+            { "get_Api" => serverApi, "get_BlockAccessor" => accessor, "PlayerByUid" => player, _ => null });
+        var selection = new BlockSelection { Position = new(8, 114, 8) };
+        var nodePatch = typeof(ServerMapModSystem).Assembly.GetType("ServerMap.Network.OreNodeCapturePatch", true)!;
+        object?[] beforeArgs = [captureWorld, entity, selection, 1, false];
+        nodePatch.GetMethod("Before", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, beforeArgs);
+        Check((bool)beforeArgs[4]!, "valid node capture rejected");
+        void Capture() => nodePatch.GetMethod("After", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, [captureWorld, entity, selection, 1, beforeArgs[4]]);
+        Capture();
+        var capturedCell = captured.Query((0, 0, 32, 32), null).Cells.Single();
+        Check(capturedCell.OwnerUid == "player" && capturedCell.Nodes.Single().Blocks == 2
+            && capturedCell.Blocks!.Any(b => b.X == 7 && b.Y == 114 && b.Z == 8) && capturedCell.Blocks!.Length == 2, "capture lost exact ore coordinates");
+        incompleteCapture = true;Capture();
+        Check(captured.Query((0, 0, 32, 32), null).Cells.Single().Blocks == null, "incomplete chunk scan treated as authoritative");
+        Console.WriteLine("PASS: coordinate capture, v1-v3 migration, per-Y deduplication, empty/replacement scans, gaps, persistence, owner/admin delete and private histogram API.");
         Console.WriteLine("PASS: privacy policies, fog, hidden-area intersection, dimension gating, persistence, chunk boundaries, density/filtering, invalid data, world isolation, response cap, real Harmony server/client gating, HTTP write rejection and GeoJSON.");
         Console.WriteLine("Test artifacts: " + directory);
     }

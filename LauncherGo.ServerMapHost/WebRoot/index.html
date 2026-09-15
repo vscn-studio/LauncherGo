@@ -102,25 +102,13 @@
     .ore-legend { display:grid;grid-template-columns:1fr 1fr;gap:3px 8px;padding-top:1px; }
     .ore-legend span { display:flex;align-items:center;gap:5px; }
     .ore-legend i { display:inline-block;width:12px;height:12px;border:1px solid #aaa; }
-    .ore-columns { background:transparent;border:0;pointer-events:auto; }
-    .ore-columns-inner { display:flex;align-items:flex-end;justify-content:center;gap:3px;height:86px;padding:0 3px;transform-origin:bottom center;filter:drop-shadow(0 2px 2px #0009); }
-    .ore-column { position:relative;display:block;width:17px;min-height:8px;border:1px solid #ffffffaa;border-bottom:0;border-radius:2px 2px 0 0;transform-origin:bottom center;transition:transform .15s,filter .15s; }
-    .ore-column b { position:absolute;bottom:100%;left:50%;transform:translateX(-50%);font-size:10px;line-height:1.1;color:#fff;text-shadow:0 1px 2px #000,0 -1px 2px #000;white-space:nowrap;font-weight:600; }
-    .ore-column { position:relative;overflow:visible;padding:0;border:1px solid #ffffffaa;cursor:pointer; }
-    .ore-column-segment { position:absolute;left:0;right:0;border-top:1px solid #ffffff55;transition:opacity .15s; }
-    .ore-reading-popup section { display:block;margin:6px 0;padding-top:5px;border-top:1px solid #ffffff26;line-height:1.45; }
-    .ore-reading-popup section:first-of-type { border-top:0;margin-top:0;padding-top:0; }
-    .ore-reading-range,.ore-reading-empty,.ore-reading-time { display:block; }
-    .ore-reading-empty { color:#d7b36a; }
-    .ore-reading-time { margin-top:4px;color:var(--muted); }
-    .ore-columns-inner.has-focus .ore-column:not(.selected) { transform:scaleY(.35);filter:brightness(.6); }
-    .ore-column-focus .ore-column { transform:scaleY(.42);filter:brightness(.65); }
-    .ore-column-focus .ore-column:hover { transform:scaleY(1.2);filter:brightness(1.25);z-index:2; }
+
   </style>
   <link rel="stylesheet" href="mobile.css">
   <link rel="stylesheet" href="notebook.css?v=regions2">
   <link rel="stylesheet" href="area-markers.css">
   <link rel="stylesheet" href="map-management.css?v=sitecode1">
+  <link rel="stylesheet" href="assets/ore-probes.css">
 </head>
 <body>
   <div id="map"></div>
@@ -206,7 +194,7 @@
     const localPoint=latlng=>relativePoint(gamePoint(latlng));
     const crs=L.Util.extend({},L.CRS.Simple,{transformation:new L.Transformation(1,0,1,0)});
     const map=L.map('map',{crs,center:[0,0],zoom:0,zoomSnap:1,zoomDelta:1,preferCanvas:true,attributionControl:false,zoomControl:false,fadeAnimation:!isMobile(),zoomAnimation:!isMobile(),markerZoomAnimation:!isMobile()}); L.control.zoom({position:'bottomright'}).addTo(map);
-    const oreHeatmap=createOreHeatmap({gameLatLng,relativePoint,language:()=>language,changed:()=>{requests['mineral-heatmap']?.abort();const state=layers['mineral-heatmap'];if(state){state.group.clearLayers();state.features=undefined;}refreshLayer('mineral-heatmap');}});
+    const oreHeatmap=createOreHeatmap({api,map,gameLatLng,relativePoint,language:()=>language,changed:()=>{requests['mineral-heatmap']?.abort();const state=layers['mineral-heatmap'];if(state){state.group.clearLayers();state.features=undefined;}refreshLayer('mineral-heatmap');}});
     const starCanvas=document.createElement('canvas');starCanvas.id='starCanvas';starCanvas.setAttribute('aria-hidden','true');map.getContainer().append(starCanvas);const starContext=starCanvas.getContext('2d'),stars=Array.from({length:720},(_,index)=>{const hash=n=>{const v=Math.sin(n*12.9898+78.233)*43758.5453;return v-Math.floor(v);};return {x:hash(index*3+1),y:hash(index*3+2),size:.45+hash(index*3+3)*1.35,phase:hash(index*3+4)*Math.PI*2,speed:.35+hash(index*3+5)*1.1,blue:hash(index*3+6)};});let starFrame=0;
     function drawStars(time=0){const rect=map.getContainer().getBoundingClientRect(),dpr=window.devicePixelRatio||1,w=Math.max(1,Math.round(rect.width)),h=Math.max(1,Math.round(rect.height));if(starCanvas.width!==w*dpr||starCanvas.height!==h*dpr){starCanvas.width=w*dpr;starCanvas.height=h*dpr;}starContext.setTransform(dpr,0,0,dpr,0,0);starContext.clearRect(0,0,w,h);for(const star of stars){const alpha=.2+.8*(.5+.5*Math.sin(time*.001*star.speed+star.phase)),x=star.x*w,y=star.y*h;starContext.fillStyle=star.blue>.65?'rgba(190,220,255,'+alpha+')':'rgba(255,255,255,'+alpha+')';starContext.beginPath();starContext.arc(x,y,star.size,0,Math.PI*2);starContext.fill();}starFrame=requestAnimationFrame(drawStars);}requestAnimationFrame(drawStars);
     // Detail labels are visible only at UI zoom levels 13–15, including selected labels.

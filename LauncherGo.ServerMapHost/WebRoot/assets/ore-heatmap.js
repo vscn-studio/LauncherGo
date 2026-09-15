@@ -1,174 +1,186 @@
-/* Both sources are server observations. Node slices describe search volumes, not exact ore Y. */
-window.createOreHeatmap = function ({ gameLatLng, relativePoint, language, changed }) {
-  const panel = document.querySelector('#oreHeatmapControls');
-  const select = document.querySelector('#oreHeatmapSelect'), modeSelect = document.querySelector('#oreHeatmapMode');
-  const minY = document.querySelector('#oreMinY'), maxY = document.querySelector('#oreMaxY');
-  const legend = panel.querySelector('.ore-legend');
-  const colors = ['#8c929b', '#5555b5', '#6260ae', '#79709c', '#a58972', '#c78250', '#c0523e', '#a82224'];
-  const nodeColors = ['#8c929b','#687790','#568ea2','#55a7a3','#a7b755','#db9640','#e06535'];
-  const densityLabels = {zh:['无读数','微量','极贫','贫','中等','高','很高','极高'],en:['No reading','Trace','Very poor','Poor','Decent','High','Very high','Ultra high']};
-  const nodeLabels = {zh:['未检出','微量 1–9','少量 10–19','中量 20–39','大量 40–79','很多 80–159','巨量 ≥160'],en:['Not detected','Trace 1–9','Small 10–19','Medium 20–39','Large 40–79','Very large 80–159','Huge ≥160']};
-  let catalog = [], lastData, failed = false;
-  const zh = () => language() === 'zh', labels = () => densityLabels[zh()?'zh':'en'];
-  const name = code => { const ore = catalog.find(item => item.code === code); return ore?.[zh()?'zh':'en'] || ore?.en || code; };
-  const time = value => new Date(value).toLocaleString(zh()?'zh-CN':'en-US');
-  const nameMode = mode => mode === 'node' ? (zh()?'矿脉搜索':'Node search') : (zh()?'密度勘探':'Density');
-  const levels = ore => Math.max(0, Math.min(6, Number(ore?.amountLevel) || 0));
-  function translate() {
-    const selected = select.value;
-    select.replaceChildren(new Option(zh()?'全部矿物':'All ores',''));
-    for (const ore of catalog) select.add(new Option(name(ore.code),ore.code));
-    if (selected && !catalog.some(ore => ore.code === selected)) select.add(new Option(selected,selected));
-    select.value = selected;
-    panel.querySelector('label[for="oreHeatmapSelect"]').textContent = zh()?'矿物筛选':'Filter ore';
-    panel.querySelector('label[for="oreHeatmapMode"]').textContent = zh()?'探矿模式':'Prospecting mode';
-    ['全部模式','密度勘探','矿脉搜索'].forEach((label,i) => modeSelect.options[i].textContent = zh()?label:['All modes','Density','Node search'][i]);
-    panel.querySelector('.ore-depth-label').textContent = zh()?'矿脉搜索 Y 范围（留空为全部）':'Node search Y range (blank = all)';
-    minY.setAttribute('aria-label',zh()?'最低 Y':'Minimum Y'); maxY.setAttribute('aria-label',zh()?'最高 Y':'Maximum Y');
-    minY.disabled = maxY.disabled = modeSelect.value === 'density';
-    legend.replaceChildren();
-    function legendItems(items,palette) {
-      items.forEach((label,i) => { const entry=document.createElement('span'), swatch=document.createElement('i'); swatch.style.backgroundColor=palette[i]; entry.append(swatch,document.createTextNode(label)); legend.append(entry); });
-    }
-    if (modeSelect.value !== 'node') legendItems(labels(),colors);
-    if (modeSelect.value !== 'density') legendItems(nodeLabels[zh()?'zh':'en'],nodeColors);
+/* Node readings describe complete search volumes, never individual Y slices. */
+window.createOreHeatmap = function ({ gameLatLng, relativePoint, language, changed, api, map }) {
+  const panel=document.querySelector('#oreHeatmapControls');
+  const select=document.querySelector('#oreHeatmapSelect'),modeSelect=document.querySelector('#oreHeatmapMode');
+  const minY=document.querySelector('#oreMinY'),maxY=document.querySelector('#oreMaxY'),legend=panel.querySelector('.ore-legend');
+  const colors=['#8c929b','#5555b5','#6260ae','#79709c','#a58972','#c78250','#c0523e','#a82224'];
+  const nodeColors=['#8c929b','#687790','#568ea2','#55a7a3','#a7b755','#db9640','#e06535'];
+  const densityLabels={zh:['无读数','微量','极贫','贫','中等','高','很高','极高'],en:['No reading','Trace','Very poor','Poor','Decent','High','Very high','Ultra high']};
+  const nodeLabels={zh:['未检出','微量 1–9','少量 10–19','中量 20–39','大量 40–79','很多 80–159','巨量 ≥160'],en:['Not detected','Trace 1–9','Small 10–19','Medium 20–39','Large 40–79','Very large 80–159','Huge ≥160']};
+  let catalog=[],tooltip=null,detailRequest=null,openedPoint=null,actionPopup=null,actionOwner=null;
+  // Keep probe actions above fixed map controls while following Leaflet's map offset.
+  const actionPane=map.createPane('oreProbeActions',map.getContainer());
+  const positionActions=()=>L.DomUtil.setPosition(actionPane,map.containerPointToLayerPoint([0,0]).multiplyBy(-1));
+  map.on('move zoom resize',positionActions);positionActions();
+  const zh=()=>language()==='zh',tr=(cn,en)=>zh()?cn:en,labels=()=>densityLabels[zh()?'zh':'en'];
+  const name=code=>{const ore=catalog.find(item=>item.code===code);return ore?.[zh()?'zh':'en']||ore?.en||code;};
+  const level=ore=>Math.max(0,Math.min(6,Number(ore?.amountLevel)||0));
+  const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
+  function button(text,action,cls){const b=el('button','notebook-button '+cls,text);b.type='button';b.onclick=action;return b;}
+  function translate(){
+    const selected=select.value;
+    select.replaceChildren(new Option(tr('全部矿物','All ores'),''));
+    for(const ore of catalog)select.add(new Option(name(ore.code),ore.code));
+    if(selected&&!catalog.some(ore=>ore.code===selected))select.add(new Option(selected,selected));
+    select.value=selected;
+    panel.querySelector('label[for="oreHeatmapSelect"]').textContent=tr('矿物筛选','Filter ore');
+    panel.querySelector('label[for="oreHeatmapMode"]').textContent=tr('探矿模式','Prospecting mode');
+    ['全部模式','密度勘探','矿脉搜索'].forEach((label,i)=>modeSelect.options[i].textContent=zh()?label:['All modes','Density','Node search'][i]);
+    panel.querySelector('.ore-depth-label').textContent=tr('搜索覆盖 Y 范围（留空为全部）','Search coverage Y range (blank = all)');
+    minY.setAttribute('aria-label',tr('最低 Y','Minimum Y'));maxY.setAttribute('aria-label',tr('最高 Y','Maximum Y'));
+    minY.disabled=maxY.disabled=modeSelect.value==='density';legend.replaceChildren();
+    function items(texts,palette){texts.forEach((text,i)=>{const entry=el('span'),swatch=el('i');swatch.style.backgroundColor=palette[i];entry.append(swatch,document.createTextNode(text));legend.append(entry);});}
+    if(modeSelect.value!=='node')items(labels(),colors);
+    if(modeSelect.value!=='density')items(nodeLabels[zh()?'zh':'en'],nodeColors);
   }
-  function update() { if (!minY.checkValidity() || !maxY.checkValidity() || minY.value && maxY.value && +minY.value > +maxY.value) return; translate(); changed(); }
-  select.onchange = modeSelect.onchange = minY.onchange = maxY.onchange = update;
-  function popup(samples, code) {
-    const box=document.createElement('div'); box.className='ore-reading-popup';
-    const title=document.createElement('b'); title.textContent=(code?name(code)+' · ':'')+nameMode(samples[0].mode); box.append(title);
-    for (const sample of samples) {
-      const ores=(sample.ores||[]).filter(ore=>!code||ore.code===code);
-      // Empty intervals clear that depth segment but are intentionally omitted
-      // from the popup; the popup contains positive observations only.
-      if (!ores.length) continue;
-      const row=document.createElement('section');
-      if (sample.mode==='node') {
-        const local=relativePoint({x:sample.sampleX,z:sample.sampleZ});
-        const range=document.createElement('div'); range.className='ore-reading-range'; range.textContent='Y '+(sample.sampleY-sample.radius)+'–'+(sample.sampleY+sample.radius)+' · O ('+Math.round(local.x)+', '+sample.sampleY+', '+Math.round(local.z)+') · R '+sample.radius; row.append(range);
-      }
-      for (const ore of ores) {
-        const line=document.createElement('div'); line.textContent=name(ore.code)+' · '+(sample.mode==='node'
-          ? ore.blocks+' '+(zh()?'个矿块':'blocks') : (labels()[ore.density]||'')+' · '+Number(ore.partsPerThousand).toFixed(2)+'‰'); row.append(line);
-      }
-      const date=document.createElement('small'); date.className='ore-reading-time'; date.textContent=(zh()?'采样：':'Sampled: ')+time(sample.sampledAt); row.append(date); box.append(row);
-    }
+  function closeDetail(){detailRequest?.abort();detailRequest=null;openedPoint=null;if(tooltip){tooltip.remove();tooltip=null;}}
+  function closeActions(){const popup=actionPopup;actionPopup=null;actionOwner=null;popup?.remove();}
+  function closeProbeUi(){closeDetail();closeActions();}
+  map.on('click',closeProbeUi);
+  map.getContainer().addEventListener('keydown',event=>{if(event.key==='Escape')closeProbeUi();});
+  function update(){if(!minY.checkValidity()||!maxY.checkValidity()||minY.value&&maxY.value&&+minY.value>+maxY.value)return;closeProbeUi();translate();changed();}
+  select.onchange=modeSelect.onchange=minY.onchange=maxY.onchange=update;
+  function densityPopup(samples){
+    const box=el('div','ore-reading-popup');box.append(el('b','',tr('密度勘探','Density')));
+    for(const sample of samples)for(const ore of sample.ores||[])box.append(el('div','',name(ore.code)+' · '+(labels()[ore.density]||'')+' · '+Number(ore.partsPerThousand).toFixed(2)+'‰'));
     return box;
   }
-  function normalizeNodeSamples(samples) {
-    if (samples.length < 2) return samples;
-    const ranges=samples.map(sample=>({sample,min:sample.sampleY-sample.radius,max:sample.sampleY+sample.radius}));
-    const boundaries=[...new Set(ranges.flatMap(range=>[range.min,range.max]))].sort((a,b)=>a-b);
-    const result=[];
-    for(let i=0;i<boundaries.length-1;i++) {
-      const min=boundaries[i], max=boundaries[i+1];
-      if(max<=min) continue;
-      const covered=ranges.filter(range=>range.min<=min&&range.max>=max)
-        .sort((a,b)=>new Date(b.sample.sampledAt)-new Date(a.sample.sampledAt));
-      if(!covered.length) continue;
-      const source=covered[0].sample;
-      result.push({...source,sampleY:(min+max)/2,radius:(max-min)/2});
-    }
-    return result;
+  function heatColor(count,maximum){
+    const ratio=count/maximum;
+    const from=[255,224,139],to=[213,32,39];
+    return 'rgb('+from.map((v,i)=>Math.round(v+(to[i]-v)*ratio)).join(',')+')';
   }
-  function feature(item) {
-    const p=item.properties||{}, samples=p.samples||[p], node=p.mode==='node';
-    const effectiveSamples=node?normalizeNodeSamples(samples):samples;
-    const density=Math.max(0,Math.min(7,Number(p.density)||0));
-    const level=node?Math.max(0,...effectiveSamples.flatMap(s=>(s.ores||[]).map(levels))):density;
-    const color=(node?nodeColors:colors)[level], coords=item.geometry.coordinates[0];
-    const polygon=L.geoJSON(item,{coordsToLatLng:c=>gameLatLng(c[0],c[1]),style:{color,fillColor:color,fillOpacity:level?.38:.08,weight:level?.5:1,dashArray:node?'3 3':null},
-      onEachFeature:(_,layer)=>layer.bindPopup(popup(effectiveSamples))});
-    const group=L.layerGroup([polygon]);
-    // Density readings remain a colored area only.  The 3D columns are reserved
-    // for node (ore-vein) searches, where each segment represents a Y search band.
-    if (!node) {
-      group.on('add', () => polygon.bringToBack());
-      return group;
-    }
-    const allCodes=[...new Set(effectiveSamples.flatMap(s=>(s.ores||[]).map(o=>o.code)))];
-    // Keep the map readable when no ore filter is selected: columns are ranked
-    // by the largest observed block count and capped at the six strongest ores.
-    const codes=select.value ? allCodes.filter(code=>code===select.value) : allCodes
-      .sort((a,b)=>Math.max(...effectiveSamples.map(s=>(s.ores||[]).find(o=>o.code===b)?.blocks||0))
-        -Math.max(...effectiveSamples.map(s=>(s.ores||[]).find(o=>o.code===a)?.blocks||0)))
-      .slice(0,6);
-    if (!codes.length) { group.on('add',()=>polygon.bringToBack()); return group; }
-    const root=document.createElement('div'); root.className='ore-columns-inner'; root.dataset.mode=node?'node':'density';
-    let pinned=null;
-    function focus(code) { root.classList.toggle('has-focus',!!code); root.querySelectorAll('.ore-column').forEach(column=>column.classList.toggle('selected',column.dataset.ore===code)); }
-    const ordered=[...effectiveSamples].sort((a,b)=>(b.sampleY||0)-(a.sampleY||0));
-    const minDepth=node?Math.min(...ordered.map(sample=>sample.sampleY-sample.radius)):0;
-    const maxDepth=node?Math.max(...ordered.map(sample=>sample.sampleY+sample.radius)):1;
-    const depthSpan=Math.max(1,maxDepth-minDepth);
-    const rowCount=node?Math.max(1,Math.ceil(depthSpan/16)):1;
-    const columnsHeight=node?Math.min(192,Math.max(48,rowCount*24)):84;
-    for (const code of codes) {
-      const column=document.createElement('button'); column.type='button'; column.className='ore-column'; column.dataset.ore=code;
-      column.setAttribute('aria-label',name(code)); column.setAttribute('aria-pressed','false');
-      column.style.height=columnsHeight+'px';
-      const title=document.createElement('b'); title.textContent=name(code); column.append(title);
-      ordered.forEach(sample=>{
-        const ore=(sample.ores||[]).find(o=>o.code===code), segment=document.createElement('span'); segment.className='ore-column-segment';
-        const amount=node?levels(ore):ore?.density||0;
-        const bottom=node?((sample.sampleY-sample.radius-minDepth)/depthSpan*100):0;
-        const height=node?((sample.radius*2)/depthSpan*100):Math.max(3,amount/7*100);
-        const hasOre=!!ore && amount>0;
-        segment.style.cssText='bottom:'+bottom+'%;height:'+height+'%;background:'+(hasOre?nodeColors[amount]:'transparent')+';opacity:'+(hasOre?1:0)+';pointer-events:'+(hasOre?'auto':'none');
-        if (hasOre) segment.title=name(code)+' · Y '+(sample.sampleY-sample.radius)+'–'+(sample.sampleY+sample.radius)+' · '+ore.blocks+' '+(zh()?'个矿块':'blocks')+' · '+time(sample.sampledAt);
-        segment.dataset.sampleY=sample.sampleY??''; column.append(segment);
+  function chart(data){
+    const root=el('div','ore-depth-chart');
+    const columns=data.columns||[];
+    if(!columns.length){root.append(el('span','ore-depth-status',data.incomplete?tr('旧记录无逐层数据，请重新探矿','No per-level data. Prospect again.'):tr('未检出矿物','No ore detected')));return root;}
+    const step=Math.max(1,Number(data.step)||6);
+    // Use the same broken Y axis for every ore; never compress away another ore's layer.
+    const levels=[...new Set(columns.flatMap(column=>column.layers.filter(layer=>layer.blocks>0).map(layer=>layer.y)))].sort((a,b)=>b-a);
+    const rowHeight=14,gapHeight=10;
+    const pageSize=Math.max(2,Math.min(10,Math.floor((map.getContainer().clientHeight-210)/(rowHeight+gapHeight))));
+    const pages=Math.max(1,Math.ceil(levels.length/pageSize));let page=0;
+    const scroller=el('div','ore-depth-scroll'),plot=el('div','ore-depth-plot');
+    plot.style.gridTemplateColumns=`42px repeat(${columns.length}, 88px)`;
+    scroller.append(plot);root.append(scroller);
+    function render(){
+      plot.replaceChildren();
+      const visible=levels.slice(page*pageSize,(page+1)*pageSize),rows=[],gaps=[];let height=0;
+      visible.forEach((y,i)=>{
+        if(i&&visible[i-1]-y>1){gaps.push({top:height,minY:y+1,maxY:visible[i-1]-1});height+=gapHeight;}
+        rows.push({y,top:height});height+=rowHeight;
       });
-      column.onmouseenter=()=>focus(code); column.onmouseleave=()=>focus(pinned);
-      column.onfocus=()=>focus(code); column.onblur=()=>focus(pinned);
-      column.onclick=event=>{event.stopPropagation(); if(pinned===code){ pinned=null; focus(null); root.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed','false')); marker.closePopup(); return; } pinned=code; focus(pinned); root.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.ore===pinned))); marker.setPopupContent(popup(ordered,code)); marker.openPopup();};
-      root.append(column);
+      plot.style.setProperty('--plot-height',height+'px');
+      const axis=el('div','ore-depth-axis'),axisTitle=el('div','ore-depth-heading','Y'),axisBody=el('div','ore-depth-axis-body');
+      for(const row of rows){const tick=el('span','ore-depth-tick',String(row.y));tick.style.top=row.top+'px';tick.dataset.y=row.y;tick.classList.toggle('ore-depth-major',row.y%step===0);axisBody.append(tick);}
+      function breaks(target){for(const gap of gaps){const mark=el('span','ore-depth-break','⋯');mark.style.top=gap.top+'px';mark.title=tr('省略 Y ','Omitted Y ')+gap.minY+'–'+gap.maxY;target.append(mark);}}
+      breaks(axisBody);
+      axis.append(axisTitle,axisBody);plot.append(axis);
+      for(const column of columns){
+        const item=el('div','ore-depth-column'),head=el('div','ore-depth-heading');
+        head.append(el('b','',column[zh()?'zh':'en']||column.en||name(column.code)),el('span','ore-depth-total',column.total+' '+tr('块','blocks')));
+        const bar=el('div','ore-depth-bar');bar.dataset.ore=column.code;bar.setAttribute('aria-label',(column[zh()?'zh':'en']||name(column.code))+' '+column.total+' '+tr('块','blocks'));
+        const maximum=Math.max(1,...column.layers.map(layer=>layer.blocks));
+        const byY=new Map(column.layers.map(layer=>[layer.y,layer]));
+        for(const row of rows){
+          const layer=byY.get(row.y);
+          if(!layer?.blocks){const empty=el('div','ore-depth-coverage');empty.style.top=row.top+'px';empty.style.height=rowHeight+'px';bar.append(empty);continue;}
+          const cell=el('div','ore-depth-cell');cell.dataset.y=layer.y;cell.dataset.blocks=layer.blocks;
+          cell.style.top=row.top+'px';cell.style.height=rowHeight+'px';cell.style.backgroundColor=heatColor(layer.blocks,maximum);
+          cell.title=`Y ${layer.y} · ${layer.blocks} `+tr('块','blocks');bar.append(cell);
+        }
+        breaks(bar);
+        item.append(head,bar);plot.append(item);
+      }
     }
-    const width=Math.max(40,codes.length*28), iconHeight=columnsHeight;
-    // Keep the DOM box exactly identical to Leaflet's icon box. Without an
-    // explicit size, a one-column flex container has an intrinsic width that
-    // differs from iconSize, so the anchor shifts on zoom/re-layout.
-    root.style.width=width+'px';
-    root.style.height=iconHeight+'px';
-    root.style.boxSizing='border-box';
-    root.style.position='absolute';
-    root.style.left='0';
-    root.style.top='0';
-    // A feature represents one chunk rectangle. Keep one immutable geographic
-    // anchor for the whole column group; never average search centers from
-    // different depth records, which made the marker drift as new probes arrived.
-    const xs=coords.map(point=>point[0]), zs=coords.map(point=>point[1]);
-    const center=gameLatLng((Math.min(...xs)+Math.max(...xs))/2,(Math.min(...zs)+Math.max(...zs))/2);
-    // The fixed chunk coordinate is the bottom-centre of the actual column
-    // box. The ore name is absolutely positioned overflow and is excluded from
-    // iconHeight, so it cannot move the geographic anchor.
-    const marker=L.marker(center,{icon:L.divIcon({className:'ore-columns',html:root,iconSize:[width,iconHeight],iconAnchor:[width/2,iconHeight]}),keyboard:false}).bindPopup(popup(ordered));
-    marker.on('popupclose',()=>{ pinned=null; focus(null); root.querySelectorAll('button').forEach(button=>button.setAttribute('aria-pressed','false')); });
-    let activeMap;
-    function zoom() {
-      const a=activeMap.latLngToLayerPoint(gameLatLng(coords[0][0],coords[0][1])), b=activeMap.latLngToLayerPoint(gameLatLng(coords[2][0],coords[2][1]));
-      const visible=Math.abs(b.x-a.x)>=Math.max(96,width+8);
-      if(visible&&!group.hasLayer(marker))group.addLayer(marker);
-      if(!visible&&group.hasLayer(marker))group.removeLayer(marker);
+    render();
+    root.append(el('small','ore-depth-note',tr('仅显示有矿 Y 层 · ⋯ 表示省略区间','Ore-bearing Y levels only · ⋯ marks omitted levels')));
+    if(pages>1){
+      const pager=el('div','ore-depth-pages'),label=el('span');
+      const refresh=()=>{render();label.textContent=(page+1)+' / '+pages;previous.disabled=page===0;next.disabled=page===pages-1;fitTooltip();};
+      const previous=button(tr('较高层','Higher'),()=>{page--;refresh();},'ore-depth-page');
+      const next=button(tr('较低层','Lower'),()=>{page++;refresh();},'ore-depth-page');
+      pager.append(previous,label,next);root.append(pager);refresh();
     }
-    group.on('add',()=>{activeMap=polygon._map;polygon.bringToBack();activeMap.on('zoomend',zoom);zoom();});
-    group.on('remove',()=>{activeMap?.off('zoomend',zoom);});
-    return group;
+    if(data.incomplete)root.append(el('small','ore-depth-status',tr('部分记录无逐层数据，请重新探矿','Some samples lack per-level data. Prospect again.')));
+    requestAnimationFrame(fitTooltip);
+    return root;
   }
-  function accept(data) {
-    catalog=data.ores||[]; failed=false;
-    // One node column group per horizontal chunk; independent depth observations remain separate slices.
-    const nodes=new Map(), features=[];
-    for(const item of data.features||[]) {
-      if(item.properties?.mode!=='node') {features.push(item);continue;}
-      const key=JSON.stringify(item.geometry.coordinates), prior=nodes.get(key);
-      if(prior)prior.properties.samples.push(item.properties);
-      else {const grouped={...item,id:'node-columns-'+item.id,properties:{...item.properties,samples:[item.properties]}};nodes.set(key,grouped);features.push(grouped);}
+  function fitTooltip(){
+    if(!tooltip?.isConnected||!openedPoint)return;
+    const point=map.latLngToContainerPoint(gameLatLng(openedPoint.x,openedPoint.z));
+    const bounds=map.getContainer().getBoundingClientRect(),box=tooltip.getBoundingClientRect();
+    const left=Math.max(8,Math.min(bounds.width-box.width-8,point.x-box.width/2));
+    let top=point.y-box.height-14;
+    const controls=panel.getBoundingClientRect();
+    const intersectsControls=!panel.hidden&&left+bounds.left<controls.right&&left+bounds.left+box.width>controls.left
+      &&top+bounds.top<controls.bottom&&top+bounds.top+box.height>controls.top;
+    if((top<8||intersectsControls)&&point.y+14+box.height<bounds.height-8)top=point.y+14;
+    tooltip.style.left=left+'px';tooltip.style.top=Math.max(8,Math.min(bounds.height-box.height-8,top))+'px';
+  }
+  map.on('move zoom resize',fitTooltip);
+  async function openDepth(point,marker){
+    if(openedPoint?.x===point.x&&openedPoint?.z===point.z){closeDetail();return;}
+    closeDetail();openedPoint=point;
+    const tip=tooltip=el('div','leaflet-tooltip ore-depth-tooltip');tip.setAttribute('role','tooltip');
+    tip.append(el('span','ore-depth-status',tr('加载中…','Loading…')));map.getContainer().append(tip);
+    L.DomEvent.disableClickPropagation(tip);L.DomEvent.disableScrollPropagation(tip);fitTooltip();
+    const request=detailRequest=new AbortController();
+    try{
+      const query=`x=${encodeURIComponent(point.x)}&z=${encodeURIComponent(point.z)}&ore=${encodeURIComponent(select.value)}`
+        +(minY.value?'&minY='+encodeURIComponent(minY.value):'')+(maxY.value?'&maxY='+encodeURIComponent(maxY.value):'');
+      const response=await fetch(`${api}/ore-probes?${query}`,{signal:request.signal});
+      if(!response.ok)throw new Error('HTTP '+response.status);
+      const data=await response.json();if(tooltip!==tip||request.signal.aborted)return;
+      tip.replaceChildren(chart(data));fitTooltip();
+    }catch(error){if(error.name!=='AbortError'&&tooltip===tip){tip.replaceChildren(button(tr('加载失败，点击重试','Load failed. Retry'),()=>{closeDetail();openDepth(point,marker);},'ore-depth-retry'));fitTooltip();}}
+  }
+  function deletePanel(container,point,admin,done){
+    container.replaceChildren(el('p','',admin?tr('删除此探矿点的全部记录？','Delete all records at this probe point?'):tr('删除我在此探矿点的记录？','Delete my records at this probe point?')));
+    const status=el('span','ore-delete-status');status.setAttribute('role','status');
+    const confirm=button(admin?tr('删除探矿点','Delete probe point'):tr('删除我的记录','Delete my records'),async()=>{
+      confirm.disabled=true;status.textContent=tr('正在删除…','Deleting…');
+      try{const response=await fetch(`${api}/ore-probes?x=${encodeURIComponent(point.x)}&z=${encodeURIComponent(point.z)}`,{method:'DELETE',headers:{'X-ServerMap-Request':'1'}});if(!response.ok)throw new Error('HTTP '+response.status);done();}
+      catch{confirm.disabled=false;status.textContent=tr('删除失败，请确认登录后重试','Delete failed. Check your login and retry.');}
+    },'ore-delete-confirm');container.append(confirm,status);
+  }
+  function feature(item){
+    const p=item.properties||{},samples=p.samples||[p];
+    if(p.mode!=='node'){
+      const color=colors[Math.max(0,Math.min(7,Number(p.density)||0))];
+      return L.geoJSON(item,{coordsToLatLng:c=>gameLatLng(c[0],c[1]),style:{color,fillColor:color,fillOpacity:.3,weight:.5},onEachFeature:(_,layer)=>layer.bindPopup(densityPopup(samples))});
     }
-    data.features=features;lastData=data;translate();
+    const point={x:p.sampleX,z:p.sampleZ},amount=Math.max(0,...samples.flatMap(s=>(s.ores||[]).map(level)));
+    const dot=el('span','ore-probe-dot');dot.style.setProperty('--ore-color',nodeColors[amount]);
+    const marker=L.marker(gameLatLng(point.x,point.z),{icon:L.divIcon({className:'ore-probe-marker',html:dot,iconSize:[24,24],iconAnchor:[12,12]}),title:tr('探矿点','Probe point'),keyboard:true,bubblingMouseEvents:false});
+    marker.on('click',()=>{if(actionPopup){closeProbeUi();return;}openDepth(point,marker);});
+    marker.on('contextmenu',event=>{
+      if(event.originalEvent)L.DomEvent.stop(event.originalEvent);
+      closeProbeUi();const box=el('div','ore-probe-menu');
+      if(samples.some(s=>s.owned||s.adminDelete))deletePanel(box,point,samples.some(s=>s.adminDelete),()=>{closeProbeUi();changed();});
+      else box.append(el('p','',tr('只能删除本人采样；旧记录无法确认归属。','Only your own samples can be deleted. Legacy records have no known owner.')));
+      // bindPopup installs its own left-click handler; actions must remain right-click only.
+      const popup=L.popup({pane:'oreProbeActions',className:'ore-probe-popup',closeOnClick:false})
+        .setLatLng(marker.getLatLng()).setContent(box);
+      actionPopup=popup;actionOwner=marker;
+      popup.on('remove',()=>{if(actionPopup===popup){actionPopup=null;actionOwner=null;}});
+      popup.openOn(map);
+    });
+    marker.on('remove',()=>{if(openedPoint?.x===point.x&&openedPoint?.z===point.z)closeDetail();if(actionOwner===marker)closeActions();});return marker;
+  }
+  function accept(data){
+    catalog=data.ores||[];const nodes=new Map(),features=[];
+    for(const item of data.features||[]){
+      if(item.properties?.mode!=='node'){features.push(item);continue;}
+      const p=item.properties;if(!Number.isFinite(p.sampleX)||!Number.isFinite(p.sampleZ))continue;
+      const key=JSON.stringify([p.sampleX,p.sampleZ]),prior=nodes.get(key);
+      if(prior)prior.properties.samples.push(p);
+      else{const grouped={...item,id:'node-point-'+key,properties:{...p,samples:[p]}};nodes.set(key,grouped);features.push(grouped);}
+    }
+    data.features=features;translate();
   }
   translate();
   return {selected:()=>select.value,mode:()=>modeSelect.value,depth:()=>modeSelect.value==='density'?'':(minY.value?'&minY='+encodeURIComponent(minY.value):'')+(maxY.value?'&maxY='+encodeURIComponent(maxY.value):''),
-    visible:value=>{panel.hidden=!value;},accept,error:()=>{failed=true;catalog=[];translate();},
-    reset:()=>{catalog=[];lastData=undefined;failed=false;select.value='';modeSelect.value='';minY.value=maxY.value='';translate();},translate,feature};
+    visible:value=>{panel.hidden=!value;if(!value)closeProbeUi();},accept,error:()=>{closeProbeUi();catalog=[];translate();},
+    reset:()=>{closeProbeUi();catalog=[];select.value='';modeSelect.value='';minY.value=maxY.value='';translate();},translate,feature};
 };
