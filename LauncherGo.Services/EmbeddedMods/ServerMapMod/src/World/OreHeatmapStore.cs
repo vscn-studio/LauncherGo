@@ -30,7 +30,10 @@ public sealed class OreHeatmapStore
     private readonly string path;
     private readonly int chunkSize;
     private readonly Action<string> log;
-    private readonly Dictionary<(int X, int Z, string Mode, int Band), Sample> samples = new();
+    // Node observations are keyed by their actual vertical interval. Using only
+    // the centre Y band caused non-overlapping searches in the same band to
+    // overwrite one another.
+    private readonly Dictionary<(int X, int Z, string Mode, int MinY, int MaxY), Sample> samples = new();
     private long version = 1;
     private bool dirty;
 
@@ -55,7 +58,7 @@ public sealed class OreHeatmapStore
                 || sample.Mode == "node" && (sample.SampleY == null || sample.SampleX == null || sample.SampleZ == null
                     || sample.Radius is < 1 or > MaxNodeRadius || sample.Nodes == null || sample.Nodes.Any(v => !ValidNode(v, sample.Radius))))
                 throw new InvalidDataException("Invalid mineral heatmap sample: " + path);
-            samples[(sample.ChunkX, sample.ChunkZ, sample.Mode, sample.Mode == "node" ? DepthBand(sample.SampleY!.Value) : 0)] = sample;
+            samples[Key(sample)] = sample;
         }
         dirty = saved.Version == 1;
     }
@@ -78,7 +81,8 @@ public sealed class OreHeatmapStore
         var chunkX = (int)Math.Floor(x / chunkSize); var chunkZ = (int)Math.Floor(z / chunkSize);
         lock (gate)
         {
-            samples[(chunkX, chunkZ, "density", 0)] = new Sample(chunkX, chunkZ, sampledAt, values, SampleY: surfaceY, SampleX: x, SampleZ: z);
+            var sample = new Sample(chunkX, chunkZ, sampledAt, values, SampleY: surfaceY, SampleX: x, SampleZ: z);
+            samples[Key(sample)] = sample;
             version++; dirty = true;
         }
         return true;
@@ -93,11 +97,18 @@ public sealed class OreHeatmapStore
             || values.Sum(v => (long)v.Blocks) > Math.Pow(radius * 2 + 1, 3)) return false;
         var cx = (int)Math.Floor(x / chunkSize); var cz = (int)Math.Floor(z / chunkSize);
         var sample = new Sample(cx, cz, sampledAt, [], "node", y, radius, x, z, values.Where(v => v.Blocks > 0).OrderByDescending(v => v.Blocks).ToArray());
-        lock (gate) { samples[(cx, cz, "node", DepthBand(y))] = sample; version++; dirty = true; }
+        lock (gate) { samples[Key(sample)] = sample; version++; dirty = true; }
         return true;
     }
 
     public static int DepthBand(int y) => (int)Math.Floor(y / (double)BandSize);
+
+    private static (int X, int Z, string Mode, int MinY, int MaxY) Key(Sample sample)
+    {
+        if (sample.Mode != "node" || sample.SampleY == null) return (sample.ChunkX, sample.ChunkZ, sample.Mode, 0, 0);
+        return (sample.ChunkX, sample.ChunkZ, sample.Mode,
+            sample.SampleY.Value - sample.Radius, sample.SampleY.Value + sample.Radius);
+    }
 
     public Result Query((double MinX, double MinZ, double MaxX, double MaxZ) bounds, string? selectedOre,
         Func<double, double, double, double, bool>? visible = null, string? mode = null, int? minY = null, int? maxY = null)
