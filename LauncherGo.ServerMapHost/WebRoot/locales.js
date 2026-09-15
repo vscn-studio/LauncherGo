@@ -78,6 +78,7 @@
     'layer.translocators': ['Транслокаторы','Translokatoren','Translocateurs','Translocalizadores','Translokatory','Translocadores'],
     'layer.pois': ['Места','Orte','Lieux','Lugares','Miejsca','Locais'],
     'layer.roads': ['Дороги','Straßen','Routes','Carreteras','Drogi','Estradas'],
+    'layer.mineral-heatmap': ['Тепловая карта руд','Erz-Heatmap','Carte thermique des minerais','Mapa térmico de minerales','Mapa cieplna rud','Mapa de calor de minérios'],
     'layer.mounts': ['Транспорт и животные','Reittiere und Fahrzeuge','Montures et véhicules','Monturas y vehículos','Wierzchowce i pojazdy','Montarias e veículos'],
     myMarkers: ['Игровые метки','Spielmarkierungen','Repères du jeu','Marcadores del juego','Znaczniki z gry','Marcadores do jogo'],
     myRoutes: ['Мои треки','Meine Tracks','Mes tracés','Mis trazados','Moje ślady','Meus traçados'],

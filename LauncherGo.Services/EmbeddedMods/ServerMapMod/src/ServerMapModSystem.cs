@@ -11,6 +11,7 @@ using System.Reflection;
 using ServerMap.Util;
 using ServerMap.Render;
 using System.Diagnostics;
+using HarmonyLib;
 
 namespace ServerMap;
 
@@ -35,6 +36,7 @@ public sealed class ServerMapModSystem : ModSystem
     private volatile bool running;
     private volatile bool disposed;
     private MapAuthStore? authStore;
+    private Harmony? oreHarmony;
     private PoiStore? poiStore;
     private int scanActive, scannedColumns;
     private readonly DoorStateCache doorStates = new();
@@ -56,6 +58,9 @@ public sealed class ServerMapModSystem : ModSystem
             poiStore = new PoiStore(Path.Combine(dataRoot, "pois.json"));
             var announcementStore = new AnnouncementStore(Path.Combine(dataRoot, "announcement.json"));
             web = new ServerMapWebServer(api, config, dataRoot, db, materials, authStore, poiStore, announcementStore);
+            oreHarmony = new Harmony("launchergo.servermap.ore-heatmap");
+            oreHarmony.CreateClassProcessor(typeof(OreMapCapturePatch)).Patch();
+            oreHarmony.CreateClassProcessor(typeof(OreNodeCapturePatch)).Patch();
             queue = new Render.RenderQueue(config.RenderThreads, RenderRegion);
             web.RequestParent = RequestParent;
             web.RenderProgress = () =>
@@ -401,6 +406,7 @@ public sealed class ServerMapModSystem : ModSystem
         if (disposed) return;
         saveAdapter?.Tick();
         disposed = true;
+        oreHarmony?.UnpatchAll(oreHarmony.Id);
         if (sapi != null)
         {
             sapi.Event.ChunkDirty -= OnChunkDirty;

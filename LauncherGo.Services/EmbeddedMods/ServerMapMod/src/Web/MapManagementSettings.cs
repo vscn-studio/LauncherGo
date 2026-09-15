@@ -20,7 +20,7 @@ public sealed record MapManagementSettings
             return this with { BlockCodes = BlockCodes.Select(code => code.Trim().ToLowerInvariant()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() };
         }
     }
-    public static readonly string[] LayerIds = ["players", "mounts", "spawn", "claims", "claim-areas", "chunks", "translocators", "pois", "roads"];
+    public static readonly string[] LayerIds = ["players", "mounts", "spawn", "claims", "claim-areas", "chunks", "translocators", "pois", "roads", "mineral-heatmap"];
     public string[] ImageTypes { get; init; } = ["jpeg", "png", "webp", "bmp"];
     public int ImageMaxMb { get; init; } = 10;
     public int PoiQuota { get; init; } = 10;

@@ -21,7 +21,7 @@ public sealed partial class ServerMapWebServer : IDisposable
 {
     private static readonly byte[] TransparentTile = PngEncoder.Encode(TilePyramidBuilder.TileSize, TilePyramidBuilder.TileSize, new byte[TilePyramidBuilder.TileSize * TilePyramidBuilder.TileSize * 4]);
     private static readonly string[] Renderers = ["basic", "sepia"];
-    private static readonly string[] Layers = ["players", "mounts", "spawn", "claims", "claim-areas", "chunks", "translocators", "pois", "roads"];
+    private static readonly string[] Layers = ["players", "mounts", "spawn", "claims", "claim-areas", "chunks", "translocators", "pois", "roads", "mineral-heatmap"];
     private readonly ICoreServerAPI api; private readonly ServerMapConfig config; private readonly string root; private readonly string webRoot;
     private readonly WorldDatabaseReader reader; private readonly MapPalette materials; private readonly MapRenderer renderer; private readonly TilePyramidBuilder pyramid;
     private readonly MapAuthStore auth; private readonly PoiStore pois; private readonly AnnouncementStore announcements; private readonly ExplorationStore exploration; private readonly AllianceStore alliances;
@@ -52,6 +52,7 @@ public sealed partial class ServerMapWebServer : IDisposable
         roads = new RoadIndex(api, root, reader, materials);
         notebook = new MapNotebookStore(Path.Combine(root, "web-notebook.json"));
         areaMarkers = new AreaMarkerStore(Path.Combine(root, "area-markers.json"));
+        InitializeOreHeatmap();
         InitializeNotebook();
         InitializeAvatars();
         trackingListener = api.Event.RegisterGameTickListener(_ => CaptureTracks(), 1000);
@@ -115,6 +116,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             if (path == "api/v1/map/metadata") { Json(context, Metadata(), true); return; }
             if (path == "api/v1/settings") { Json(context, Settings(), true); return; }
             if (path == "api/v1/layers/manifest") { Json(context, Manifest()); return; }
+            if (path.Equals("api/v1/layers/mineral-heatmap", StringComparison.OrdinalIgnoreCase)) { HandleOreHeatmap(context); return; }
             if (path.StartsWith("api/v1/layers/", StringComparison.OrdinalIgnoreCase)) { var name = path[14..]; if (!Layers.Contains(name, StringComparer.OrdinalIgnoreCase)) { NotFound(context); return; } Json(context, Layer(name, context.Request.QueryString["bbox"], Principal(context.Request)), true); return; }
             if (path == "api/v1/fog/regions") { ServeFogRegions(context); return; }
             if (path.StartsWith("api/v1/fog/", StringComparison.OrdinalIgnoreCase)) { ServeFogTile(context, path[11..]); return; }
@@ -507,7 +509,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             version = 12,
             serverName = api.Server.Config.ServerName,
             updatedAt = startedAt,
-            serverMapVersion = "0.3.8",
+            serverMapVersion = "0.3.9",
             poiZoomRanges = true,
             tileVersion = typeof(ServerMapWebServer).Assembly.ManifestModule.ModuleVersionId.ToString("N"),
             colorVersion = materials.ClientColormapVersion,
@@ -531,7 +533,7 @@ public sealed partial class ServerMapWebServer : IDisposable
             // Flat aliases keep the metadata easy to consume for lightweight
             // custom web roots that do not understand the nested objects.
             serverVersion = GameVersion.LongGameVersion,
-            mapVersion = "0.3.8",
+            mapVersion = "0.3.9",
             mapSize = $"{mapSizeX} × {mapSizeZ} × {mapSizeY}",
             cacheSizeBytes = cacheBytes,
             renderTimeMs = RenderMilliseconds,
@@ -960,6 +962,7 @@ public sealed partial class ServerMapWebServer : IDisposable
                 if (trackingListener != 0) { api.Event.UnregisterGameTickListener(trackingListener); trackingListener = 0; }
                 foreach (var track in trackStore.Active) trackStore.Stop(track.Id, "server-stopped");
                 stop.Cancel(); allianceCleanup.Dispose(); events.Dispose(); avatars?.Dispose(); ClientAvatars?.Dispose(); Mounts.Dispose(); exploration.Dispose(); alliances.Dispose();
+                maintenance = Task.WhenAll(maintenance, StopOreHeatmap());
                 try { listener?.Stop(); listener?.Close(); } catch { }
             }
             return maintenance;

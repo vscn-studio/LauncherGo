@@ -225,7 +225,7 @@
     fogLanguage();
     const layerRows={},table=node('table',{className:'management-grid'}),head=node('tr');
     for(const label of [text('图层','Layer'),text('默认','Default'),text('禁止','Block'),text('强制','Force'),text('倍率','Scale')])head.append(node('th',{textContent:label}));table.append(head);
-    for(const [id,zh,en] of [['players','玩家','Players'],['mounts','坐骑','Mounts'],['spawn','出生点','Spawn'],['claims','领地文字','Claim labels'],['claim-areas','领地区域','Claim areas'],['chunks','已生成区域','Regions'],['translocators','传送器','Translocators'],['pois','地点标记','Places'],['roads','道路','Roads']]){
+    for(const [id,zh,en] of [['players','玩家','Players'],['mounts','坐骑','Mounts'],['spawn','出生点','Spawn'],['claims','领地文字','Claim labels'],['claim-areas','领地区域','Claim areas'],['chunks','已生成区域','Regions'],['translocators','传送器','Translocators'],['pois','地点标记','Places'],['roads','道路','Roads'],['mineral-heatmap','矿物热力图','Mineral heatmap']]){
       const row=node('tr');row.append(node('td',{textContent:text(zh,en)}));const fields={};
       for(const key of ['defaultVisible','forbidden','forced','scale']){
         if(key==='scale'&&!['players','mounts','translocators'].includes(id)){row.append(node('td',{className:'no-layer-scale',textContent:'—'}));continue;}
