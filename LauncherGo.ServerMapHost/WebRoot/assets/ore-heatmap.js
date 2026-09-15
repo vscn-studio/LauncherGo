@@ -121,9 +121,11 @@ window.createOreHeatmap = function ({ gameLatLng, relativePoint, language, chang
     // A feature represents one chunk rectangle. Keep one immutable geographic
     // anchor for the whole column group; never average search centers from
     // different depth records, which made the marker drift as new probes arrived.
-    const center=gameLatLng((coords[0][0]+coords[2][0])/2,(coords[0][1]+coords[2][1])/2);
-    // The chunk centre is the fixed base point: the column grows upward from
-    // this coordinate, so a single column cannot appear lower than the anchor.
+    const xs=coords.map(point=>point[0]), zs=coords.map(point=>point[1]);
+    const center=gameLatLng((Math.min(...xs)+Math.max(...xs))/2,(Math.min(...zs)+Math.max(...zs))/2);
+    // The fixed chunk coordinate is the bottom-centre of the actual column
+    // box. The ore name is absolutely positioned overflow and is excluded from
+    // iconHeight, so it cannot move the geographic anchor.
     const marker=L.marker(center,{icon:L.divIcon({className:'ore-columns',html:root,iconSize:[width,iconHeight],iconAnchor:[width/2,iconHeight]}),keyboard:false}).bindPopup(popup(ordered));
     marker.on('popupclose',()=>{ pinned=null; focus(null); root.querySelectorAll('button').forEach(button=>button.setAttribute('aria-pressed','false')); });
     let activeMap;
