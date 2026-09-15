@@ -56,14 +56,31 @@ window.createOreHeatmap = function ({ gameLatLng, relativePoint, language, chang
     }
     return box;
   }
+  function normalizeNodeSamples(samples) {
+    if (samples.length < 2) return samples;
+    const ranges=samples.map(sample=>({sample,min:sample.sampleY-sample.radius,max:sample.sampleY+sample.radius}));
+    const boundaries=[...new Set(ranges.flatMap(range=>[range.min,range.max]))].sort((a,b)=>a-b);
+    const result=[];
+    for(let i=0;i<boundaries.length-1;i++) {
+      const min=boundaries[i], max=boundaries[i+1];
+      if(max<=min) continue;
+      const covered=ranges.filter(range=>range.min<=min&&range.max>=max)
+        .sort((a,b)=>new Date(b.sample.sampledAt)-new Date(a.sample.sampledAt));
+      if(!covered.length) continue;
+      const source=covered[0].sample;
+      result.push({...source,sampleY:(min+max)/2,radius:(max-min)/2});
+    }
+    return result;
+  }
   function feature(item) {
     const p=item.properties||{}, samples=p.samples||[p], node=p.mode==='node';
+    const effectiveSamples=node?normalizeNodeSamples(samples):samples;
     const density=Math.max(0,Math.min(7,Number(p.density)||0));
-    const level=node?Math.max(0,...samples.flatMap(s=>(s.ores||[]).map(levels))):density;
+    const level=node?Math.max(0,...effectiveSamples.flatMap(s=>(s.ores||[]).map(levels))):density;
     const color=(node?nodeColors:colors)[level], coords=item.geometry.coordinates[0];
     const polygon=L.geoJSON(item,{coordsToLatLng:c=>gameLatLng(c[0],c[1]),style:{color,fillColor:color,fillOpacity:level?.38:.08,weight:level?.5:1,dashArray:node?'3 3':null},
-      onEachFeature:(_,layer)=>layer.bindPopup(popup(samples))});
-    const group=L.layerGroup([polygon]), codes=[...new Set(samples.flatMap(s=>(s.ores||[]).map(o=>o.code)))];
+      onEachFeature:(_,layer)=>layer.bindPopup(popup(effectiveSamples))});
+    const group=L.layerGroup([polygon]), codes=[...new Set(effectiveSamples.flatMap(s=>(s.ores||[]).map(o=>o.code)))];
     // Density readings remain a colored area only.  The 3D columns are reserved
     // for node (ore-vein) searches, where each segment represents a Y search band.
     if (!node) {
@@ -74,7 +91,7 @@ window.createOreHeatmap = function ({ gameLatLng, relativePoint, language, chang
     const root=document.createElement('div'); root.className='ore-columns-inner'; root.dataset.mode=node?'node':'density';
     let pinned=null;
     function focus(code) { root.classList.toggle('has-focus',!!code); root.querySelectorAll('.ore-column').forEach(column=>column.classList.toggle('selected',column.dataset.ore===code)); }
-    const ordered=[...samples].sort((a,b)=>(b.sampleY||0)-(a.sampleY||0));
+    const ordered=[...effectiveSamples].sort((a,b)=>(b.sampleY||0)-(a.sampleY||0));
     const minDepth=node?Math.min(...ordered.map(sample=>sample.sampleY-sample.radius)):0;
     const maxDepth=node?Math.max(...ordered.map(sample=>sample.sampleY+sample.radius)):1;
     const depthSpan=Math.max(1,maxDepth-minDepth);
