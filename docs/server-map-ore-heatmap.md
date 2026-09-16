@@ -1,6 +1,6 @@
 # LauncherGo 内嵌地图：矿物热力图
 
-ServerMap 0.4.3 / LauncherGo 2.7.4-pre.1。在 LauncherGo 的内嵌模组和 WebRoot 中实现，不依赖 ProspectTogether，也不修改独立的 ServerMap 项目。
+ServerMap 0.4.3 / LauncherGo 2.7.4-pre.2。在 LauncherGo 的内嵌模组和 WebRoot 中实现，不依赖 ProspectTogether，也不修改独立的 ServerMap 项目。
 
 ## 使用
 

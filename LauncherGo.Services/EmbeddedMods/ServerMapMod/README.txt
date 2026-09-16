@@ -9,8 +9,8 @@ package, or the repository LICENSE file when distributed with LauncherGo.
 
 ServerMap 为 Vintage Story 提供浏览器地图、玩家位置、领地、传送器、地点标记、公告和路径测量功能。网页资源由 LauncherGo.ServerMapHost 独立提供，模组仅负责读取世界数据并提供本地 API。
 
-当前版本（ServerMap 0.4.3 / LauncherGo 2.7.4-pre.1）：
-- 统一模组清单、程序集和地图 API 版本为 0.4.3；主程序和其他内嵌模组版本不变。
+当前版本（ServerMap 0.4.3 / LauncherGo 2.7.4-pre.2）：
+- 统一模组清单、程序集和地图 API 版本为 0.4.3；主程序升级至 2.7.4-pre.2，其他内嵌模组版本不变。
 - 配套 LauncherGo 将网页重置与模组部署分离：顶部使用“部署地图模组、启动／停止地图、重置网页、重建缓存、打开地图”，不再自动安装或覆盖地图模组。
 - 手动部署先确认目标与版本，替换前备份并检查重复模组和确认后的文件变化；重置网页只覆盖内置同名网页文件，保留额外文件、用户配置、地图数据和瓦片缓存。
 - 配套网页新增兼容瓦片合成、动态星空、后台暂停刷新、跟随自己、毛玻璃与阴影五项本地设置；探矿 tooltip 补充出生点相对 X/Z，加载、空结果和失败时也保留。
