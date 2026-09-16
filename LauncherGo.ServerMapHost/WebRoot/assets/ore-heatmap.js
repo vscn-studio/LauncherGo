@@ -58,7 +58,7 @@ window.createOreHeatmap = function ({ gameLatLng, relativePoint, language, chang
     // Use the same broken Y axis for every ore; never compress away another ore's layer.
     const levels=[...new Set(columns.flatMap(column=>column.layers.filter(layer=>layer.blocks>0).map(layer=>layer.y)))].sort((a,b)=>b-a);
     const rowHeight=14,gapHeight=10;
-    const pageSize=Math.max(2,Math.min(10,Math.floor((map.getContainer().clientHeight-210)/(rowHeight+gapHeight))));
+    const pageSize=Math.max(2,Math.min(10,Math.floor((map.getContainer().clientHeight-234)/(rowHeight+gapHeight))));
     const pages=Math.max(1,Math.ceil(levels.length/pageSize));let page=0;
     const scroller=el('div','ore-depth-scroll'),plot=el('div','ore-depth-plot');
     plot.style.gridTemplateColumns=`42px repeat(${columns.length}, 88px)`;
@@ -123,7 +123,9 @@ window.createOreHeatmap = function ({ gameLatLng, relativePoint, language, chang
     if(openedPoint?.x===point.x&&openedPoint?.z===point.z){closeDetail();return;}
     closeDetail();openedPoint=point;
     const tip=tooltip=el('div','leaflet-tooltip ore-depth-tooltip');tip.setAttribute('role','tooltip');
-    tip.append(el('span','ore-depth-status',tr('加载中…','Loading…')));map.getContainer().append(tip);
+    const local=relativePoint(point),content=el('div','ore-depth-content');
+    tip.append(el('div','ore-depth-coordinates',`X ${Math.round(local.x)}, Z ${Math.round(local.z)}`),content);
+    content.append(el('span','ore-depth-status',tr('加载中…','Loading…')));map.getContainer().append(tip);
     L.DomEvent.disableClickPropagation(tip);L.DomEvent.disableScrollPropagation(tip);fitTooltip();
     const request=detailRequest=new AbortController();
     try{
@@ -132,8 +134,8 @@ window.createOreHeatmap = function ({ gameLatLng, relativePoint, language, chang
       const response=await fetch(`${api}/ore-probes?${query}`,{signal:request.signal});
       if(!response.ok)throw new Error('HTTP '+response.status);
       const data=await response.json();if(tooltip!==tip||request.signal.aborted)return;
-      tip.replaceChildren(chart(data));fitTooltip();
-    }catch(error){if(error.name!=='AbortError'&&tooltip===tip){tip.replaceChildren(button(tr('加载失败，点击重试','Load failed. Retry'),()=>{closeDetail();openDepth(point,marker);},'ore-depth-retry'));fitTooltip();}}
+      content.replaceChildren(chart(data));fitTooltip();
+    }catch(error){if(error.name!=='AbortError'&&tooltip===tip){content.replaceChildren(button(tr('加载失败，点击重试','Load failed. Retry'),()=>{closeDetail();openDepth(point,marker);},'ore-depth-retry'));fitTooltip();}}
   }
   function deletePanel(container,point,admin,done){
     container.replaceChildren(el('p','',admin?tr('删除此探矿点的全部记录？','Delete all records at this probe point?'):tr('删除我在此探矿点的记录？','Delete my records at this probe point?')));

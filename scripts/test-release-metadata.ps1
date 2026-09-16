@@ -64,6 +64,8 @@ foreach ($mod in $mods) {
     }
     if ($mod.Id -eq 'servermap') {
         Assert-Equal ([regex]::Match($source, '\bmapVersion\s*=\s*"([^"]+)"').Groups[1].Value) $info.version 'Map metadata version alias'
+        $mapProject = [xml](Get-Content -LiteralPath (Join-Path $repository 'LauncherGo.Services/EmbeddedMods/ServerMapMod/ServerMapMod.csproj') -Raw)
+        Assert-Equal ([string]$mapProject.Project.PropertyGroup.Version) $info.version 'Map assembly/package version'
     }
 }
 $appProject = [xml](Get-Content -LiteralPath (Join-Path $repository 'LauncherGo.App/LauncherGo.App.csproj') -Raw)

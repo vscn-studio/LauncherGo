@@ -131,9 +131,11 @@ app.Map("/{**path}", async context =>
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or JsonException or ArgumentException) { }
         context.Response.ContentType = "text/html; charset=utf-8";
         context.Response.Headers.CacheControl = "no-store";
-        await context.Response.WriteAsync(site.ApplyToHtml(await File.ReadAllTextAsync(file, context.RequestAborted)), context.RequestAborted);
+        var html = ServerMapWebAssets.VersionHtml(await File.ReadAllTextAsync(file, context.RequestAborted), webRoot);
+        await context.Response.WriteAsync(site.ApplyToHtml(html), context.RequestAborted);
         return;
     }
+    context.Response.Headers.CacheControl = "no-cache";
     await context.Response.SendFileAsync(file, context.RequestAborted);
 });
 

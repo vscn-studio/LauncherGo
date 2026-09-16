@@ -72,7 +72,12 @@ public partial class LauncherMainWindow : Window
     [
         ("自定义 WebRoot", "Custom WebRoot"),
         ("默认内置网页", "Built-in web pages"),
-        ("手动更新", "Update web files"),
+        ("部署地图模组", "Deploy map mod"),
+        ("重置网页", "Reset web files"),
+        ("重建缓存", "Rebuild cache"),
+        ("打开地图", "Open map"),
+        ("启动地图", "Start map"),
+        ("停止地图", "Stop map"),
         ("服务器", "Server"),
         ("管理", "Manage"),
         ("连接", "Connections"),
@@ -413,8 +418,7 @@ public partial class LauncherMainWindow : Window
     private bool _isRefreshingAuth;
     private bool _isRefreshingServerBridge;
     private bool _isRefreshingServerMap;
-    private bool _isUpdatingServerMapWeb;
-    private bool _isTogglingServerMap;
+    private bool _isMaintainingServerMap;
     private string _editingServerMapProfileId = string.Empty;
     private bool _toastPointerOver;
     private string _editingConfigProfileId = string.Empty;
@@ -8877,6 +8881,7 @@ public partial class LauncherMainWindow : Window
 
     private void ShowServerMapList()
     {
+        if (_isMaintainingServerMap) return;
         _editingServerMapProfileId = string.Empty;
         ServerMapListPanel.IsVisible = true;
         ServerMapEditorPanel.IsVisible = false;
@@ -8889,12 +8894,13 @@ public partial class LauncherMainWindow : Window
         ServerMapResetWebButton.IsVisible = false;
         ServerMapRebuildCacheButton.IsVisible = false;
         ServerMapCacheStatusTextBlock.IsVisible = false;
-        Grid.SetColumn(ServerMapRefreshButton, 1);
+        ServerMapModStatusTextBlock.IsVisible = false;
         RefreshServerMapConfigItems();
     }
 
     private async Task ShowServerMapEditorAsync(InstanceProfile profile)
     {
+        if (_isMaintainingServerMap) return;
         _editingServerMapProfileId = profile.Id;
         ServerMapListPanel.IsVisible = false;
         ServerMapEditorPanel.IsVisible = true;
@@ -8907,14 +8913,14 @@ public partial class LauncherMainWindow : Window
         ServerMapOpenButton.IsVisible = true;
         ServerMapRebuildCacheButton.IsVisible = true;
         ServerMapCacheStatusTextBlock.IsVisible = true;
-        Grid.SetColumn(ServerMapRefreshButton, 3);
+        ServerMapModStatusTextBlock.IsVisible = true;
         ServerMapProfileComboBox.SelectedItem = _serverMapProfileItems.FirstOrDefault(p => p.Id.Equals(profile.Id, StringComparison.OrdinalIgnoreCase)) ?? profile;
         await LoadServerMapForProfileAsync(profile);
     }
 
     private async Task RefreshServerMapProfilesAsync()
     {
-        if (_isRefreshingServerMap) return;
+        if (_isMaintainingServerMap || _isRefreshingServerMap) return;
         _isRefreshingServerMap = true;
         try
         {
@@ -8939,34 +8945,18 @@ public partial class LauncherMainWindow : Window
         ServerMapCertificateTextBox.Text = settings.CertificatePath;
         ServerMapPrivateKeyTextBox.Text = settings.PrivateKeyPath;
         ServerMapWebRootTextBox.Text = settings.WebRoot;
-        ToolTip.SetTip(ServerMapWebRootUpdateButton, T("更新自定义 WebRoot；留空时更新运行中的内置网页，停止后下次启动应用。", "Update the custom WebRoot; when empty, update the running bundled page or apply it on the next start."));
         ToolTip.SetTip(ServerMapResetWebButton, T("重置为当前安装包内置网页；地图数据和瓦片缓存不受影响。", "Reset to the bundled web page; map data and tile caches are not changed."));
-        ServerMapWebRootUpdateButton.IsEnabled = !_isUpdatingServerMapWeb;
+        ToolTip.SetTip(ServerMapRefreshButton, T("刷新配置与运行状态，不更新网页或模组。", "Refresh settings and status; does not update web files or mods."));
         var status = _serverMapService.GetStatus(profile);
-        if (!_isTogglingServerMap)
+        if (!_isMaintainingServerMap)
         {
-            ServerMapStatusTextBlock.Text = status.IsRunning ? $"运行中：{status.Url}" : "未启动";
-            ServerMapToggleButton.Content = status.IsRunning ? "停止地图" : "启动地图";
+            ServerMapStatusTextBlock.Text = status.IsRunning ? T($"运行中：{status.Url}", $"Running: {status.Url}") : T("未启动", "Stopped");
+            ServerMapToggleButton.Content = status.IsRunning ? T("停止地图", "Stop map") : T("启动地图", "Start map");
         }
+        await RefreshServerMapModStatusAsync(profile);
         await RefreshMapCacheProgressAsync();
     }
 
-    private async void OnServerMapSaveClick(object? sender, RoutedEventArgs e)
-    {
-        if (_isUpdatingServerMapWeb || _isTogglingServerMap) return;
-        if (ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile) { SetServerMapStatus("请先选择档案。"); return; }
-        try
-        {
-            var settings = await CollectServerMapSettingsAsync(profile);
-            var running = _serverMapService.GetStatus(profile).IsRunning;
-            await _serverMapService.SaveSettingsAsync(profile, settings);
-            await LoadServerMapForProfileAsync(profile);
-            SetServerMapStatus(running
-                ? T("配置已保存，重启地图后生效。", "Settings saved. Restart the map to apply them.")
-                : T("服务器地图配置已保存。", "Server map settings saved."));
-        }
-        catch (Exception ex) { SetServerMapStatus(T($"保存失败：{ex.Message}", $"Save failed: {ex.Message}")); }
-    }
 
     private async Task<ServerMapSettings> CollectServerMapSettingsAsync(InstanceProfile profile)
     {
@@ -8992,14 +8982,6 @@ public partial class LauncherMainWindow : Window
         };
     }
 
-    private void OnServerMapWebRootChanged(object? sender, TextChangedEventArgs e)
-    {
-        if (ServerMapWebRootUpdateButton is not null)
-            // An empty WebRoot means the bundled page. It is still a valid
-            // target: running Hosts can be refreshed, and stopped Hosts pick
-            // up the bundled files on their next start.
-            ServerMapWebRootUpdateButton.IsEnabled = !_isUpdatingServerMapWeb;
-    }
 
     private async void OnServerMapWebRootBrowseClick(object? sender, RoutedEventArgs e)
     {
@@ -9011,59 +8993,6 @@ public partial class LauncherMainWindow : Window
         if (!string.IsNullOrWhiteSpace(path)) ServerMapWebRootTextBox.Text = path;
     }
 
-    private async void OnServerMapWebRootUpdateClick(object? sender, RoutedEventArgs e)
-    {
-        if (_isUpdatingServerMapWeb || _isTogglingServerMap || ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile) return;
-        _isUpdatingServerMapWeb = true;
-        ServerMapEditorPanel.IsEnabled = false;
-        ServerMapSaveButton.IsEnabled = false;
-        ServerMapToggleButton.IsEnabled = false;
-        ServerMapRefreshButton.IsEnabled = false;
-        ServerMapBackButton.IsEnabled = false;
-        try
-        {
-            var previousSettings = await _serverMapService.LoadSettingsAsync(profile);
-            var settings = await CollectServerMapSettingsAsync(profile);
-            var running = _serverMapService.GetStatus(profile).IsRunning;
-            var webRootChanged = !string.Equals(previousSettings.WebRoot, settings.WebRoot, StringComparison.OrdinalIgnoreCase);
-            SetServerMapStatus(T("正在更新地图网页…", "Updating map web files..."));
-            var count = await _serverMapService.UpdateWebRootAsync(profile, settings);
-            if (_editingServerMapProfileId == profile.Id)
-            {
-                await LoadServerMapForProfileAsync(profile);
-                var suffix = running
-                    ? (webRootChanged
-                        ? T(" 网页目录已变更，重启地图后生效。", " The web directory changed; restart the map to apply it.")
-                        : T(" 刷新网页即可。", " Refresh the page to see the changes."))
-                    : T(" 下次启动地图时应用。", " Applied on the next map start.");
-                var defaultWebRoot = string.IsNullOrWhiteSpace(settings.WebRoot);
-                SetServerMapStatus(count > 0
-                    ? T($"已更新 {count} 个网页文件并保存配置。", $"Updated {count} web files and saved settings.") + suffix
-                    : (defaultWebRoot
-                        ? T("当前使用内置网页，已确认无需复制；地图数据和瓦片缓存未修改。", "The bundled page is already selected; no files needed copying. Map data and tile caches were not changed.")
-                        : T("网页目录未发现需要复制的文件；地图数据和瓦片缓存未修改。", "No web files needed copying. Map data and tile caches were not changed.")) + suffix);
-            }
-        }
-        catch (Exception ex) { SetServerMapStatus(T($"网页更新失败：{ex.Message}", $"Web update failed: {ex.Message}")); }
-        finally
-        {
-            _isUpdatingServerMapWeb = false;
-            ServerMapEditorPanel.IsEnabled = true;
-            ServerMapSaveButton.IsEnabled = true;
-            ServerMapToggleButton.IsEnabled = true;
-            ServerMapRefreshButton.IsEnabled = true;
-            ServerMapBackButton.IsEnabled = true;
-            ServerMapWebRootUpdateButton.IsEnabled = !_isUpdatingServerMapWeb;
-        }
-    }
-
-    private async void OnServerMapDeployClick(object? sender, RoutedEventArgs e)
-    {
-        if (_isTogglingServerMap || _isUpdatingServerMapWeb) return;
-        if (ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile) { SetServerMapStatus("请先选择档案。"); return; }
-        try { await _serverMapService.EnsureMapModDeployedAsync(profile); SetServerMapStatus("服务器地图模组已部署。"); }
-        catch (Exception ex) { SetServerMapStatus($"部署失败：{ex.Message}"); }
-    }
 
     private void SetMapCacheStatus(string message) => ServerMapCacheStatusTextBlock.Text = message;
     private bool _refreshingMapCache;
@@ -9099,7 +9028,7 @@ public partial class LauncherMainWindow : Window
             }
             var busy = progress.Rebuilding || awaiting;
             ServerMapRebuildCacheButton.Content = busy ? T("重建中…", "Rebuilding…") : T("重建缓存", "Rebuild cache");
-            ServerMapRebuildCacheButton.IsEnabled = !busy;
+            ServerMapRebuildCacheButton.IsEnabled = !busy && !_isMaintainingServerMap;
             ToolTip.SetTip(ServerMapRebuildCacheButton, busy ? T("重建任务已提交，现有地图仍可访问。", "Rebuild submitted; existing maps remain available.") : T("后台核对存档并重建地图缓存。", "Check the save and rebuild map caches in the background."));
             if (progress.Error is { Length: > 0 }) SetMapCacheStatus(T($"地图任务：{progress.Error}", $"Map task: {progress.Error}"));
             else if (_mapRebuildFailures.TryGetValue(profile.Id, out var failure)) SetMapCacheStatus(failure);
@@ -9120,7 +9049,7 @@ public partial class LauncherMainWindow : Window
     }
     private async void OnServerMapRebuildCacheClick(object? sender, RoutedEventArgs e)
     {
-        if (ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile || _mapRebuildRequests.ContainsKey(profile.Id)
+        if (_isMaintainingServerMap || ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile || _mapRebuildRequests.ContainsKey(profile.Id)
             || !_mapCacheProgress.TryGetValue(profile.Id, out var progress) || progress.Rebuilding) return;
         _mapRebuildFailures.Remove(profile.Id);
         _mapRebuildRequests[profile.Id] = (DateTimeOffset.UtcNow, progress.RebuildId);
@@ -9135,79 +9064,16 @@ public partial class LauncherMainWindow : Window
         await RefreshMapCacheProgressAsync();
     }
 
-    private async void OnServerMapResetWebClick(object? sender, RoutedEventArgs e)
-    {
-        // Re-deploy only the bundled WebRoot; map data and tile caches remain untouched.
-        OnServerMapWebRootUpdateClick(sender, e);
-    }
-
-    private async void OnServerMapToggleClick(object? sender, RoutedEventArgs e)
-    {
-        if (_isTogglingServerMap || _isUpdatingServerMapWeb) return;
-        if (ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile) { SetServerMapStatus("请先选择档案。"); return; }
-        _isTogglingServerMap = true;
-        ServerMapToggleButton.IsEnabled = false;
-        ServerMapSaveButton.IsEnabled = false;
-        ServerMapDeployButton.IsEnabled = false;
-        ServerMapRefreshButton.IsEnabled = false;
-        ServerMapBackButton.IsEnabled = false;
-        ServerMapProfileComboBox.IsEnabled = false;
-        ServerMapEditorPanel.IsEnabled = false;
-        string? failure = null;
-        try
-        {
-            ServerMapToggleButton.Content = T("处理中…", "Working…");
-            var running = await Task.Run(() => _serverMapService.GetStatus(profile).IsRunning);
-            var message = running ? T("停止中…", "Stopping…") : T("启动中…", "Starting…");
-            ServerMapToggleButton.Content = message;
-            SetServerMapStatus(message);
-            if (running) await _serverMapService.StopAsync(profile);
-            else await _serverMapService.StartAsync(profile);
-        }
-        catch (Exception ex) { failure = T($"操作失败：{ex.Message}", $"Operation failed: {ex.Message}"); }
-        finally
-        {
-            // Keep the guard held while refreshing so a click cannot queue behind this operation.
-            try
-            {
-                var status = await Task.Run(() => _serverMapService.GetStatus(profile));
-                ServerMapToggleButton.Content = status.IsRunning ? T("停止地图", "Stop map") : T("启动地图", "Start map");
-                SetServerMapStatus(failure ?? (status.IsRunning ? T($"运行中：{status.Url}", $"Running: {status.Url}") : T("未启动", "Stopped")));
-            }
-            catch (Exception ex)
-            {
-                ServerMapToggleButton.Content = T("启动/停止地图", "Start/stop map");
-                SetServerMapStatus(failure ?? T($"状态刷新失败：{ex.Message}", $"Status refresh failed: {ex.Message}"));
-            }
-            finally
-            {
-                _isTogglingServerMap = false;
-                ServerMapToggleButton.IsEnabled = true;
-                ServerMapSaveButton.IsEnabled = true;
-                ServerMapDeployButton.IsEnabled = true;
-                ServerMapRefreshButton.IsEnabled = true;
-                ServerMapBackButton.IsEnabled = true;
-                ServerMapProfileComboBox.IsEnabled = true;
-                ServerMapEditorPanel.IsEnabled = true;
-            }
-        }
-    }
-
-    private void OnServerMapOpenClick(object? sender, RoutedEventArgs e)
-    {
-        if (ServerMapProfileComboBox.SelectedItem is not InstanceProfile profile) return;
-        var url = _serverMapService.GetStatus(profile).Url;
-        if (!string.IsNullOrWhiteSpace(url)) Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-    }
 
     private async void OnServerMapProfileSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
-        if (!_isRefreshingServerMap && ServerMapEditorPanel.IsVisible && ServerMapProfileComboBox.SelectedItem is InstanceProfile profile)
+        if (!_isMaintainingServerMap && !_isRefreshingServerMap && ServerMapEditorPanel.IsVisible && ServerMapProfileComboBox.SelectedItem is InstanceProfile profile)
             await LoadServerMapForProfileAsync(profile);
     }
 
     private async void OnServerMapRefreshClick(object? sender, RoutedEventArgs e)
     {
+        if (_isMaintainingServerMap) return;
         if (ServerMapEditorPanel.IsVisible && ServerMapProfileComboBox.SelectedItem is InstanceProfile profile) await LoadServerMapForProfileAsync(profile);
         else await RefreshServerMapProfilesAsync();
     }
@@ -9218,7 +9084,7 @@ public partial class LauncherMainWindow : Window
             await ShowServerMapEditorAsync(profile);
     }
 
-    private void OnServerMapBackClick(object? sender, RoutedEventArgs e) => ShowServerMapList();
+    private void OnServerMapBackClick(object? sender, RoutedEventArgs e) { if (!_isMaintainingServerMap) ShowServerMapList(); }
 
     private async void OnServerMapClearClick(object? sender, RoutedEventArgs e)
     {

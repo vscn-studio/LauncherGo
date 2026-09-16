@@ -7,7 +7,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const root = path.resolve(__dirname, '../LauncherGo.ServerMapHost/WebRoot');
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
 const ores = [{code:'silver',zh:'白银发晶',en:'Silver quartz'}];
-const sample = (id,y,owned=true,x=512016) => ({id,kind:'mineral-heatmap',mode:'node',sampleX:x,sampleZ:512012,sampleY:y,radius:6,sampledAt:'2026-09-16T01:47:12Z',ownerName:owned?'Tester':'Other',owned,ores:[{code:'silver',amountLevel:1,blocks:3}]});
+const sample = (id,y,owned=true,x=512016,z=512012) => ({id,kind:'mineral-heatmap',mode:'node',sampleX:x,sampleZ:z,sampleY:y,radius:6,sampledAt:'2026-09-16T01:47:12Z',ownerName:owned?'Tester':'Other',owned,ores:[{code:'silver',amountLevel:1,blocks:3}]});
 const histogram=()=>({minY:107,maxY:120,step:6,incomplete:legacyOnly,coverage:[{minY:107,maxY:120}],columns:legacyOnly?[]:[
   {code:'silver',zh:'白银发晶',en:'Silver quartz',total:6,layers:[{y:107,blocks:1},{y:113,blocks:2},{y:114,blocks:3}]},
   {code:'copper',zh:'铜',en:'Copper',total:4,layers:[{y:108,blocks:3},{y:112,blocks:1}]}
@@ -52,7 +52,7 @@ async function main(){
   const browser=await chromium.launch({headless:true});
   try{
     for(const width of [1440,390]){
-      samples=[sample('mine114',114),sample('mine113',113),sample('other114',114,false),sample('legacy',112,false),sample('neighbor',114,true,512040)];
+      samples=[sample('mine114',114),sample('mine113',113),sample('other114',114,false),sample('legacy',112,false),sample('neighbor',114,true,511984,511988)];
       failDetail=failDelete=delayDetail=admin=legacyOnly=false;deleteCalls=[];
       const page=await browser.newPage({viewport:{width,height:900}}),errors=[];
       page.on('pageerror',error=>errors.push(error.message));
@@ -65,8 +65,12 @@ async function main(){
       const markers=page.locator('.ore-probe-marker');
       await markers.first().hover();
       assert.equal(await page.locator('.ore-depth-tooltip').count(),0,'chart opened without a click');
-      await markers.first().click();
+      delayDetail=true;await markers.first().click();
+      assert.equal(await page.locator('.ore-depth-coordinates').innerText(),'X 16, Z 12','loading must show spawn-relative X/Z');
+      assert.equal(await page.locator('.ore-depth-status').innerText(),'加载中…');
+      delayDetail=false;
       await page.locator('.ore-depth-column').first().waitFor();
+      assert.equal(await page.locator('.ore-depth-coordinates').innerText(),'X 16, Z 12','loaded chart lost coordinates');
       assert.equal(await page.locator('.ore-section-dialog,.ore-section-svg,.ore-column').count(),0,'removed modal/section remains');
       assert.equal(await page.locator('.ore-depth-column').count(),2,'ore types should have independent bars');
       assert.deepEqual(await page.locator('.ore-depth-total').allTextContents(),['6 块','4 块']);
@@ -118,10 +122,16 @@ async function main(){
       await page.keyboard.press('Escape');await page.setViewportSize({width,height:900});detailOverride=null;
       legacyOnly=true;await markers.first().click();
       await page.getByText('旧记录无逐层数据，请重新探矿',{exact:true}).waitFor();
+      assert.equal(await page.locator('.ore-depth-coordinates').innerText(),'X 16, Z 12');
       assert.equal(await page.locator('.ore-depth-cell').count(),0,'legacy totals fabricated actual layers');
       await markers.first().click();await page.waitForFunction(()=>!document.querySelector('.ore-depth-tooltip')); legacyOnly=false;
+      detailOverride={columns:[]};await markers.first().click();
+      await page.getByText('未检出矿物',{exact:true}).waitFor();
+      assert.equal(await page.locator('.ore-depth-coordinates').innerText(),'X 16, Z 12');
+      await markers.first().click();detailOverride=null;
       failDetail=true;await markers.first().click();
       await page.getByRole('button',{name:'加载失败，点击重试',exact:true}).waitFor();
+      assert.equal(await page.locator('.ore-depth-coordinates').innerText(),'X 16, Z 12');
       await page.screenshot({path:path.join(artifacts,`retry-${width}.png`)});
       failDetail=false;await page.getByRole('button',{name:'加载失败，点击重试',exact:true}).click();await page.locator('.ore-depth-column').first().waitFor();
       await markers.first().click();await page.waitForFunction(()=>!document.querySelector('.ore-depth-tooltip'));
@@ -170,11 +180,12 @@ async function main(){
       await page.getByRole('button',{name:'删除探矿点',exact:true}).click();
       await page.waitForFunction(()=>document.querySelectorAll('.ore-probe-marker').length===1);
       assert.equal(samples.length,1,'admin should delete all owners at one point only');
-      assert.equal(samples[0].sampleX,512040);
+      assert.equal(samples[0].sampleX,511984);
       await page.locator('#language').selectOption('en',{force:true});
       await page.waitForFunction(()=>document.querySelector('#oreHeatmapSelect option').textContent==='All ores');
       await markers.first().click();await page.locator('.ore-depth-column').first().waitFor();
       assert.match(await page.locator('.ore-depth-tooltip').innerText(),/Silver quartz/);
+      assert.equal(await page.locator('.ore-depth-coordinates').innerText(),'X -16, Z -12','English/negative coordinates must use the selected point, not the last response');
       assert.deepEqual(errors,[]);
       await page.close();console.log(`PASS ${width}px: real Y bars, quantities, hottest layer, radius ticks, tooltip bounds, legacy, owner/admin deletion and cancellation`);
     }

@@ -3,6 +3,7 @@
 .ore-probe-marker:focus-visible .ore-probe-dot,.ore-probe-marker:hover .ore-probe-dot { outline:2px solid #f2bd65;outline-offset:3px; }
 .leaflet-tooltip.ore-depth-tooltip { position:absolute;z-index:1400;opacity:1;padding:8px;background:#18181af5;border:var(--border);border-radius:4px;color:var(--text);box-shadow:var(--shadow);white-space:normal;pointer-events:auto;font:500 12px/1.4 Inter,system-ui,sans-serif; }
 .ore-depth-tooltip:before { display:none; }
+.ore-depth-coordinates { margin-bottom:6px;color:var(--text);font-weight:600;font-variant-numeric:tabular-nums; }
 .leaflet-oreProbeActions-pane { z-index:1400; }
 .ore-probe-popup .leaflet-popup-content-wrapper { background:#18181af5;border:var(--border);border-radius:4px;box-shadow:var(--shadow); }
 .ore-probe-popup .leaflet-popup-tip { background:#18181af5;box-shadow:var(--shadow); }

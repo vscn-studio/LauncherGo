@@ -2,7 +2,7 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>ServerMap</AssemblyName>
-    <Version>0.4.2</Version>
+    <Version>0.4.3</Version>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <OutputPath>bin\$(Configuration)\package</OutputPath>
     <PackagePath>bin\$(Configuration)\servermap.zip</PackagePath>

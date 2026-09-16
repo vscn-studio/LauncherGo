@@ -11,20 +11,28 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace LauncherGo.Services;
 
-public sealed class ServerMapService : IServerMapService
+public sealed partial class ServerMapService : IServerMapService
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true, WriteIndented = true };
     private readonly object gate = new();
     private readonly Dictionary<string, Process> processes = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim webUpdateGate = new(1, 1);
     private readonly string builtInWebRoot;
+    private readonly string builtInMapMod;
+    private readonly string? mapRuntimeRoot;
+    private string MapRuntimeRoot => mapRuntimeRoot ?? WorkspacePathHelper.RuntimeRoot;
+    private readonly string hostExecutable;
     private readonly ILogger<ServerMapService> logger;
     private readonly HttpClient progressClient;
 
     public ServerMapService(ILogger<ServerMapService>? logger = null) : this(Path.Combine(AppContext.BaseDirectory, "WebRoot"), logger) { }
-    internal ServerMapService(string builtInWebRoot, ILogger<ServerMapService>? logger = null, HttpClient? progressClient = null)
+    internal ServerMapService(string builtInWebRoot, ILogger<ServerMapService>? logger = null, HttpClient? progressClient = null,
+        string? mapModPackage = null, string? runtimeRoot = null, string? hostPath = null)
     {
         this.builtInWebRoot = builtInWebRoot;
+        builtInMapMod = mapModPackage ?? Path.Combine(AppContext.BaseDirectory, "EmbeddedMods", "servermap", "servermap.zip");
+        mapRuntimeRoot = runtimeRoot;
+        hostExecutable = hostPath ?? Path.Combine(AppContext.BaseDirectory, "LauncherGo.ServerMapHost.exe");
         this.progressClient = progressClient ?? ProgressClient;
         this.logger = logger ?? NullLogger<ServerMapService>.Instance;
     }
@@ -78,46 +86,6 @@ public sealed class ServerMapService : IServerMapService
         await File.WriteAllTextAsync(GetSettingsPath(profile), JsonSerializer.Serialize(settings, JsonOptions), cancellationToken);
         await WriteModConfigurationAsync(profile, settings, cancellationToken);
     }
-
-    public async Task EnsureMapModDeployedAsync(InstanceProfile profile, CancellationToken cancellationToken = default)
-    {
-        var source = Path.Combine(AppContext.BaseDirectory, "EmbeddedMods", "servermap", "servermap.zip");
-        var target = Path.Combine(WorkspacePathHelper.GetProfileModsPath(profile.DirectoryPath), "servermap.zip");
-        var receipt = Path.Combine(GetProfileDirectory(profile), ".deployment", "receipt.json");
-        var copied = await Task.Run(() => DeployMapModAsync(source, target, receipt, cancellationToken), cancellationToken).ConfigureAwait(false);
-        logger.LogInformation("Map mod deployment checked. ProfileId={ProfileId}, Copied={Copied}.", profile.Id, copied);
-    }
-
-    private sealed record DeploymentReceipt(string SourcePath, string TargetPath, FileStamp Source, FileStamp Target);
-
-    internal static async Task<bool> DeployMapModAsync(string source, string target, string receiptPath, CancellationToken cancellationToken = default)
-    {
-        using var deploymentLock = await BackgroundHostFiles.AcquireControlAsync(Path.GetDirectoryName(receiptPath)!, cancellationToken).ConfigureAwait(false);
-        cancellationToken.ThrowIfCancellationRequested();
-        if (!File.Exists(source)) throw new FileNotFoundException("内置 ServerMap 模组包不存在。", source);
-        var sourceStamp = FileStamp.Read(source);
-        var previous = BackgroundHostFiles.Read<DeploymentReceipt>(receiptPath);
-        if (previous is not null && previous.SourcePath == Path.GetFullPath(source) && previous.TargetPath == Path.GetFullPath(target) &&
-            previous.Source == sourceStamp && File.Exists(target) && previous.Target == FileStamp.Read(target))
-            return false;
-        ValidateMapModPackage(source);
-        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-        var temporary = target + $".{Guid.NewGuid():N}.tmp";
-        try
-        {
-            await using (var input = File.OpenRead(source))
-            await using (var output = File.Create(temporary))
-                await input.CopyToAsync(output, cancellationToken).ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
-            if (sourceStamp != FileStamp.Read(source)) throw new IOException("地图模组包在部署期间发生变化，请更新完成后重试。");
-            File.Move(temporary, target, overwrite: true);
-            await BackgroundHostFiles.WriteAsync(receiptPath,
-                new DeploymentReceipt(Path.GetFullPath(source), Path.GetFullPath(target), sourceStamp, FileStamp.Read(target)));
-            return true;
-        }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
-    }
-
     internal static void ValidateMapModPackage(string path)
     {
         using var archive = ZipFile.OpenRead(path);
@@ -125,31 +93,6 @@ public sealed class ServerMapService : IServerMapService
             if (archive.GetEntry(name) is not { Length: > 0 })
                 throw new InvalidDataException($"内置 ServerMap 模组包缺少版权文件 {name}，请重新构建或更新 LauncherGo。");
     }
-
-    public async Task<int> UpdateWebRootAsync(InstanceProfile profile, ServerMapSettings settings, CancellationToken cancellationToken = default)
-    {
-        settings = Normalize(profile, settings);
-        await webUpdateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            string? target = string.IsNullOrWhiteSpace(settings.WebRoot)
-                ? ResolveRunningDefaultWebRoot(profile)
-                : settings.WebRoot;
-
-            // The bundled WebRoot is already the source of truth for the default
-            // configuration. When the Host is stopped, the next start stages it
-            // into a new immutable runtime directory; there is nothing to copy.
-            var count = string.IsNullOrWhiteSpace(target)
-                ? 0
-                : await CopyWebRootAsync(builtInWebRoot, target, cancellationToken).ConfigureAwait(false);
-            await SaveSettingsAsync(profile, settings, cancellationToken).ConfigureAwait(false);
-            logger.LogInformation("Map web root update checked. ProfileId={ProfileId}, CustomWebRoot={CustomWebRoot}, Target={Target}, Copied={Copied}.",
-                profile.Id, !string.IsNullOrWhiteSpace(settings.WebRoot), target ?? "next-start", count);
-            return count;
-        }
-        finally { webUpdateGate.Release(); }
-    }
-
     private string? ResolveRunningDefaultWebRoot(InstanceProfile profile)
     {
         var statePath = Path.Combine(RuntimeDirectory(profile.Id), "host.state.json");
@@ -166,7 +109,8 @@ public sealed class ServerMapService : IServerMapService
         if (string.IsNullOrWhiteSpace(hostDirectory))
             return null;
         var webRoot = Path.Combine(hostDirectory, "WebRoot");
-        return File.Exists(Path.Combine(webRoot, "index.html")) ? webRoot : null;
+        // A missing homepage is a reason to reset, not evidence that the Host is stopped.
+        return webRoot;
     }
 
     internal static Task<int> CopyWebRootAsync(string sourceDirectory, string targetDirectory, CancellationToken cancellationToken = default) =>
@@ -174,17 +118,18 @@ public sealed class ServerMapService : IServerMapService
         {
             var source = Path.TrimEndingDirectorySeparator(Path.GetFullPath(sourceDirectory));
             var target = Path.TrimEndingDirectorySeparator(Path.GetFullPath(targetDirectory));
-            if (target.Equals(Path.GetPathRoot(target), StringComparison.OrdinalIgnoreCase) ||
-                source.Equals(target, StringComparison.OrdinalIgnoreCase) ||
-                target.StartsWith(source + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
-                source.StartsWith(target + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("自定义 WebRoot 不能与内置网页目录重叠。 ");
+            ValidateWebDirectories(source, target);
             if (!File.Exists(Path.Combine(source, "index.html")))
                 throw new FileNotFoundException("内置地图网页不存在，请重新安装 LauncherGo。 ", Path.Combine(source, "index.html"));
 
             var files = Directory.GetFiles(source, "*", SearchOption.AllDirectories)
                 .OrderBy(file => Path.GetRelativePath(source, file).Equals("index.html", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
                 .ToArray();
+            foreach (var file in files)
+            {
+                RejectLinkedPath(file);
+                RejectLinkedPath(Path.Combine(target, Path.GetRelativePath(source, file)));
+            }
             foreach (var file in files)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -194,9 +139,17 @@ public sealed class ServerMapService : IServerMapService
                 var temporary = Path.Combine(directory, $".{Path.GetFileName(destination)}.{Guid.NewGuid():N}.tmp");
                 try
                 {
-                    await using (var input = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous))
-                    await using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, FileOptions.Asynchronous))
+                    if (Path.GetRelativePath(source, file).Equals("index.html", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var html = await File.ReadAllTextAsync(file, cancellationToken);
+                        await File.WriteAllTextAsync(temporary, ServerMapWebAssets.VersionHtml(html, source), cancellationToken);
+                    }
+                    else
+                    {
+                        await using var input = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous);
+                        await using var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, FileOptions.Asynchronous);
                         await input.CopyToAsync(output, cancellationToken).ConfigureAwait(false);
+                    }
                     // Readers see either the previous complete asset or the new complete asset.
                     for (var attempt = 0; ; attempt++)
                     {
@@ -216,8 +169,8 @@ public sealed class ServerMapService : IServerMapService
             return files.Length;
         }, cancellationToken);
 
-    private static string RuntimeDirectory(string profileId) =>
-        Path.Combine(WorkspacePathHelper.RuntimeRoot, "server-map", WorkspacePathHelper.SanitizeFileName(profileId));
+    private string RuntimeDirectory(string profileId) =>
+        Path.Combine(MapRuntimeRoot, "server-map", WorkspacePathHelper.SanitizeFileName(profileId));
 
     public Task<ServerMapRuntimeStatus> StartAsync(InstanceProfile profile, CancellationToken cancellationToken = default) =>
         Task.Run(async () =>
@@ -247,14 +200,12 @@ public sealed class ServerMapService : IServerMapService
         var settings = await LoadSettingsAsync(profile, cancellationToken);
         if (!settings.Enabled) throw new InvalidOperationException("请先启用服务器地图。");
         if (!string.IsNullOrWhiteSpace(settings.WebRoot) && !File.Exists(Path.Combine(settings.WebRoot, "index.html")))
-            throw new InvalidOperationException("自定义 WebRoot 缺少 index.html，请先手动更新网页。");
+            throw new InvalidOperationException("自定义 WebRoot 缺少 index.html，请先重置网页。 / Custom WebRoot has no index.html; reset web files first.");
         if (settings.UseHttps && !await ValidateCertificateAsync(profile, settings, cancellationToken))
             throw new InvalidOperationException("HTTPS 证书或私钥无效、已过期，或两者不匹配。");
-        var sourceHost = ResolveServerMapHostPath();
+        var sourceHost = hostExecutable;
         stages.Stage("check-dotnet-runtime");
         DotNetRuntimeRequirement.EnsureForHost(sourceHost);
-        stages.Stage("deploy-map-mod");
-        await EnsureMapModDeployedAsync(profile, cancellationToken);
         stages.Stage("write-host-config");
         var runtimeConfig = Path.Combine(runtime, "host.json");
         var stop = Path.Combine(runtime, "host.stop");
@@ -273,7 +224,7 @@ public sealed class ServerMapService : IServerMapService
         var webFiles = Directory.Exists(builtInWebRoot)
             ? Directory.GetFiles(builtInWebRoot, "*", SearchOption.AllDirectories) : [];
         using var prepared = await Task.Run(() => ServerHostRuntimeStager.Prepare(
-            sourceHost, Path.Combine(WorkspacePathHelper.RuntimeRoot, "server-map-host"), cancellationToken, webFiles,
+            sourceHost, Path.Combine(MapRuntimeRoot, "server-map-host"), cancellationToken, webFiles,
             (step, _) => stages.Stage("prepare-host/" + step)), cancellationToken);
         stages.Stage("launch-host");
         cancellationToken.ThrowIfCancellationRequested();
@@ -361,7 +312,7 @@ public sealed class ServerMapService : IServerMapService
 
     public async Task StopAllAsync(CancellationToken cancellationToken = default)
     {
-        var root = Path.Combine(WorkspacePathHelper.RuntimeRoot, "server-map");
+        var root = Path.Combine(MapRuntimeRoot, "server-map");
         if (!Directory.Exists(root)) return;
         foreach (var directory in Directory.GetDirectories(root))
             await StopProfileAsync(Path.GetFileName(directory), cancellationToken);
@@ -385,9 +336,6 @@ public sealed class ServerMapService : IServerMapService
         var settings = BackgroundHostFiles.Read<ServerMapSettings>(GetSettingsPath(profile)) ?? new();
         return new ServerMapRuntimeStatus { ProfileId = profile.Id, Url = BuildUrl(settings), Error = state?.Error ?? "" };
     }
-
-    private static string ResolveServerMapHostPath() => Path.Combine(AppContext.BaseDirectory, "LauncherGo.ServerMapHost.exe");
-
     public Task<bool> ValidateCertificateAsync(InstanceProfile profile, ServerMapSettings settings, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

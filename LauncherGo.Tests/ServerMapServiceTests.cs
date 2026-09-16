@@ -5,12 +5,14 @@ using Xunit;
 
 namespace LauncherGo.Tests;
 
-public sealed class ServerMapServiceTests : IDisposable
+public sealed partial class ServerMapServiceTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "launchergo-webroot-tests-" + Guid.NewGuid().ToString("N"));
     private string Source => Path.Combine(root, "builtin");
     private string Target => Path.Combine(root, "custom");
     private InstanceProfile Profile => new() { Id = "map-test", DirectoryPath = Path.Combine(root, "profile") };
+    private ServerMapService CreateService(string? source = null, string? mod = null) => new(source ?? Source,
+        mapModPackage: mod, runtimeRoot: Path.Combine(root, "runtime"));
 
     public ServerMapServiceTests()
     {
@@ -64,11 +66,16 @@ public sealed class ServerMapServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateWebRoot_PersistsRelativePathAsAbsoluteAndKeepsSettings()
+    public async Task ResetWebRoot_UsesSavedRelativePathWithoutSavingSettings()
     {
-        var service = new ServerMapService(Source);
+        var service = CreateService();
         var settings = new ServerMapSettings { WebRoot = "www", BackendToken = "existing-token", BackendPort = 15080, ListenPort = 18081 };
-        await service.UpdateWebRootAsync(Profile, settings);
+        await service.SaveSettingsAsync(Profile, settings);
+        var settingsFiles = Directory.GetFiles(service.GetProfileDirectory(Profile), "*.json", SearchOption.AllDirectories)
+            .ToDictionary(p => p, p => (Content: File.ReadAllText(p), Stamp: File.GetLastWriteTimeUtc(p)));
+        await service.ResetWebRootAsync(Profile, await service.InspectWebResetAsync(Profile));
+        foreach (var (path, before) in settingsFiles)
+            Assert.Equal(before, (File.ReadAllText(path), File.GetLastWriteTimeUtc(path)));
         var loaded = await service.LoadSettingsAsync(Profile);
         Assert.Equal(Path.Combine(Profile.DirectoryPath, "ServerMap", "www"), loaded.WebRoot);
         Assert.True(File.Exists(Path.Combine(loaded.WebRoot, "index.html")));
@@ -80,11 +87,12 @@ public sealed class ServerMapServiceTests : IDisposable
     [Fact]
     public async Task SaveSettings_EmptyWebRootKeepsBuiltInDefault()
     {
-        var service = new ServerMapService(Source);
+        var service = CreateService();
         await service.SaveSettingsAsync(Profile, new ServerMapSettings { WebRoot = "   " });
         Assert.Equal(string.Empty, (await service.LoadSettingsAsync(Profile)).WebRoot);
-        var copied = await service.UpdateWebRootAsync(Profile, new ServerMapSettings());
-        Assert.Equal(0, copied);
+        var result = await service.ResetWebRootAsync(Profile, await service.InspectWebResetAsync(Profile));
+        Assert.Equal(0, result.FilesChanged);
+        Assert.True(result.AppliesOnNextStart);
         Assert.Equal(string.Empty, (await service.LoadSettingsAsync(Profile)).WebRoot);
     }
 
@@ -98,11 +106,11 @@ public sealed class ServerMapServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateWebRoot_MissingBundleDoesNotChangeSavedSettings()
+    public async Task ResetWebRoot_MissingBundleDoesNotChangeSavedSettings()
     {
-        var service = new ServerMapService(Path.Combine(root, "missing"));
+        var service = CreateService(Path.Combine(root, "missing"));
         await service.SaveSettingsAsync(Profile, new ServerMapSettings { WebRoot = Target });
-        await Assert.ThrowsAsync<FileNotFoundException>(() => service.UpdateWebRootAsync(Profile, new ServerMapSettings { WebRoot = "different" }));
+        await Assert.ThrowsAsync<FileNotFoundException>(() => service.InspectWebResetAsync(Profile));
         Assert.Equal(Target, (await service.LoadSettingsAsync(Profile)).WebRoot);
     }
 
@@ -135,57 +143,6 @@ public sealed class ServerMapServiceTests : IDisposable
         ServerMapService.ValidateMapModPackage(CreateModPackage());
     }
 
-    [Fact]
-    public async Task DeployMapMod_UnchangedPackageIsNotReadOrOverwritten()
-    {
-        var source = CreateModPackage();
-        var target = Path.Combine(Target, "servermap.zip");
-        var receipt = Path.Combine(root, "deployment", "receipt.json");
-        Assert.True(await ServerMapService.DeployMapModAsync(source, target, receipt));
-        using (File.Open(source, FileMode.Open, FileAccess.Read, FileShare.None))
-        using (File.Open(target, FileMode.Open, FileAccess.Read, FileShare.None))
-            Assert.False(await ServerMapService.DeployMapModAsync(source, target, receipt));
-
-        File.WriteAllText(target, "damaged target");
-        Assert.True(await ServerMapService.DeployMapModAsync(source, target, receipt));
-        Assert.Equal(File.ReadAllBytes(source), File.ReadAllBytes(target));
-        File.Delete(target);
-        Assert.True(await ServerMapService.DeployMapModAsync(source, target, receipt));
-
-        File.WriteAllText(receipt, "invalid json");
-        Assert.True(await ServerMapService.DeployMapModAsync(source, target, receipt));
-    }
-
-    [Fact]
-    public async Task DeployMapMod_ChangedPackageIsValidated_AndCancelledOrFailedCopyKeepsOldTarget()
-    {
-        var source = CreateModPackage();
-        var target = Path.Combine(Target, "servermap.zip");
-        var receipt = Path.Combine(root, "deployment", "receipt.json");
-        Assert.True(await ServerMapService.DeployMapModAsync(source, target, receipt));
-        var oldContents = File.ReadAllBytes(target);
-        using (var zip = ZipFile.Open(source, ZipArchiveMode.Update))
-        using (var writer = new StreamWriter(zip.CreateEntry("mod.json").Open())) writer.Write("new mod");
-        using (var cancel = new CancellationTokenSource())
-        {
-            cancel.Cancel();
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ServerMapService.DeployMapModAsync(source, target, receipt, cancel.Token));
-        }
-        Assert.Equal(oldContents, File.ReadAllBytes(target));
-        using (File.Open(target, FileMode.Open, FileAccess.Read, FileShare.Read))
-        {
-            var error = await Record.ExceptionAsync(() => ServerMapService.DeployMapModAsync(source, target, receipt));
-            Assert.True(error is IOException or UnauthorizedAccessException);
-        }
-        Assert.Equal(oldContents, File.ReadAllBytes(target));
-        Assert.Empty(Directory.EnumerateFiles(Target, "*.tmp"));
-        Assert.True(await ServerMapService.DeployMapModAsync(source, target, receipt));
-        var updated = File.ReadAllBytes(target);
-        Assert.Equal(File.ReadAllBytes(source), updated);
-        File.WriteAllText(source, "invalid package");
-        await Assert.ThrowsAsync<InvalidDataException>(() => ServerMapService.DeployMapModAsync(source, target, receipt));
-        Assert.Equal(updated, File.ReadAllBytes(target));
-    }
 
     [Theory]
     [InlineData("LICENSE.txt", false)]
@@ -213,6 +170,8 @@ public sealed class ServerMapServiceTests : IDisposable
     {
         var path = Path.Combine(root, "servermap.zip");
         using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+        using (var writer = new StreamWriter(archive.CreateEntry("modinfo.json").Open()))
+            writer.Write("""{"modid":"servermap","version":"0.4.2"}""");
         foreach (var name in new[] { "LICENSE.txt", "THIRD_PARTY_NOTICES.txt", "VS-LiveMap-Revival-LICENSE.txt" })
         {
             if (name == excluded && !empty) continue;
