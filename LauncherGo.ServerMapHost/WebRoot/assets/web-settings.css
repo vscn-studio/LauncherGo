@@ -1,0 +1,19 @@
+html.web-compatible-tiles #map img.leaflet-tile { mix-blend-mode:normal!important; }
+html.web-no-effects body { --shadow:none; }
+html.web-no-effects body *,html.web-no-effects body *::before,html.web-no-effects body *::after {
+  backdrop-filter:none!important;-webkit-backdrop-filter:none!important;box-shadow:none!important;text-shadow:none!important;
+}
+html.web-no-effects .map-marker { filter:none; }
+html.web-no-effects dialog::backdrop { backdrop-filter:none!important;-webkit-backdrop-filter:none!important; }
+html.web-no-effects .map-marker.light { filter:brightness(0) invert(1); }
+html.web-no-effects #pin::before,html.web-no-effects #poiImageViewerClose svg,html.web-no-effects #poiImageRemove svg { filter:none; }
+#webSettingsDialog { width:min(480px,calc(100vw - 24px)); }
+#webSettingsDialog .web-setting { display:grid;grid-template-columns:22px minmax(0,1fr);gap:4px 10px;padding:12px 0;margin:0;border-bottom:1px solid #ffffff18;cursor:pointer; }
+#webSettingsDialog .web-setting input { grid-row:1 / span 2;width:18px;height:18px;min-height:0;margin:2px 0;padding:0;accent-color:#8abdc5; }
+#webSettingsDialog .web-setting span { color:var(--text);font-size:14px; }
+#webSettingsDialog .web-setting small { grid-column:2;color:var(--muted);font-size:12px;line-height:1.5; }
+#webSettingsDialog p { color:var(--muted);font-size:12px;line-height:1.5; }
+#webSettingsDialog [role=status]:empty { display:none; }
+.web-settings-actions { display:flex;justify-content:flex-end;gap:8px;margin-top:14px; }
+.web-settings-actions button { padding:8px 12px;border:var(--border);border-radius:4px;background:transparent;color:var(--text);font:inherit;cursor:pointer; }
+.web-settings-actions button:hover { background:var(--hover); }

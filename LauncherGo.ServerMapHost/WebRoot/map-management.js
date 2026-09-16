@@ -91,7 +91,7 @@
     alliesForm.onsubmit=event=>{event.preventDefault();const mapId=alliesInput.value.trim();if(mapId)void changeAllies({action:'add',mapId});};
     $('searchInput').addEventListener('focus',closeAllies);
     document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!allies.hidden){closeAllies();alliesButton.focus();}});
-    setInterval(()=>{if(!document.hidden)void loadAllies();},5000);renderAllies();
+    setInterval(()=>{if(!(window.ServerMapWebSettings?.paused()??document.hidden))void loadAllies();},5000);renderAllies();
     const spotlight=dialog('spotlightDialog',text('聚焦','Spotlight'));
     const spotlightSearch=node('input',{id:'spotlightSearch',type:'search',autocomplete:'off'});
     const spotlightSort=node('select',{id:'spotlightSort',className:'spotlight-sort'});
@@ -332,7 +332,7 @@
     trackingButton.hidden=true;
     let polling=false;
     setInterval(async()=>{
-      if(polling||!getAuth().admin||document.hidden)return;polling=true;
+      if(polling||!getAuth().admin||(window.ServerMapWebSettings?.paused()??document.hidden))return;polling=true;
       try{
         if(tracking.open)await refreshHistory();
         if(selectedTrack?.ended)await request('/admin/online-players'); // Recheck admin access without reloading a large history.

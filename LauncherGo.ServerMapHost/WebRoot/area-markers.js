@@ -93,7 +93,7 @@
       try{const response=await fetch(api+'/area-markers',{method,cache:'no-store',signal:abort.signal,headers:body?{'Content-Type':'application/json','X-ServerMap-Request':'1'}:{},body:body?JSON.stringify(body):undefined});if(!response.ok){const e=Error(response.status===409?'conflict':method==='GET'?'unavailable':'error');e.status=response.status;throw e;}return await response.json();}finally{clearTimeout(timer);if(controller===abort)controller=null;}
     }
     async function refresh(){
-      if(!ready||document.hidden||pending)return;pending=true;const captured=epoch;
+      if(!ready||(window.ServerMapWebSettings?.paused()??document.hidden)||pending)return;pending=true;const captured=epoch;
       try{const next=await request();if(captured!==epoch)return;if(!Array.isArray(next.markers)||!Number.isSafeInteger(next.revision))throw Error('unavailable');loaded=true;if(JSON.stringify(next)!==JSON.stringify(data)){data=next;for(const id of selected)if(!data.markers.some(m=>m.id===id))selected.delete(id);render();renderToolbar();}}
       catch{if(captured===epoch&&!loaded){data={revision:0,markers:[]};render();}}finally{pending=false;if(captured!==epoch)void refresh();}
     }

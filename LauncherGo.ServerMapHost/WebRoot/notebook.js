@@ -474,7 +474,7 @@
       }catch{if(epoch!==authEpoch||visibility!==privacyEpoch)return;sharedMarker=null;sharedMarkerGroup.clearLayers();if(!mode)toolbar.hidden=true;if(fit)notice(text('unavailableShare'));}
     }
     async function poll() {
-      if(!ready||document.hidden||requestBusy)return;requestBusy=true;
+      if(!ready||(window.ServerMapWebSettings?.paused()??document.hidden)||requestBusy)return;requestBusy=true;
       try {
         const epoch=authEpoch;
         const current=await request('/auth/me');if(epoch!==authEpoch)return;

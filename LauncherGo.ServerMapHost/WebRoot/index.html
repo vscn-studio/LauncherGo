@@ -109,6 +109,7 @@
   <link rel="stylesheet" href="area-markers.css">
   <link rel="stylesheet" href="map-management.css?v=sitecode1">
   <link rel="stylesheet" href="assets/ore-probes.css">
+  <link rel="stylesheet" href="assets/web-settings.css?v=1">
 </head>
 <body>
   <div id="map"></div>
@@ -148,19 +149,20 @@
   <div id="teleportModal" class="modal-backdrop" hidden><form id="teleportForm" class="modal"><h2 data-i18n="teleportHere">传送到此处</h2><p id="teleportDetails" style="white-space:pre-line" aria-live="polite"></p><p id="teleportError" class="error" role="alert"></p><div class="modal-actions"><button type="button" data-close-modal="teleportModal" data-i18n="close">关闭</button><button id="teleportRefresh" type="button" data-i18n="teleportRefresh">重新计算</button><button id="teleportSubmit" type="submit" data-i18n="teleportConfirm" disabled>确认传送</button></div></form></div>
   <div id="oreHeatmapControls" hidden><label for="oreHeatmapMode">探矿模式</label><select id="oreHeatmapMode"><option value="">全部模式</option><option value="density">密度勘探</option><option value="node">矿脉搜索</option></select><label class="ore-depth-label" for="oreMinY">矿脉搜索 Y 范围（留空为全部）</label><div class="ore-depth"><input id="oreMinY" type="number" min="0" max="65535" step="1" placeholder="最低 Y"><input id="oreMaxY" type="number" min="0" max="65535" step="1" placeholder="最高 Y"></div><label for="oreHeatmapSelect">矿物筛选</label><select id="oreHeatmapSelect"></select><div class="ore-legend"></div></div>
   <div id="contributors"><div id="contributorsPanel" class="contributors-panel"><table class="contributors-table"><tbody><tr><th data-i18n="dataFrom">数据来自</th><td><a id="serverWebsite"></a></td></tr><tr><th data-i18n="updated">更新时间</th><td id="lastUpdated">—</td></tr><tr><th data-i18n="serverVersion">服务器版本</th><td id="serverVersion">—</td></tr><tr><th data-i18n="mapVersion">地图版本</th><td id="mapVersion">—</td></tr><tr><th data-i18n="mapSize">地图大小</th><td id="mapSize">—</td></tr><tr><th data-i18n="cacheSize">缓存大小</th><td id="cacheSize">—</td></tr><tr><th data-i18n="renderTime">渲染时间</th><td id="renderTime">—</td></tr><tr><th data-i18n="serverConfig">服务器配置</th><td id="serverConfig">—</td></tr></tbody></table><table class="contributors-links"><tbody><tr><td><a href="https://github.com/mja00/VS-LiveMap-Revival" target="_blank">VS-LiveMap-Revival</a></td><td><a href="https://gitlab.com/th3dilli_vintagestory/WebCartographer" target="_blank">WebCartographer</a></td></tr><tr><td><a href="https://leafletjs.com" target="_blank">Leaflet</a></td><td><a href="https://github.com/VSCN-Studio" target="_blank">ServerMap</a></td></tr><tr><td>LauncherGo MIT</td><td>Leaflet BSD-2-Clause</td></tr><tr><td>LiveMap / WebCartographer MIT</td><td></td></tr><tr><td><a href="LICENSE.txt" target="_blank">LICENSE</a></td><td><a href="vendor/Feather-LICENSE.txt" target="_blank">Feather</a></td></tr><tr><td><a href="THIRD_PARTY_NOTICES.txt" target="_blank">Third-party notices</a></td><td></td></tr></tbody></table><details class="contributors-notice"><summary data-i18n="assetNoticeTitle">素材与许可</summary><p data-i18n="gameAssetNotice">本地图展示的游戏模型、贴图、路径点图标及基于这些素材生成的头像，其相关权利归 Vintage Story 官方及对应模组、资源包作者所有。LauncherGo 不主张这些素材的所有权，其开源许可证不适用于这些素材。官方原始模型、贴图及运行时同步的游戏图标仅在模组运行时调用，用于服务器地图展示，不随 LauncherGo 安装包、携带版或模组 ZIP 分发。第三方模组、资源包素材的使用仍须遵循原作者许可。</p></details><p id="webmapVersion" class="contributors-version"></p></div><button type="button" class="right" aria-expanded="false" aria-controls="contributorsPanel"><span data-i18n="websiteInfo">网站信息</span><span class="arrow">▲</span></button></div>
+  <script src="assets/web-settings.js?v=1"></script>
   <script src="vendor/leaflet/leaflet.js"></script>
   <script src="vendor/webcartographer-route.js"></script>
   <script src="vendor/html-to-image.js"></script>
   <script src="screenshot.js"></script>
   <script src="locales.js"></script>
-  <script src="notebook.js?v=regions3"></script>
+  <script src="notebook.js?v=websettings1"></script>
   <dialog id="poiImageViewer" aria-label="地点图片"><button id="poiImageViewerClose" type="button" data-i18n-label="poiImageClose" aria-label="关闭图片" title="关闭图片"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6L6 18"/></svg></button><img id="poiImageFull" alt=""><p id="poiImageViewerError" role="status"></p></dialog>
   <script src="poi-images.js"></script>
   <script src="mounts.js"></script>
-  <script src="area-markers.js"></script>
+  <script src="area-markers.js?v=websettings1"></script>
   <script src="assets/ore-heatmap.js"></script>
   <script src="track-timeline.js"></script>
-  <script src="map-management.js?v=sitecode1"></script>
+  <script src="map-management.js?v=websettings1"></script>
   <script>
   (() => {
     const prefix=location.pathname.startsWith('/servermap')?'/servermap':'', api=`${prefix}/api/v1`;
@@ -184,7 +186,21 @@
     const mobileMedia=matchMedia('(max-width: 700px), (pointer: coarse)'),isMobile=()=>mobileMedia.matches;
     let language=(localStorage.getItem('servermap-language')||navigator.language||'en').toLowerCase().split('-')[0];if(!supportedLanguages.includes(language))language='en';const t=key=>key.split('.').reduce((value,part)=>value?.[part],messages[language])||key.split('.').reduce((value,part)=>value?.[part],messages.en)||key;
     let metadata, rendererName=localStorage.getItem('servermap-renderer')||'basic', nativeZoom=12, scale=1, activeLayer, players=[], layers={}, requests={}, authState={authenticated:false,admin:false}, editingPoi=null, playerGearTeleportEnabled=false, sharedPoiOpened=false;const tileVersions=new Map();let tilePrivacyVersion=0;
-    let notebook, areas, managementUi, mapPolicy={}, viewReady=false;
+    const webSettings=ServerMapWebSettings;
+    let notebook, areas, managementUi, webSettingsUi, mapPolicy={}, viewReady=false;
+    let followRequest;
+    function stopFollowing(){if(webSettings.values.followSelf)webSettings.set('followSelf',false);}
+    async function followSelf(){
+      if(!webSettings.values.followSelf||!authState.authenticated||webSettings.paused()||moving||!viewReady||followRequest||measureActive||document.querySelector('dialog[open],.modal-backdrop:not([hidden])')||notebook?.isSelectingScreenshot())return;
+      const auth=authState,controller=followRequest=new AbortController(),timeout=setTimeout(()=>controller.abort(),10000);
+      try{
+        const response=await fetch(`${api}/players`,{cache:'no-store',signal:controller.signal});if(!response.ok)return;
+        const data=await response.json(),self=Array.isArray(data)?data.find(player=>player.name===auth.name):null;
+        if(controller.signal.aborted||auth!==authState||!webSettings.values.followSelf||webSettings.paused()||moving||measureActive||document.querySelector('dialog[open],.modal-backdrop:not([hidden])')||notebook?.isSelectingScreenshot()||!self||!Number.isFinite(self.x)||!Number.isFinite(self.z))return;
+        const target=gameLatLng(self.x,self.z);
+        if(map.project(map.getCenter()).distanceTo(map.project(target))>.5)map.panTo(target,{animate:false});
+      }catch(error){if(error.name!=='AbortError')console.debug(error);}finally{clearTimeout(timeout);if(followRequest===controller)followRequest=undefined;}
+    }
     const layerScale=name=>['players','mounts','translocators'].includes(name)?(mapPolicy.layers?.[name]?.scale??layers[name]?.scale??1):1;
     const gameLatLng=(x,z)=>L.latLng(z*scale,x*scale), gamePoint=latlng=>({x:latlng.lng/scale,z:latlng.lat/scale});
     // The north-pointing SVG uses clockwise screen angles; game yaw uses
@@ -196,7 +212,9 @@
     const map=L.map('map',{crs,center:[0,0],zoom:0,zoomSnap:1,zoomDelta:1,preferCanvas:true,attributionControl:false,zoomControl:false,fadeAnimation:!isMobile(),zoomAnimation:!isMobile(),markerZoomAnimation:!isMobile()}); L.control.zoom({position:'bottomright'}).addTo(map);
     const oreHeatmap=createOreHeatmap({api,map,gameLatLng,relativePoint,language:()=>language,changed:()=>{requests['mineral-heatmap']?.abort();const state=layers['mineral-heatmap'];if(state){state.group.clearLayers();state.features=undefined;}refreshLayer('mineral-heatmap');}});
     const starCanvas=document.createElement('canvas');starCanvas.id='starCanvas';starCanvas.setAttribute('aria-hidden','true');map.getContainer().append(starCanvas);const starContext=starCanvas.getContext('2d'),stars=Array.from({length:720},(_,index)=>{const hash=n=>{const v=Math.sin(n*12.9898+78.233)*43758.5453;return v-Math.floor(v);};return {x:hash(index*3+1),y:hash(index*3+2),size:.45+hash(index*3+3)*1.35,phase:hash(index*3+4)*Math.PI*2,speed:.35+hash(index*3+5)*1.1,blue:hash(index*3+6)};});let starFrame=0;
-    function drawStars(time=0){const rect=map.getContainer().getBoundingClientRect(),dpr=window.devicePixelRatio||1,w=Math.max(1,Math.round(rect.width)),h=Math.max(1,Math.round(rect.height));if(starCanvas.width!==w*dpr||starCanvas.height!==h*dpr){starCanvas.width=w*dpr;starCanvas.height=h*dpr;}starContext.setTransform(dpr,0,0,dpr,0,0);starContext.clearRect(0,0,w,h);for(const star of stars){const alpha=.2+.8*(.5+.5*Math.sin(time*.001*star.speed+star.phase)),x=star.x*w,y=star.y*h;starContext.fillStyle=star.blue>.65?'rgba(190,220,255,'+alpha+')':'rgba(255,255,255,'+alpha+')';starContext.beginPath();starContext.arc(x,y,star.size,0,Math.PI*2);starContext.fill();}starFrame=requestAnimationFrame(drawStars);}requestAnimationFrame(drawStars);
+    function drawStars(time=0){starFrame=0;if(!starContext||!webSettings.values.stars||webSettings.paused())return;const rect=map.getContainer().getBoundingClientRect(),dpr=window.devicePixelRatio||1,w=Math.max(1,Math.round(rect.width)),h=Math.max(1,Math.round(rect.height));if(starCanvas.width!==w*dpr||starCanvas.height!==h*dpr){starCanvas.width=w*dpr;starCanvas.height=h*dpr;}starContext.setTransform(dpr,0,0,dpr,0,0);starContext.clearRect(0,0,w,h);for(const star of stars){const alpha=.2+.8*(.5+.5*Math.sin(time*.001*star.speed+star.phase)),x=star.x*w,y=star.y*h;starContext.fillStyle=star.blue>.65?'rgba(190,220,255,'+alpha+')':'rgba(255,255,255,'+alpha+')';starContext.beginPath();starContext.arc(x,y,star.size,0,Math.PI*2);starContext.fill();}starFrame=requestAnimationFrame(drawStars);}
+    function syncStars(){cancelAnimationFrame(starFrame);starFrame=0;starCanvas.hidden=!webSettings.values.stars;if(starContext&&webSettings.values.stars&&!webSettings.paused())starFrame=requestAnimationFrame(drawStars);}
+    syncStars();document.addEventListener('visibilitychange',syncStars);
     // Detail labels are visible only at UI zoom levels 13–15, including selected labels.
     function updateOverlayScale(){const element=map.getContainer(),line=Math.max(.5,Math.min(1,Math.pow(2,(map.getZoom()-nativeZoom)/4)));element.classList.toggle('map-labels-distant',map.getZoom()<13||map.getZoom()>15);element.style.setProperty('--preview-width',`${2*line}px`);element.style.setProperty('--walk-width',`${2.5*line}px`);element.style.setProperty('--jump-casing-width',`${4.5*line}px`);element.style.setProperty('--jump-width',`${3*line}px`);element.style.setProperty('--thin-width',`${1.5*line}px`);}
     function selectableMapLabel(layer){
@@ -389,7 +407,7 @@ function avatarImage(p){const labels=language==='zh'?{'waiting-client':'等待�
     // Coalesce event bursts, and leave rendering idle while dragging or in a hidden tab.
     const pendingLayers=new Set(),pendingTiles=new Set();
     let refreshTimer,tileTimer,moving=false,fullTileRefresh=false,tileRevision=0,playerListSignature='';
-    const refreshBlocked=()=>document.hidden||moving||!metadata;
+    const refreshBlocked=()=>webSettings.paused()||moving||!metadata;
     function scheduleLayers(){if(refreshTimer||refreshBlocked())return;refreshTimer=setTimeout(()=>{refreshTimer=undefined;if(refreshBlocked())return;for(const name of pendingLayers){if(requests[name])continue;pendingLayers.delete(name);fetchLayer(name);}},isMobile()?400:180);}
     function refreshLayer(name){if(!layers[name]?.visible)return;pendingLayers.add(name);scheduleLayers();}
     async function fetchLayer(name){
@@ -457,7 +475,9 @@ function avatarImage(p){const labels=language==='zh'?{'waiting-client':'等待�
     map.on('movestart',()=>{moving=true;});
     map.on('moveend',()=>{moving=false;scheduleLayers();scheduleTiles();});
     document.addEventListener('visibilitychange',()=>{
-      if(document.hidden){for(const [name,controller] of Object.entries(requests)){pendingLayers.add(name);controller.abort();}return;}
+      if(webSettings.paused()){followRequest?.abort();for(const [name,controller] of Object.entries(requests)){pendingLayers.add(name);controller.abort();}return;}
+      if(document.hidden)return;
+      followSelf();
       fullTileRefresh=true;refreshLayers();scheduleTiles();
     });
     const refreshLayers=()=>Object.keys(layers).forEach(refreshLayer);
@@ -493,7 +513,7 @@ function avatarImage(p){const labels=language==='zh'?{'waiting-client':'等待�
       map.setMinZoom(minimumZoom);viewReady=true;updateOverlayScale();setRenderer(rendererName);updateUrl();
       const manifest=await fetch(`${api}/layers/manifest`).then(r=>r.json());manifest.layers.forEach(def=>{const group=L.layerGroup(),visible=!def.forbidden&&(def.forced||layerVisibility.get(`layer:${def.id}`,def.visible));layers[def.id]={group,visible,defaultVisible:def.visible,forbidden:def.forbidden,forced:def.forced,scale:def.scale||1};if(visible)group.addTo(map);const row=document.createElement('li');row.className='layer-row';row.dataset.layer=def.id;row.innerHTML=`<input type="checkbox" ${visible?'checked':''}><label>${escapeHtml(t(`layer.${def.id}`))}</label>`;const [toggle,label]=row.children;label.onclick=()=>{toggle.checked=!toggle.checked;toggle.dispatchEvent(new Event('change'));};toggle.onchange=()=>{const policy=mapPolicy.layers?.[def.id]||layers[def.id];if(policy.forbidden||policy.forced){toggle.checked=!policy.forbidden;return;}layers[def.id].visible=toggle.checked;layerVisibility.set(`layer:${def.id}`,toggle.checked);toggle.checked?group.addTo(map):map.removeLayer(group);if(def.id==='roads'){roadNetworkPromise=undefined;roadNetworkExpires=0;if(measureActive&&measurePoints.length===2){currentRouteResult=null;updateRouteInfo(t('routeComputing'));planMeasuredRoute();}}if(def.id==='mineral-heatmap'){oreHeatmap.visible(toggle.checked);if(!toggle.checked)requests[def.id]?.abort();}if(toggle.checked)refreshLayer(def.id);};document.querySelector('#layers').append(row);});
       document.querySelector('#serverWebsite').textContent=metadata.serverName||'Vintage Story Server';document.querySelector('#lastUpdated').textContent=metadata.updatedAt?new Date(metadata.updatedAt).toLocaleString(language==='zh'?'zh-CN':'en-US'):'—';updateContributorsInfo();
-      applyMapPolicy(mapPolicy);applyLanguage();refreshLayers();updateZoomText();setInterval(()=>{if(!document.hidden){refreshLayer('players');refreshLayer('mounts');}},isMobile()?5000:2000);
+      applyMapPolicy(mapPolicy);applyLanguage();refreshLayers();updateZoomText();setInterval(()=>{if(!webSettings.paused()){followSelf();refreshLayer('players');refreshLayer('mounts');}},isMobile()?5000:2000);
     }
     function applyMapPolicy(value){
       const next=ServerMapManagement.normalize(value||{}),fogChanged=Object.entries({fogEnabled:true,shareExploration:false,adminsBypassFog:true}).some(([key,fallback])=>(mapPolicy[key]??fallback)!==(next[key]??fallback));
@@ -514,7 +534,7 @@ function avatarImage(p){const labels=language==='zh'?{'waiting-client':'等待�
       translocatorNetworkPromise=undefined;roadNetworkPromise=undefined;roadNetworkExpires=0;refreshLayers();if(measureActive&&measurePoints.length===2){currentRouteResult=null;updateRouteInfo(t('routeComputing'));planMeasuredRoute();}
     }
     function updateZoomText(){const detail=Math.max(0,map.getZoom()-nativeZoom),parent=Math.max(0,nativeZoom-map.getZoom()),blocksPerPixel=parent?Math.pow(2,parent):1/Math.pow(2,detail);document.querySelector('#zoom').textContent=`${t('level')} ${map.getZoom()} · ${blocksPerPixel>=1?blocksPerPixel+' '+t('blocksPixel'):'1 '+t('blockPixels')+'/'+Math.round(1/blocksPerPixel)+' '+t('pixel')}`;}
-    function applyLanguage(){oreHeatmap.translate();document.documentElement.lang=language==='zh'?'zh-CN':language==='pt'?'pt-BR':language;document.querySelectorAll('[data-i18n]').forEach(element=>element.textContent=t(element.dataset.i18n));document.querySelectorAll('[data-i18n-label]').forEach(element=>{const label=t(element.dataset.i18nLabel);element.setAttribute('aria-label',label);element.title=label;});document.querySelectorAll('[data-i18n-placeholder]').forEach(element=>element.placeholder=t(element.dataset.i18nPlaceholder));document.querySelectorAll('#layers [data-layer]').forEach(row=>row.querySelector('label').textContent=t(`layer.${row.dataset.layer}`));const languageSelect=document.querySelector('#language');languageSelect.value=language;languageSelect.title=t('languageName');languageSelect.setAttribute('aria-label',t('languageName'));document.querySelector('#pin').title=language==='zh'?'固定侧栏':'Pin sidebar';if(metadata){document.querySelector('#lastUpdated').textContent=metadata.updatedAt?new Date(metadata.updatedAt).toLocaleString(language==='zh'?'zh-CN':language==='pt'?'pt-BR':language):'—';updateContributorsInfo();}renderPlayerList();updateZoomText();notebook?.languageChanged();areas?.languageChanged();managementUi?.languageChanged();ServerMapPoiImages.configure(mapPolicy);if(currentRouteResult)drawRoute(currentRouteResult);else if(measureActive)updateRouteInfo(measurePoints.length===1?t('routeStartPlaced'):t('routeHelp'));}
+    function applyLanguage(){oreHeatmap.translate();webSettingsUi?.translate();document.documentElement.lang=language==='zh'?'zh-CN':language==='pt'?'pt-BR':language;document.querySelectorAll('[data-i18n]').forEach(element=>element.textContent=t(element.dataset.i18n));document.querySelectorAll('[data-i18n-label]').forEach(element=>{const label=t(element.dataset.i18nLabel);element.setAttribute('aria-label',label);element.title=label;});document.querySelectorAll('[data-i18n-placeholder]').forEach(element=>element.placeholder=t(element.dataset.i18nPlaceholder));document.querySelectorAll('#layers [data-layer]').forEach(row=>row.querySelector('label').textContent=t(`layer.${row.dataset.layer}`));const languageSelect=document.querySelector('#language');languageSelect.value=language;languageSelect.title=t('languageName');languageSelect.setAttribute('aria-label',t('languageName'));document.querySelector('#pin').title=language==='zh'?'固定侧栏':'Pin sidebar';if(metadata){document.querySelector('#lastUpdated').textContent=metadata.updatedAt?new Date(metadata.updatedAt).toLocaleString(language==='zh'?'zh-CN':language==='pt'?'pt-BR':language):'—';updateContributorsInfo();}renderPlayerList();updateZoomText();notebook?.languageChanged();areas?.languageChanged();managementUi?.languageChanged();ServerMapPoiImages.configure(mapPolicy);if(currentRouteResult)drawRoute(currentRouteResult);else if(measureActive)updateRouteInfo(measurePoints.length===1?t('routeStartPlaced'):t('routeHelp'));}
     async function copyText(value){try{await navigator.clipboard.writeText(value);}catch{const input=document.createElement('textarea');input.value=value;input.style.position='fixed';input.style.opacity='0';document.body.append(input);input.select();document.execCommand('copy');input.remove();}}
     const contextMenu=document.querySelector('#contextMenu');let contextPoint={x:0,z:0};function hideContext(){contextMenu.classList.remove('show');}
      map.on('contextmenu',event=>{if(event.originalEvent)L.DomEvent.preventDefault(event.originalEvent);contextPoint=localPoint(event.latlng);document.querySelector('#contextCoords').textContent=`X ${Math.round(contextPoint.x)}, Z ${Math.round(contextPoint.z)}`;contextMenu.classList.add('show');const x=Math.min(event.originalEvent?.clientX??innerWidth/2,innerWidth-contextMenu.offsetWidth-5),y=Math.min(event.originalEvent?.clientY??innerHeight/2,innerHeight-contextMenu.offsetHeight-5);contextMenu.style.left=`${Math.max(5,x)}px`;contextMenu.style.top=`${Math.max(5,y)}px`;});map.on('click dragstart zoomstart',hideContext);
@@ -622,6 +642,16 @@ document.querySelector('#nearestTranslocator').onclick=locateNearestTranslocator
     areas=ServerMapAreas.create({map,api,gameLatLng,gamePoint,getAuth:()=>authState,getMetadata:()=>metadata,getLanguage:()=>language,layerVisibility,cancelOtherTools:()=>{notebook.cancelMode();clearMeasurement();if(isMobile())mobilePanel(null);}});
     managementUi=ServerMapManagement.create({api,map,gameLatLng,getAuth:()=>authState,getLanguage:()=>language,getMetadata:()=>metadata,refreshPois:()=>refreshLayer('pois'),closePanels:()=>{if(isMobile())mobilePanel(null);},showSearch:()=>{if(isMobile())mobilePanel('search');},invalidateFog:()=>{notebook.privacyChanged().catch(console.debug);areas?.privacyChanged();}});
     managementUi.settings(mapPolicy);
+    webSettingsUi=webSettings.create({getLanguage:()=>language,closePanels:()=>{if(isMobile())mobilePanel(null);},onChange:key=>{
+      if(key==='stars'||key==='pauseBackground')syncStars();
+      if(key==='followSelf'){followRequest?.abort();if(webSettings.values.followSelf)setTimeout(followSelf,0);}
+      if(key==='pauseBackground'){
+        if(webSettings.paused()){followRequest?.abort();for(const [name,controller] of Object.entries(requests)){pendingLayers.add(name);controller.abort();}}
+        else{refreshLayers();scheduleTiles();followSelf();}
+      }
+    }});
+    document.getElementById('webSettingsDialog').addEventListener('close',()=>followSelf());
+    map.on('dragstart',stopFollowing);
     const removeLayerInfoButtons=()=>document.querySelectorAll('#layers .layer-info').forEach(button=>button.remove());removeLayerInfoButtons();new MutationObserver(removeLayerInfoButtons).observe(document.querySelector('#layers'),{childList:true});
     document.getElementById('trackingButton')?.remove();
     const langBtn=document.getElementById('languageButton'),langSelect=document.getElementById('language'); if(langBtn&&langSelect){langSelect.hidden=true;langSelect.style.position='fixed';langSelect.style.zIndex='1500';langSelect.style.width='180px';langBtn.onclick=e=>{e.preventDefault();e.stopPropagation();const show=langSelect.hidden;langSelect.hidden=!show;if(show){const r=langBtn.getBoundingClientRect();langSelect.style.left=Math.max(8,r.right-180)+'px';langSelect.style.top=r.bottom+5+'px';langSelect.focus();}};document.addEventListener('pointerdown',e=>{if(e.target!==langSelect&&!langBtn.contains(e.target))langSelect.hidden=true;});}
@@ -632,12 +662,12 @@ document.querySelector('#nearestTranslocator').onclick=locateNearestTranslocator
     }
     const dockObserver=new ResizeObserver(updateTopDock);dockObserver.observe(topDock);dockObserver.observe(document.querySelector('#mapActions'));window.addEventListener('resize',updateTopDock);updateTopDock();
     events.addEventListener('area-markers',()=>areas.refresh());
-    events.addEventListener('visibility',()=>{invalidateTeleportVisibility();managementUi?.privacyChanged();notebook.privacyChanged().catch(console.debug);areas?.privacyChanged();});
+    events.addEventListener('visibility',()=>{followRequest?.abort();invalidateTeleportVisibility();managementUi?.privacyChanged();notebook.privacyChanged().catch(console.debug);areas?.privacyChanged();});
     let explorationRefreshTimer=0,lastExplorationRefresh=0;
     function scheduleExplorationRefresh(){
-      if(explorationRefreshTimer||document.hidden||!authState.authenticated||!(mapPolicy.fogEnabled??true)||(authState.admin&&(mapPolicy.adminsBypassFog??true)))return;
+      if(explorationRefreshTimer||webSettings.paused()||!authState.authenticated||!(mapPolicy.fogEnabled??true)||(authState.admin&&(mapPolicy.adminsBypassFog??true)))return;
       explorationRefreshTimer=setTimeout(()=>{
-        explorationRefreshTimer=0;if(document.hidden)return;lastExplorationRefresh=Date.now();
+        explorationRefreshTimer=0;if(webSettings.paused())return;lastExplorationRefresh=Date.now();
         refreshPrivateTiles();refreshLayers();areas?.refresh();notebook?.explorationChanged().catch(console.debug);
       },Math.max(200,2000-(Date.now()-lastExplorationRefresh)));
     }
