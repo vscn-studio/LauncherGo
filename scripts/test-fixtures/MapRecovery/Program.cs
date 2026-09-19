@@ -23,6 +23,7 @@ static class Checks
     private static void Require(bool value, string message) { if (!value) throw new Exception(message); }
     public static async Task Run()
     {
+        SnowSurfaceChecks.Run();
         // Synthetic save records use the game's TreeAttribute serializer, not
         // BlockEntity construction or any loaded player/world state.
         var tree = new TreeAttribute();

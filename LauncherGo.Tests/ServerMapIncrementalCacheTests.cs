@@ -1,4 +1,6 @@
 using ServerMap.Render;
+using System.IO.Compression;
+using System.Security.Cryptography;
 using Xunit;
 
 namespace LauncherGo.Tests;
@@ -7,6 +9,33 @@ public sealed class ServerMapIncrementalCacheTests : IDisposable
 {
     private readonly string root = Directory.CreateTempSubdirectory("map-incremental-").FullName;
     private string Database => Path.Combine(root, "cache-state.db");
+    [Theory]
+    [InlineData(32)]
+    [InlineData(512)]
+    public void OldSnowSurfaceSelectionRequiresExtractionEvenWithValidChecksum(int width)
+    {
+        var path = Path.Combine(root, "old-surface.br");
+        new SurfaceRegion(width).Save(path);
+        Assert.NotNull(SurfaceRegion.Load(path));
+        using var payload = new MemoryStream();
+        using (var input = File.OpenRead(path))
+        {
+            input.Position = 32;
+            using var compressed = new BrotliStream(input, CompressionMode.Decompress);
+            compressed.CopyTo(payload);
+        }
+        var bytes = payload.ToArray();
+        // v1 used the same binary layout, but persisted soil where snowy
+        // stairs stood. Reject semantic staleness, not just corrupt files.
+        BitConverter.GetBytes(1).CopyTo(bytes, 0);
+        using (var output = File.Create(path))
+        {
+            output.Write(SHA256.HashData(bytes));
+            using var compressed = new BrotliStream(output, CompressionLevel.Fastest);
+            compressed.Write(bytes);
+        }
+        Assert.Null(SurfaceRegion.Load(path));
+    }
     [Fact]
     public void RestartRestoresWorkAndCleanMarkerWithoutDiscoveringRegionsAgain()
     {

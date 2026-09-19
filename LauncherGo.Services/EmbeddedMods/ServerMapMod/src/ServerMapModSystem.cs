@@ -18,7 +18,7 @@ namespace ServerMap;
 public sealed class ServerMapModSystem : ModSystem
 {
     public ServerMapWebServer? WebServer => web;
-    private const string CacheFormatVersion = "2d-live-flat-5";
+    private const string CacheFormatVersion = "2d-live-flat-6";
     private ICoreServerAPI? sapi; private WorldDatabaseReader? db; private ServerMapWebServer? web; private ServerMapConfig? config; private Render.RenderQueue? queue; private Render.MapPalette? materials; private ClientColormapReceiver? colormapReceiver; private IServerNetworkChannel? colormapChannel; private string dataRoot="", configPath="";
     private MapCacheState? cache;
     private Dictionary<string, long> restoredDirty = new();

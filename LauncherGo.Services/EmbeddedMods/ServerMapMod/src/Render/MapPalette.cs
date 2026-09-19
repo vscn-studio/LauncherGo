@@ -21,6 +21,7 @@ public sealed class MapPalette
         public bool IsRoof { get; init; }
         public bool IsGroundStorage { get; init; }
         public bool IsLooseRock { get; init; }
+        public int? SnowFreeId { get; init; }
     }
 
     private readonly Entry?[] entries;
@@ -73,6 +74,8 @@ public sealed class MapPalette
     public static MapPalette Capture(ICoreAPI api)
     {
         var blocks = api.World.Blocks;
+        var blocksByCode = blocks.Where(block => block?.Code != null)
+            .ToDictionary(block => block.Code.ToString(), StringComparer.Ordinal);
         var result = new Entry?[Math.Max(1, blocks.Where(block => block != null).Select(block => block.Id).DefaultIfEmpty().Max() + 1)];
         foreach (var block in blocks.Where(block => block?.Code != null))
         {
@@ -93,17 +96,22 @@ public sealed class MapPalette
             // while glacier ice remains land and ordinary ice remains water.
             var water = block.BlockMaterial == EnumBlockMaterial.Water
                 || (ice && !path.Equals("glacierice", StringComparison.OrdinalIgnoreCase));
-            // LiveMap only substitutes the block under snow overlays. Plants
-            // remain the visible top block; lowering them can turn shallow
-            // water columns into soil and creates false shorelines.
-            var cover = overlay;
+            // Only standalone snow occupies a cell above the visible block.
+            // A ceramic stair/wooden slab with cover=snow is still that block
+            // at the same height, not a separate layer to step down through.
+            var cover = block.BlockMaterial == EnumBlockMaterial.Snow && !micro;
+            int? snowFreeId = null;
+            if (!cover && !micro && block.Variant["cover"] is "snow" or "snow2" or "snow3"
+                && blocksByCode.TryGetValue(block.CodeWithVariant("cover", "free").ToString(), out var snowFree)
+                && snowFree.Id > 0 && !snowFree.IsMissing)
+                snowFreeId = snowFree.Id;
             var placeholder = block.BlockMaterial == EnumBlockMaterial.Meta
                 || path.StartsWith("multiblock-", StringComparison.OrdinalIgnoreCase)
                 || path.Equals("clutter", StringComparison.OrdinalIgnoreCase)
                 || path.StartsWith("clutter-", StringComparison.OrdinalIgnoreCase)
                 || path.StartsWith("rocktyped-rubble", StringComparison.OrdinalIgnoreCase)
                 || path.StartsWith("banner-", StringComparison.OrdinalIgnoreCase);
-            result[block.Id] = new Entry(block.Id, code, color, water, ice, lava, overlay, cover, micro, placeholder, block.Id == 0) { IsRoof = RoofingColors.IsRoof(block), IsGroundStorage = GroundStorageColors.IsStorage(block), IsLooseRock = block is BlockLooseRock };
+            result[block.Id] = new Entry(block.Id, code, color, water, ice, lava, overlay, cover, micro, placeholder, block.Id == 0) { IsRoof = RoofingColors.IsRoof(block), IsGroundStorage = GroundStorageColors.IsStorage(block), IsLooseRock = block is BlockLooseRock, SnowFreeId = snowFreeId };
         }
         result[0] ??= new Entry(0, "game:air", "land", false, false, false, false, false, false, false, true);
         api.Logger.Notification("ServerMap 2D palette captured {0} block definitions.", result.Count(entry => entry != null));
@@ -126,6 +134,7 @@ public sealed class MapPalette
     public bool IsMapWaterBlock(int id) => Get(id).IsWater;
     public bool IsMapOverlay(int id) => Get(id).IsOverlay;
     public bool IsSurfaceCover(int id) => Get(id).IsSurfaceCover;
+    public int WithoutSnowCover(int id) => Get(id).SnowFreeId ?? id;
     public bool IsIce(int id) => Get(id).IsIce;
     public bool IsLava(int id) => Get(id).IsLava;
     public bool IsMicroBlock(int id) => Get(id).IsMicroBlock;

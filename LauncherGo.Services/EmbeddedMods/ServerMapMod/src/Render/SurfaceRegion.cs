@@ -8,7 +8,10 @@ namespace ServerMap.Render;
 public sealed class SurfaceRegion(int width = 512)
 {
     public int Width { get; } = width;
-    public const int Format = 1, Size = 512, Pixels = Size * Size;
+    // v1 surfaces discarded snow-covered stairs/slabs and retained the block
+    // underneath. Re-extract those caches; recoloring cannot recover the lost
+    // block or height. Existing PNGs remain available during background repair.
+    public const int Format = 2, Size = 512, Pixels = Size * Size;
     public ushort[] Heights { get; } = new ushort[width * width];
     public bool[] Valid { get; } = new bool[width * width];
     public string[] Codes { get; } = Enumerable.Repeat("game:air", width * width).ToArray();

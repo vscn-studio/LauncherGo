@@ -76,40 +76,7 @@ public sealed class MapRenderer
                 {
                     var index = z * 32 + x;
                     var y = Math.Clamp((int)(rainValues?[index] ?? terrainValues?[index] ?? 0), 0, mapSizeY - 1);
-                    var solidId = ReadMapBlock(chunks, cx, cz, x, y, z);
-                    var fluidId = ReadFluid(chunks, x, y, z);
-                    // A column's default layer is solid.  Vintage Story stores
-                    // water and lava separately, however, so an air/default
-                    // block must fall back to the fluid layer at the same cell.
-                    var id = solidId;
-                    if (id == 0 || materials.IsEmpty(id) || materials.IsPlaceholder(id)) id = fluidId;
-                    // LiveMap's BlocksToIgnore contains snow overlays.  It
-                    // selects the block immediately underneath and lowers the
-                    // reported height by one, rather than repeatedly scanning
-                    // down until an arbitrary non-snow block is found.
-                    if (id != MapPalette.MissingBlockId && materials.IsSurfaceCover(id))
-                    {
-                        y = Math.Max(0, y - 1);
-                        solidId = ReadMapBlock(chunks, cx, cz, x, y, z);
-                        fluidId = ReadFluid(chunks, x, y, z);
-                        id = solidId == 0 || materials.IsEmpty(solidId) || materials.IsPlaceholder(solidId) ? fluidId : solidId;
-                    }
-                    if (id == 0 || materials.IsEmpty(id) || materials.IsPlaceholder(id))
-                    {
-                        // RainHeightMap may point at an air cell above a cave
-                        // entrance. Search the complete saved column, not an
-                        // arbitrary eight-block window, so the visible cave
-                        // floor still receives a map pixel.
-                        for (var sampleY = y - 1; sampleY >= 0; sampleY--)
-                        {
-                            solidId = ReadMapBlock(chunks, cx, cz, x, sampleY, z);
-                            fluidId = ReadFluid(chunks, x, sampleY, z);
-                            var candidate = solidId == 0 || materials.IsEmpty(solidId) || materials.IsPlaceholder(solidId) ? fluidId : solidId;
-                            if (candidate == MapPalette.MissingBlockId) break;
-                            if (candidate == 0 || materials.IsEmpty(candidate) || materials.IsPlaceholder(candidate)) continue;
-                            id = candidate; y = sampleY; break;
-                        }
-                    }
+                    var id = ReadSurfaceBlock(chunks, cx, cz, x, ref y, z);
                     var pixelX = (singleColumn ? 0 : chunkOffsetX) * 32 + x;
                     var pixelZ = (singleColumn ? 0 : chunkOffsetZ) * 32 + z;
                     var pixel = pixelZ * size + pixelX;
@@ -239,6 +206,40 @@ public sealed class MapRenderer
         if (!chunks.TryGetValue(chunkY, out var chunk) || chunk == null) return 0;
         var index = x + z * 32 + (y & 31) * 1024;
         return chunk.Data.GetBlockId(index, 0);
+    }
+
+    private int ReadSurfaceBlock(IReadOnlyDictionary<int, ServerChunk?> chunks, int cx, int cz, int x, ref int y, int z)
+    {
+        var solidId = ReadMapBlock(chunks, cx, cz, x, y, z);
+        var fluidId = ReadFluid(chunks, x, y, z);
+        // Preserve the default solid layer, falling back to fluids at the same cell.
+        var id = solidId == 0 || materials.IsEmpty(solidId) || materials.IsPlaceholder(solidId) ? fluidId : solidId;
+        // Standalone snow still selects exactly one cell below. Snow-covered
+        // stairs/slabs remain at their own height and are normalized below.
+        if (id != MapPalette.MissingBlockId && materials.IsSurfaceCover(id))
+        {
+            y = Math.Max(0, y - 1);
+            solidId = ReadMapBlock(chunks, cx, cz, x, y, z);
+            fluidId = ReadFluid(chunks, x, y, z);
+            id = solidId == 0 || materials.IsEmpty(solidId) || materials.IsPlaceholder(solidId) ? fluidId : solidId;
+        }
+        if (id == 0 || materials.IsEmpty(id) || materials.IsPlaceholder(id))
+        {
+            // RainHeightMap may point at air above a cave entrance. Search the
+            // complete saved column so the visible cave floor receives a pixel.
+            for (var sampleY = y - 1; sampleY >= 0; sampleY--)
+            {
+                solidId = ReadMapBlock(chunks, cx, cz, x, sampleY, z);
+                fluidId = ReadFluid(chunks, x, sampleY, z);
+                var candidate = solidId == 0 || materials.IsEmpty(solidId) || materials.IsPlaceholder(solidId) ? fluidId : solidId;
+                if (candidate == MapPalette.MissingBlockId) break;
+                if (candidate == 0 || materials.IsEmpty(candidate) || materials.IsPlaceholder(candidate)) continue;
+                id = candidate; y = sampleY; break;
+            }
+        }
+        // Use the registered cover=free counterpart without changing height
+        // or any material/orientation variant. Missing counterparts stay visible.
+        return materials.WithoutSnowCover(id);
     }
     private static int ReadFluid(IReadOnlyDictionary<int, ServerChunk?> chunks, int x, int y, int z)
     {

@@ -27,6 +27,9 @@ static class DeferredGenerationChecks
             Set(web, "root", root);
             Set(web, "translocators", new TranslocatorIndex(Path.Combine(root, "translocators.json"), _ => { }));
             Set(web, "knownRegions", new ConcurrentDictionary<(int X, int Z), byte>());
+            Set(web, "roads", new RoadIndex(null!, root, null!, null!));
+            Set(web, "events", new LiveEventHub());
+            Set(web, "layerVersions", new ConcurrentDictionary<string, long>());
             var system = new ServerMapModSystem();
             Set(system, "cache", state); Set(system, "web", web); Set(system, "saveAdapter", adapter);
             object? Invoke(string method, params object?[] args) => typeof(ServerMapModSystem).GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(system, args);

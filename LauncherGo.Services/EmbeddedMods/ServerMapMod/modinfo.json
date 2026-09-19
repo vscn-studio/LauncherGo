@@ -4,7 +4,7 @@
   "name": "ServerMap",
   "authors": ["VSCN-Studio"],
   "description": "2D and free-flight 3D browser maps for Vintage Story servers.",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "side": "Universal",
   "dependencies": { "game": "1.22.3" }
 }
