@@ -6,6 +6,7 @@
 
 - 新增按档案保存的独立语音网页，可通过 LauncherGo 启停并使用本机网页端口访问，不依赖游戏服务器进程的启停。
 - 对接 SimpleVoiceChat 网页麦克风：支持一次性 Token 首次配对、浏览器设备凭证复用、重新获取凭证、连接状态和后端健康状态显示。
+- SimpleVoiceChat 网页麦克风默认关闭；使用前需在服务端 `SimpleVoiceChat.Server.json` 将 `EnableWebMicrophone` 设置为 `true`，模组接入端口默认是本机 `15082`。
 - 支持按键说话、发送范围/频道控制、网页录音测试、输入阈值与噪声门、48 kHz 单声道 PCM 音频以及麦克风音量 HUD。
 - 语音网页支持 HTTP 本机访问和 HTTPS 证书配置；远程浏览器使用麦克风时可通过 HTTPS 访问，凭证和音频由 SimpleVoiceChat 校验与转发。
 
