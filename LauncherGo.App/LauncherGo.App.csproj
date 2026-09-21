@@ -19,6 +19,7 @@
   <ItemGroup>
     <AvaloniaResource Include="Assets\**\*" />
     <Content Include="..\docs\launchergo-introduction.html" Link="launchergo-introduction.html" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\docs\voice\**\*" Link="voice\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\NOTICE" Link="NOTICE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\THIRD-PARTY-NOTICES.md" Link="THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
@@ -50,6 +51,7 @@
                       ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\LauncherGo.ServerMapHost\LauncherGo.ServerMapHost.csproj"
                       ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\LauncherGo.VoiceHost\LauncherGo.VoiceHost.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\LauncherGo.Ui\LauncherGo.Ui.csproj" />
   </ItemGroup>
 
@@ -251,5 +253,28 @@
       <_GatewayHostPublishFile Include="$(_GatewayHostPublishDir)LauncherGo.GatewayHost.runtimeconfig.json" Condition="Exists('$(_GatewayHostPublishDir)LauncherGo.GatewayHost.runtimeconfig.json')" />
     </ItemGroup>
     <Copy SourceFiles="@(_GatewayHostPublishFile)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="CopyVoiceHostBuildOutput" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
+    <MSBuild Projects="$(MSBuildProjectDirectory)\..\LauncherGo.VoiceHost\LauncherGo.VoiceHost.csproj" Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
+      <Output TaskParameter="TargetOutputs" ItemName="_VoiceHostTarget" />
+    </MSBuild>
+    <ItemGroup>
+      <_VoiceHostBuildFile Include="@(_VoiceHostTarget)" />
+      <_VoiceHostBuildFile Include="@(_VoiceHostTarget->'%(RootDir)%(Directory)LauncherGo.VoiceHost.exe')" Condition="'$(OS)' == 'Windows_NT'" />
+      <_VoiceHostBuildFile Include="@(_VoiceHostTarget->'%(RootDir)%(Directory)LauncherGo.VoiceHost')" Condition="'$(OS)' != 'Windows_NT'" />
+      <_VoiceHostBuildFile Include="@(_VoiceHostTarget->'%(RootDir)%(Directory)LauncherGo.VoiceHost.deps.json')" />
+      <_VoiceHostBuildFile Include="@(_VoiceHostTarget->'%(RootDir)%(Directory)LauncherGo.VoiceHost.runtimeconfig.json')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_VoiceHostBuildFile)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="PublishVoiceHost" AfterTargets="Publish" Condition="'$(RuntimeIdentifier)' != '' and Exists('$(PublishDir)')">
+    <PropertyGroup>
+      <_VoiceHostPublishDir>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)voicehost-publish'))\</_VoiceHostPublishDir>
+    </PropertyGroup>
+    <MSBuild Projects="$(MSBuildProjectDirectory)\..\LauncherGo.VoiceHost\LauncherGo.VoiceHost.csproj" Targets="Publish"
+             Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=$(LauncherGoHostSelfContained);PublishSingleFile=$(LauncherGoHostPublishSingleFile);IncludeNativeLibrariesForSelfExtract=$(LauncherGoHostSelfContained);DebugType=None;DebugSymbols=false;PublishDir=$(_VoiceHostPublishDir)" />
+    <ItemGroup><_VoiceHostPublishFile Include="$(_VoiceHostPublishDir)**\*" /></ItemGroup>
+    <Copy SourceFiles="@(_VoiceHostPublishFile)" DestinationFolder="$(PublishDir)VoiceHost\%(RecursiveDir)" SkipUnchangedFiles="true" />
   </Target>
 </Project>

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AppHostDotNetSearch Condition="'$(SelfContained)' != 'true'">Global</AppHostDotNetSearch>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\LauncherGo.Services\LauncherGo.Services.csproj" />
+    <EmbeddedResource Include="..\docs\voice\index.html" LogicalName="LauncherGo.Voice.index.html" />
+    <EmbeddedResource Include="..\docs\voice\assets\*" LogicalName="LauncherGo.Voice.assets.%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

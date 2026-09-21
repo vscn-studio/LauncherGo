@@ -12,6 +12,12 @@ namespace LauncherGo.Services;
 public class InstanceModService(IInstanceServerConfigService serverConfigService) : IInstanceModService
 {
     private static readonly HttpClient UpdateHttpClient = CreateUpdateHttpClient();
+    private static readonly JsonDocumentOptions ModInfoJsonOptions = new()
+    {
+        AllowTrailingCommas = true,
+        CommentHandling = JsonCommentHandling.Skip,
+        MaxDepth = 64
+    };
 
     private static readonly HashSet<string> BuiltInDependencyIds = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -369,14 +375,17 @@ public class InstanceModService(IInstanceServerConfigService serverConfigService
         HashSet<string> disabledSet,
         string modConfigPath)
     {
-        var node = JsonNode.Parse(modInfoJson) as JsonObject;
+        // Vintage Story mods in the wild commonly contain a trailing comma or
+        // comments. Be permissive for modinfo.json only; launcher-owned config
+        // files continue to use their normal strict parsing rules.
+        var node = JsonNode.Parse(modInfoJson, nodeOptions: null, documentOptions: ModInfoJsonOptions) as JsonObject;
         if (node is null)
             return BuildFallbackEntry(filePath, "InvalidMetadata", disabledSet, modConfigPath);
 
-        var modId = GetMetadataProperty(node, "modid")?.GetValue<string>() ?? Path.GetFileNameWithoutExtension(filePath);
-        var name = GetMetadataProperty(node, "name")?.GetValue<string>();
-        var version = GetMetadataProperty(node, "version")?.GetValue<string>() ?? "unknown";
-        var side = GetMetadataProperty(node, "side")?.GetValue<string>();
+        var modId = ReadMetadataString(GetMetadataProperty(node, "modid")) ?? Path.GetFileNameWithoutExtension(filePath);
+        var name = ReadMetadataString(GetMetadataProperty(node, "name"));
+        var version = ReadMetadataString(GetMetadataProperty(node, "version")) ?? "unknown";
+        var side = ReadMetadataString(GetMetadataProperty(node, "side"));
         var dependencies = ReadDependencies(GetMetadataProperty(node, "dependencies"));
         var disabled = disabledSet.Contains(modId) || disabledSet.Contains($"{modId}@{version}");
 
@@ -429,7 +438,7 @@ public class InstanceModService(IInstanceServerConfigService serverConfigService
                     dependencies.Add(new ModDependency
                     {
                         ModId = pair.Key,
-                        Version = pair.Value?.GetValue<string>()
+                        Version = ReadMetadataString(pair.Value)
                     });
                 }
 
@@ -438,13 +447,13 @@ public class InstanceModService(IInstanceServerConfigService serverConfigService
                 foreach (var dependencyNode in dependenciesArray)
                 {
                     if (dependencyNode is not JsonObject dependencyItem) continue;
-                    var modId = GetMetadataProperty(dependencyItem, "modid")?.GetValue<string>();
+                    var modId = ReadMetadataString(GetMetadataProperty(dependencyItem, "modid"));
                     if (string.IsNullOrWhiteSpace(modId)) continue;
 
                     dependencies.Add(new ModDependency
                     {
                         ModId = modId,
-                        Version = GetMetadataProperty(dependencyItem, "version")?.GetValue<string>()
+                        Version = ReadMetadataString(GetMetadataProperty(dependencyItem, "version"))
                     });
                 }
 
@@ -535,6 +544,22 @@ public class InstanceModService(IInstanceServerConfigService serverConfigService
         }
 
         return null;
+    }
+
+    private static string? ReadMetadataString(JsonNode? value)
+    {
+        if (value is null)
+            return null;
+
+        return value switch
+        {
+            JsonValue jsonValue when jsonValue.TryGetValue<string>(out var text) => text,
+            JsonValue jsonValue when jsonValue.TryGetValue<int>(out var integer) => integer.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            JsonValue jsonValue when jsonValue.TryGetValue<long>(out var longValue) => longValue.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            JsonValue jsonValue when jsonValue.TryGetValue<double>(out var number) => number.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            JsonValue jsonValue when jsonValue.TryGetValue<bool>(out var boolean) => boolean ? "true" : "false",
+            _ => null
+        };
     }
 
     private static string ResolveModConfigPath(string modConfigPath, string modId)

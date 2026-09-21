@@ -51,6 +51,39 @@ public sealed class InstanceModServiceTests
     }
 
     [Fact]
+    public async Task GetModsAsync_AcceptsTrailingCommasAndCommentsInModInfo()
+    {
+        var directory = Directory.CreateTempSubdirectory("launchergo-mod-lenient-metadata-");
+        try
+        {
+            var modDirectory = Directory.CreateDirectory(Path.Combine(directory.FullName, "Mods", "legacy-mod"));
+            await File.WriteAllTextAsync(
+                Path.Combine(modDirectory.FullName, "modinfo.json"),
+                """
+                {
+                  // Older mods sometimes leave a comma after the final field.
+                  "modid": "legacy-mod",
+                  "name": "Legacy Mod",
+                  "version": 3.1,
+                }
+                """);
+
+            var service = new InstanceModService(new StubServerConfigService());
+            var mods = await service.GetModsAsync(new InstanceProfile { DirectoryPath = directory.FullName });
+
+            var mod = Assert.Single(mods);
+            Assert.Equal("legacy-mod", mod.ModId);
+            Assert.Equal("Legacy Mod", mod.Name);
+            Assert.Equal("3.1", mod.Version);
+            Assert.Equal("OK", mod.Status);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ImportModsAsync_ImportsZipFilesAndIgnoresDirectories()
     {
         var directory = Directory.CreateTempSubdirectory("launchergo-mod-import-");

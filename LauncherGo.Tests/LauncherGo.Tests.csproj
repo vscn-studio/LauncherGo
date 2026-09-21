@@ -21,6 +21,7 @@
     <ProjectReference Include="..\LauncherGo.Services\LauncherGo.Services.csproj" />
     <ProjectReference Include="..\LauncherGo.Ui\LauncherGo.Ui.csproj" />
     <ProjectReference Include="..\LauncherGo.ServerMapHost\LauncherGo.ServerMapHost.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\LauncherGo.VoiceHost\LauncherGo.VoiceHost.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>

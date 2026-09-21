@@ -1209,6 +1209,7 @@
                                     <Button x:Name="ConnectionFrpTabButton" Classes="SidebarNavButton" Content="FRP" Click="OnConnectionFrpTabClick" />
                                     <Button x:Name="ConnectionEasyTierTabButton" Classes="SidebarNavButton" Content="EasyTier" Click="OnConnectionEasyTierTabClick" />
                                     <Button x:Name="ConnectionGatewayTabButton" Classes="SidebarNavButton" Content="网关" Click="OnConnectionGatewayTabClick" />
+                                    <Button x:Name="ConnectionVoiceTabButton" Classes="SidebarNavButton" Content="语音" Click="OnConnectionVoiceTabClick" />
 
                                     <TextBlock x:Name="SettingsNavSectionTitleTextBlock" Classes="SidebarSectionTitle" Text="设置" />
                                     <Button x:Name="ServerSettingsTabButton" Classes="SidebarNavButton" Content="服务器设置" Click="OnServerSettingsTabClick" />
@@ -3555,6 +3556,41 @@
                                                     </Grid>
                                                 </Grid>
                                             </Border>
+                                                </StackPanel>
+                                            </Grid>
+                                        </StackPanel>
+                                    </ScrollViewer>
+
+                                    <ScrollViewer x:Name="ConnectionVoicePanel" IsVisible="False" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Hidden">
+                                        <StackPanel Spacing="10">
+                                            <WrapPanel Orientation="Horizontal">
+                                                <Button Margin="0,0,8,8" x:Name="VoiceClearButton" Classes="SecondaryActionButton DangerButton" Content="清空" Click="OnVoiceClearClick" />
+                                                <Button Margin="0,0,8,8" x:Name="VoiceBackButton" Classes="SecondaryActionButton" Content="返回" Click="OnVoiceBackClick" IsVisible="False" />
+                                                <Button Margin="0,0,8,8" x:Name="VoiceSaveButton" Classes="ActionButton" Content="保存" Click="OnVoiceSaveClick" IsVisible="False" />
+                                                <Button Margin="0,0,8,8" x:Name="VoiceRefreshButton" Classes="SecondaryActionButton" Content="刷新" Click="OnVoiceRefreshClick" />
+                                                <Button Margin="0,0,8,8" x:Name="VoiceToggleButton" Classes="SecondaryActionButton" Content="启动语音网页" Click="OnVoiceToggleClick" IsVisible="False" />
+                                                <Button Margin="0,0,8,8" x:Name="VoiceOpenWebButton" Classes="SecondaryActionButton" Content="打开语音网页" Click="OnVoiceOpenWebClick" IsVisible="False" />
+                                            </WrapPanel>
+                                            <TextBlock x:Name="VoiceStatusTextBlock" Classes="ConfigHintText" TextWrapping="Wrap" />
+                                            <Grid>
+                                                <Grid x:Name="VoiceListPanel" RowDefinitions="Auto,*"><Border Grid.Row="0" Classes="TableHeader"><Grid ColumnDefinitions="44,1.2*,2.4*,1*,Auto" ColumnSpacing="8"><TextBlock Classes="TableHeaderText" Text="选择" HorizontalAlignment="Center" /><TextBlock Grid.Column="1" Classes="TableHeaderText" Text="服务器名称" /><TextBlock Grid.Column="2" Classes="TableHeaderText" Text="语音网页地址" /><TextBlock Grid.Column="3" Classes="TableHeaderText" Text="状态" /><TextBlock Grid.Column="4" Classes="TableHeaderText" Text="操作" HorizontalAlignment="Center" /></Grid></Border><Border Grid.Row="1" Classes="TableBody"><ItemsControl x:Name="VoiceConfigItemsControl"><ItemsControl.ItemTemplate><DataTemplate><Border Classes="TableRow"><Grid ColumnDefinitions="44,1.2*,2.4*,1*,Auto" ColumnSpacing="8"><CheckBox Classes="TableSelectCheck" IsChecked="{Binding IsSelected, Mode=TwoWay}" /><TextBlock Grid.Column="1" Classes="TableCellText" Text="{Binding ProfileName}" FontWeight="SemiBold" /><TextBlock Grid.Column="2" Classes="TableCellText" Text="{Binding Url}" TextTrimming="CharacterEllipsis" /><TextBlock Grid.Column="3" Classes="TableCellText" Text="{Binding StatusText}" /><Button Grid.Column="4" Classes="SecondaryActionButton" Tag="{Binding}" Content="修改" Click="OnVoiceEditConfigClick" /></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></Border></Grid>
+                                                <StackPanel x:Name="VoiceEditorPanel" Spacing="10" IsVisible="False">
+                                                    <Border Classes="ConfigCard">
+                                                        <StackPanel Spacing="10">
+                                                            <TextBlock Classes="ConfigSectionTitle" Text="独立语音网页" />
+                                                            <WrapPanel Orientation="Horizontal">
+                                                                <StackPanel Classes="ToggleField"><TextBlock Classes="ConfigFieldLabel" Text="启用语音网页" /><ToggleSwitch x:Name="VoiceEnabledCheckBox" Classes="LabelledToggle" /></StackPanel>
+                                                                <StackPanel Classes="ToggleField"><TextBlock Classes="ConfigFieldLabel" Text="启用 HTTPS" /><ToggleSwitch x:Name="VoiceHttpsCheckBox" Classes="LabelledToggle" /></StackPanel>
+                                                                <StackPanel Classes="ConfigFormField"><TextBlock Classes="ConfigFieldLabel" Text="网页端口" /><NumericUpDown x:Name="VoiceListenPortNumericUpDown" Classes="CompactNumber" Minimum="1024" Maximum="65535" /></StackPanel>
+                                                                <StackPanel Classes="ConfigFormField"><TextBlock Classes="ConfigFieldLabel" Text="模组接入端口" /><NumericUpDown x:Name="VoiceBackendPortNumericUpDown" Classes="CompactNumber" Minimum="1024" Maximum="65535" /></StackPanel>
+                                                            </WrapPanel>
+                                                            <TextBlock Classes="ConfigFieldLabel" Text="网页监听地址" /><TextBox x:Name="VoiceListenAddressTextBox" Classes="CompactInput" PlaceholderText="127.0.0.1" />
+                                                            <TextBlock Classes="ConfigFieldLabel" Text="公开 URL（可选）" />
+                                                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8"><TextBox x:Name="VoicePublicUrlTextBox" Classes="CompactInput" PlaceholderText="http://127.0.0.1:5082/" /><Button Grid.Column="1" Classes="SecondaryActionButton" Content="复制地址" Click="OnVoiceCopyUrlClick" /></Grid>
+                                                            <TextBlock Classes="ConfigFieldLabel" Text="HTTPS 证书路径" /><TextBox x:Name="VoiceCertificateTextBox" Classes="CompactInput" PlaceholderText=".crt / .pem" />
+                                                            <TextBlock Classes="ConfigFieldLabel" Text="HTTPS 私钥路径" /><TextBox x:Name="VoicePrivateKeyTextBox" Classes="CompactInput" PlaceholderText=".key / .pem" />
+                                                        </StackPanel>
+                                                    </Border>
                                                 </StackPanel>
                                             </Grid>
                                         </StackPanel>

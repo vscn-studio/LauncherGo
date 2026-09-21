@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LauncherGo 语音</title>
+<link rel="icon" href="assets/audio-lines.svg" type="image/svg+xml">
+<style>
+:root{color-scheme:dark;font-family:Inter,"Segoe UI","Microsoft YaHei",sans-serif;background:#202622;color:#f3f6f4;letter-spacing:0;--muted:#bac5bf;--mint:#91e6bd}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;min-height:100svh;display:grid;place-items:center;padding:32px 20px;position:relative}
+.backdrop{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;filter:saturate(.42) brightness(.65);z-index:-2}body:before{content:"";position:fixed;inset:0;background:#10181440;z-index:-1}
+main{width:min(580px,100%);padding:24px 32px 20px;background:rgba(24,32,29,.72);border:1px solid #ffffff36;border-radius:8px;backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);box-shadow:0 24px 80px #0006,inset 0 1px 0 #ffffff14}
+.icon{width:18px;height:18px;flex:none;filter:invert(1);opacity:.9}.identity{display:flex;align-items:center;gap:14px;margin:0 0 18px;min-width:0}.avatar{display:grid;place-items:center;flex:none;width:48px;height:48px;border-radius:50%;background:#ffffff0d;border:1px solid #ffffff2a}.avatar .icon{width:24px;height:24px}.player{min-width:0;flex:1}h2{font-size:20px;font-weight:600;margin:0 0 4px;overflow-wrap:anywhere}.player-id{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}.connection{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:7px;flex:none}.dot{width:7px;height:7px;border-radius:50%;background:#97a39d;flex:none}.dot.ok{background:var(--mint)}.dot.warn{background:#f4cb7b}
+.recorder{padding:14px 0}.recorder-top,.recorder-bottom{display:flex;align-items:center;justify-content:flex-end;gap:12px;font-size:12px;color:var(--muted)}.recorder-bottom{justify-content:flex-start}.numeric{font-variant-numeric:tabular-nums;font-family:ui-monospace,"Cascadia Code",monospace}.meter{height:106px;display:grid;grid-template-columns:repeat(48,minmax(0,1fr));align-items:center;gap:4px;margin:10px 0;overflow:hidden}.bar{height:4px;max-height:100%;border-radius:2px;background:var(--mint);opacity:.75;transition:height 65ms linear}.bar.hot{background:#f4cb7b}.db{color:#edf7f0;min-width:78px;text-align:right}#state{color:var(--mint);overflow-wrap:anywhere}
+.device{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);padding:2px 0 16px}#device{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.credentials{padding-top:4px}label{display:none}.token-field{position:relative;display:flex;min-width:0}input,button{font:inherit;border-radius:5px}input{width:100%;min-width:0;height:44px;padding:0 46px 0 12px;background:#0c151340;border:1px solid #ffffff35;color:#fff;font-size:13px}input::placeholder{color:#a8b5ae}input:disabled{opacity:.65}button{cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;border:1px solid transparent;font-size:13px;font-weight:600;height:44px}button:disabled{opacity:.4;cursor:not-allowed}button:focus-visible,input:focus-visible{outline:2px solid var(--mint);outline-offset:3px}.reveal{position:absolute;right:2px;top:2px;width:40px;height:40px;background:transparent}.reveal:hover{background:#ffffff12}.actions{display:grid;grid-template-columns:1fr 100px;gap:10px;margin-top:12px}#connect{background:var(--mint);color:#142e20}#connect .icon{filter:none}#connect:hover:not(:disabled){background:#b3f4d3}#stop{background:#ffffff0a;border-color:#ffffff30;color:#e8efea}#stop:hover:not(:disabled){background:#ffffff1c}.error{font-size:12px;color:#ffb3ab;line-height:1.6;margin:12px 0 0;overflow-wrap:anywhere}.error:empty{display:none}footer{display:flex;align-items:center;gap:7px;margin-top:14px;color:var(--muted);font-size:11px;line-height:1.5}footer .icon{width:14px;height:14px}
+@media(max-width:480px){body{padding:16px 12px}main{padding:20px 20px 18px}.meter{gap:3px;height:96px}.player-id{max-width:170px}.identity{gap:10px}h2{font-size:18px}.connection{font-size:10px}}
+@media(max-width:350px){main{padding:18px 16px}.connection{align-self:flex-start;margin-top:4px}.avatar{width:38px;height:38px}.player-id{max-width:120px}.meter{gap:2px}.actions{grid-template-columns:1fr 76px}}
+@media(prefers-reduced-motion:reduce){.bar{transition:none}}
+main{background:rgba(24,32,29,.55);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+.meter{height:84px;margin:6px 0}footer{margin-top:12px}
+</style>
+</head>
+<body>
+<img class="backdrop" src="assets/studio.jpg" alt="" aria-hidden="true">
+<main aria-label="语音麦克风">
+  <section class="identity" aria-label="玩家信息">
+    <div class="avatar"><img class="icon" src="assets/user-round.svg" alt=""></div>
+    <div class="player"><h2 id="player-name">尚未连接</h2><div id="player-id" class="player-id">等待凭证认证</div></div>
+    <div class="connection"><span id="dot" class="dot"></span><span id="connection">离线</span></div>
+  </section>
+  <section class="recorder" aria-label="麦克风音量">
+    <div class="recorder-top"><span id="db" class="db numeric">静音</span></div>
+    <div id="level" class="meter" role="meter" aria-label="麦克风输入电平" aria-valuemin="-60" aria-valuemax="0" aria-valuenow="-60"></div>
+    <div class="recorder-bottom"><span id="state" role="status">未连接</span></div>
+  </section>
+  <div class="device"><img class="icon" src="assets/headphones.svg" alt=""><span id="device">麦克风未启用</span></div>
+  <section class="credentials" aria-label="连接认证">
+    <div class="token-field"><input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="首次连接时粘贴游戏内凭证"><button id="reveal" class="reveal" type="button" title="显示凭证" aria-label="显示凭证" aria-pressed="false"><img class="icon" src="assets/eye.svg" alt=""></button></div>
+    <div class="actions"><button id="connect"><img class="icon" src="assets/mic.svg" alt=""><span id="connect-label">连接麦克风</span></button><button id="stop" disabled><img class="icon" src="assets/unplug.svg" alt="">断开</button></div>
+    <p id="error" class="error" role="alert"></p>
+  </section>
+  <footer><span id="backend">正在检查语音服务…</span></footer>
+</main>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  let session = 0, stream, context, source, analyser, processor, silent, socket, raf;
+  let accepted = false, pcmQueue = new Float32Array(0);
+  let control = null, controlReceivedAt = 0, activationUntil = 0;
+  let lastMeterAt = 0, lastLevelSentAt = 0;
+  const bars = Array.from({ length: 48 }, () => {
+    const bar = document.createElement('span'); bar.className = 'bar'; bar.setAttribute('aria-hidden', 'true');
+    $('level').append(bar); return bar;
+  });
+  const levels = new Array(bars.length).fill(0);
+  const setState = (text, kind = '') => { $('state').textContent = text; $('dot').className = 'dot ' + kind; };
+  const setError = text => { $('error').textContent = text || ''; };
+  function voiceInfo() {
+    $('connection').textContent = accepted ? '已连接' : '离线';
+    $('connect-label').textContent = accepted ? '麦克风已连接' : '连接麦克风';
+    $('token').placeholder = accepted ? '设备已配对' : (localStorage.getItem('svc-device-token') ? '已保存设备配对，可直接连接' : '首次连接时粘贴游戏内凭证');
+    $('player-name').textContent = accepted ? control?.playerName || '等待玩家信息' : '尚未连接';
+    $('player-id').textContent = accepted ? control?.playerUid || '已通过凭证认证' : '等待凭证认证';
+    $('player-id').title = accepted ? control?.playerUid || '' : '';
+  }
+  function updateClock() {
+    if (accepted && control && performance.now() - controlReceivedAt > 2500) {
+      setState('等待游戏状态同步', 'warn');
+    }
+  }
+  function resetMeter() {
+    levels.fill(0); lastMeterAt = 0;
+    bars.forEach(bar => { bar.style.height = '4px'; bar.classList.remove('hot'); });
+    $('db').textContent = '静音'; $('level').setAttribute('aria-valuenow', '-60');
+  }
+  function stop(text = '已断开') {
+    session++; accepted = false; control = null; controlReceivedAt = 0; activationUntil = 0;
+    lastLevelSentAt = 0;
+    cancelAnimationFrame(raf);
+    const oldSocket = socket; socket = null;
+    if (oldSocket) { oldSocket.onclose = oldSocket.onerror = oldSocket.onmessage = null; oldSocket.close(); }
+    processor?.disconnect(); source?.disconnect(); silent?.disconnect();
+    stream?.getTracks().forEach(track => track.stop());
+    if (context) void context.close().catch(() => {});
+    stream = context = source = analyser = processor = silent = null;
+    pcmQueue = new Float32Array(0);
+    $('connect').disabled = false; $('stop').disabled = true; $('token').disabled = false;
+    $('device').textContent = '麦克风未启用';
+    resetMeter(); voiceInfo(); updateClock(); setState(text);
+  }
+  function meter(now = performance.now()) {
+    if (!analyser) return;
+    if (now - lastMeterAt >= 40) {
+      lastMeterAt = now;
+      const data = new Float32Array(analyser.fftSize); analyser.getFloatTimeDomainData(data);
+      const rms = Math.sqrt(data.reduce((sum, x) => sum + x * x, 0) / data.length);
+      const db = rms > .001 ? Math.max(-60, Math.min(0, 20 * Math.log10(rms))) : -60;
+      // A two-second history of measured input, displayed on a logarithmic dBFS scale.
+      levels.shift(); levels.push((db + 60) / 60);
+      bars.forEach((bar, i) => { bar.style.height = `${4 + levels[i] * 96}%`; bar.classList.toggle('hot', levels[i] > .92); });
+      $('db').textContent = db <= -60 ? '静音' : `${db.toFixed(1)} dBFS`;
+      $('level').setAttribute('aria-valuenow', db.toFixed(1));
+    }
+    raf = requestAnimationFrame(meter);
+  }
+  function sendPcm(data) {
+    if (!accepted || !socket || socket.readyState !== WebSocket.OPEN) return;
+    const now = performance.now(), fresh = control && now - controlReceivedAt <= 2500;
+    if (fresh && control.monitor && now - lastLevelSentAt >= 100 && socket.bufferedAmount < 19200) {
+      const rms = Math.sqrt(data.reduce((sum, x) => sum + x * x, 0) / data.length);
+      socket.send(JSON.stringify({ type: 'level', rms: Math.min(1, rms) })); lastLevelSentAt = now;
+    }
+    const testId = fresh && control.monitor && Number.isInteger(control.testId) && control.testId > 0 ? control.testId : 0;
+    if (!fresh || (!control.allowed && !testId)) {
+      pcmQueue = new Float32Array(0); activationUntil = 0;
+      setState('已连接，等待游戏允许发言', 'warn'); return;
+    }
+    if (socket.bufferedAmount > 960 * 2 * 50) { pcmQueue = new Float32Array(0); return; }
+    const queue = new Float32Array(pcmQueue.length + data.length);
+    queue.set(pcmQueue); queue.set(data, pcmQueue.length); pcmQueue = queue;
+    while (pcmQueue.length >= 960) {
+      const rms = Math.sqrt(pcmQueue.subarray(0, 960).reduce((sum, x) => sum + x * x, 0) / 960);
+      if (control.voiceActivation && !testId) {
+        if (rms >= control.threshold) activationUntil = performance.now() + 300;
+        if (performance.now() >= activationUntil) {
+          pcmQueue = pcmQueue.slice(960); setState('已连接，等待声音', 'warn'); continue;
+        }
+      }
+      const offset = testId ? 4 : 0, bytes = new ArrayBuffer(1920 + offset), view = new DataView(bytes);
+      if (testId) view.setInt32(0, testId, true);
+      for (let i = 0; i < 960; i++) view.setInt16(offset + i * 2, Math.max(-1, Math.min(1, pcmQueue[i])) * 32767, true);
+      socket.send(bytes); pcmQueue = pcmQueue.slice(960); setState(testId ? '正在测试录音' : '正在发送语音', 'ok');
+    }
+  }
+  async function backendStatus() {
+    try {
+      const response = await fetch('backend-health', { cache: 'no-store', signal: AbortSignal.timeout(4000) });
+      if (!response.ok) throw new Error();
+      const data = await response.json();
+      $('backend').textContent = data.connected ? 'SimpleVoiceChat 已就绪' : 'SimpleVoiceChat 未就绪';
+    } catch { $('backend').textContent = '网页服务连接中断'; }
+  }
+  $('connect').onclick = async () => {
+    const token = $('token').value.trim() || localStorage.getItem('svc-device-token') || '';
+    if (!token) { setError('请先输入游戏内的 Token。'); return; }
+    stop(); setError('');
+    const current = session;
+    $('connect').disabled = true; $('stop').disabled = false; $('token').disabled = true;
+    try {
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)
+        throw new Error('麦克风需要 HTTPS 或 localhost / 127.0.0.1 页面。');
+      setState('请求麦克风权限…', 'warn');
+      const media = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      if (current !== session) { media.getTracks().forEach(t => t.stop()); return; }
+      stream = media;
+      $('device').textContent = stream.getAudioTracks()[0]?.label || '默认麦克风';
+      const audio = context = new AudioContext({ sampleRate: 48000 });
+      if (audio.sampleRate !== 48000 || !audio.audioWorklet) throw new Error('浏览器不支持所需的音频采集，请使用新版浏览器。');
+      await audio.resume();
+      if (current !== session) return;
+      const code = "class P extends AudioWorkletProcessor { process(inputs) { const samples = inputs[0]?.[0]; if (samples) this.port.postMessage(samples); return true; } } registerProcessor('svc-pcm', P);";
+      const blob = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
+      try { await audio.audioWorklet.addModule(blob); } finally { URL.revokeObjectURL(blob); }
+      if (current !== session) return;
+      source = audio.createMediaStreamSource(stream); analyser = audio.createAnalyser(); analyser.fftSize = 512;
+      source.connect(analyser); meter();
+      processor = new AudioWorkletNode(audio, 'svc-pcm');
+      processor.port.onmessage = e => { if (current === session) sendPcm(e.data); };
+      silent = audio.createGain(); silent.gain.value = 0;
+      source.connect(processor); processor.connect(silent); silent.connect(audio.destination);
+      stream.getTracks().forEach(t => t.onended = () => { if (current === session) stop('麦克风已断开'); });
+      setState('连接语音服务…', 'warn');
+      const url = new URL('voice', location.href); url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = socket = new WebSocket(url); ws.binaryType = 'arraybuffer';
+      ws.onopen = () => {
+        if (current !== session) return;
+        ws.send(JSON.stringify({ type: 'hello', protocol: 1, token, sampleRate: 48000, channels: 1, frameMs: 20 }));
+        setState('等待 Token 认证…', 'warn');
+      };
+      ws.onmessage = e => {
+        if (current !== session || typeof e.data !== 'string') return;
+        try {
+          const message = JSON.parse(e.data);
+          if (message.type === 'accepted') {
+            accepted = true;
+            if (message.deviceToken) localStorage.setItem('svc-device-token', message.deviceToken);
+            $('token').value = ''; voiceInfo(); updateClock(); setState('已连接，等待游戏允许发言', 'warn');
+          }
+          if (message.type === 'control' && accepted) {
+            if (control?.testId !== message.testId) pcmQueue = new Float32Array(0);
+            control = message; controlReceivedAt = performance.now();
+            voiceInfo();
+            if (!control.allowed && !control.testId) { pcmQueue = new Float32Array(0); activationUntil = 0; setState('已连接，等待游戏允许发言', 'warn'); }
+          }
+          if (message.type === 'error') { if (token === localStorage.getItem('svc-device-token')) localStorage.removeItem('svc-device-token'); stop('连接失败'); setError(message.message || '凭证认证失败。'); }
+        } catch { stop('连接失败'); setError('语音服务返回无效响应。'); }
+      };
+      ws.onerror = () => { if (current === session) { const wasAccepted = accepted; if (!wasAccepted) localStorage.removeItem('svc-device-token'); stop('连接已断开'); setError(wasAccepted ? '设备配对已失效，请在游戏中重新获取凭证。' : '无法连接语音服务，请检查网页服务与 SimpleVoiceChat。'); } };
+      ws.onclose = () => { if (current === session) { stop('语音连接已断开'); setError('请在游戏中重新获取凭证后连接。'); } };
+    } catch (error) {
+      if (current !== session) return;
+      stop('连接失败');
+      setError(error.name === 'NotAllowedError' ? '浏览器拒绝麦克风权限，请允许访问后重试。' : error.message || '无法启用麦克风。');
+    }
+  };
+  $('stop').onclick = () => stop();
+  $('reveal').onclick = () => {
+    const show = $('token').type === 'password'; $('token').type = show ? 'text' : 'password';
+    $('reveal').setAttribute('aria-pressed', String(show));
+    $('reveal').title = show ? '隐藏凭证' : '显示凭证';
+    $('reveal').setAttribute('aria-label', $('reveal').title);
+    $('reveal').querySelector('img').src = show ? 'assets/eye-off.svg' : 'assets/eye.svg';
+  };
+  $('token').addEventListener('keydown', event => { if (event.key === 'Enter' && !$('connect').disabled) $('connect').click(); });
+  const timer = setInterval(updateClock, 250);
+  const poll = setInterval(backendStatus, 5000); void backendStatus();
+  window.addEventListener('beforeunload', event => {
+    if (!$('connect').disabled) return;
+    event.preventDefault(); event.returnValue = '';
+  });
+  window.addEventListener('pagehide', () => stop());
+})();
+</script></body></html>

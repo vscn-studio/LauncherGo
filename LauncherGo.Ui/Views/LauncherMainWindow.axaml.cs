@@ -348,6 +348,8 @@ public partial class LauncherMainWindow : Window
     private readonly ObservableCollection<GatewayBackendRuntimeItem> _gatewayBackendRuntimeItems = [];
     private readonly ObservableCollection<InstanceProfile> _serverMapProfileItems = [];
     private readonly ObservableCollection<ProfileConfigListItem> _serverMapConfigItems = [];
+    private readonly ObservableCollection<VoiceConfigListItem> _voiceConfigItems = [];
+    private readonly IVoiceWebService _voiceWebService;
     private readonly HashSet<GatewayBackendStatisticsWindow> _gatewayStatisticsWindows = [];
     private readonly ObservableCollection<DashboardServerItem> _dashboardServerItems = [];
     private readonly ObservableCollection<DashboardPlayerItem> _dashboardOnlinePlayerItems = [];
@@ -418,8 +420,11 @@ public partial class LauncherMainWindow : Window
     private bool _isRefreshingAuth;
     private bool _isRefreshingServerBridge;
     private bool _isRefreshingServerMap;
+    private bool _isRefreshingVoice;
     private bool _isMaintainingServerMap;
     private string _editingServerMapProfileId = string.Empty;
+    private string _editingVoiceProfileId = string.Empty;
+    private bool _isTogglingVoice;
     private bool _toastPointerOver;
     private string _editingConfigProfileId = string.Empty;
     private string _pendingConfigLoadProfileId = string.Empty;
@@ -490,7 +495,8 @@ public partial class LauncherMainWindow : Window
         ILauncherUpdateService launcherUpdateService,
         ILogger<LauncherMainWindow>? logger = null,
         ILocalizationService? localizationService = null,
-        IDiscordBotService? discordBotService = null)
+        IDiscordBotService? discordBotService = null,
+        IVoiceWebService? voiceWebService = null)
     {
         _preferencesService = preferencesService;
         _serverPackageService = serverPackageService;
@@ -513,6 +519,7 @@ public partial class LauncherMainWindow : Window
         _modUpdateService = modUpdateService;
         _serverAuthService = serverAuthService;
         _serverMapService = serverMapService;
+        _voiceWebService = voiceWebService ?? ServiceLocator.GetRequiredService<IVoiceWebService>();
         _serverBridgeService = serverBridgeService;
         _launcherUpdateService = launcherUpdateService;
         _localizationService = localizationService ?? new LocalizationService();
@@ -3720,6 +3727,7 @@ public partial class LauncherMainWindow : Window
         ConnectionDiscordPanel.IsVisible = tab == ConnectionTab.Discord;
         ConnectionGatewayPanel.IsVisible = tab == ConnectionTab.Gateway;
         ConnectionAuthPanel.IsVisible = tab == ConnectionTab.Auth;
+        ConnectionVoicePanel.IsVisible = tab == ConnectionTab.Voice;
         RefreshSidebarSelection();
         RefreshConnectionSettingsEditor();
         RefreshConnectionRuntimeStatus();
@@ -3745,6 +3753,11 @@ public partial class LauncherMainWindow : Window
             _ = RefreshGatewayStatusAsync();
         }
 
+        if (tab == ConnectionTab.Voice)
+        {
+            RefreshVoiceProfiles();
+        }
+
         RequestStaticUiTranslations();
     }
 
@@ -3767,6 +3780,7 @@ public partial class LauncherMainWindow : Window
         SetSelectedClass(ConnectionGatewayTabButton, !_logsNavSelected && _selectedTab == MainTab.Connection && _selectedConnectionTab == ConnectionTab.Gateway);
         SetSelectedClass(ConnectionRobotTabButton, !_logsNavSelected && _selectedTab == MainTab.Connection && _selectedConnectionTab == ConnectionTab.Robot);
         SetSelectedClass(ConnectionDiscordTabButton, !_logsNavSelected && _selectedTab == MainTab.Connection && _selectedConnectionTab == ConnectionTab.Discord);
+        SetSelectedClass(ConnectionVoiceTabButton, !_logsNavSelected && _selectedTab == MainTab.Connection && _selectedConnectionTab == ConnectionTab.Voice);
         SetSelectedClass(ServerMapTabButton, !_logsNavSelected && _selectedTab == MainTab.InstanceManage && _selectedInstanceManageTab == InstanceManageTab.ServerMap);
         SetSelectedClass(ServerSettingsTabButton, !_logsNavSelected && _selectedTab == MainTab.Settings && _selectedSettingsTab == SettingsTab.Server);
         SetSelectedClass(AppearanceSettingsTabButton, !_logsNavSelected && _selectedTab == MainTab.Settings && _selectedSettingsTab == SettingsTab.Appearance);
@@ -7212,6 +7226,211 @@ public partial class LauncherMainWindow : Window
     {
         SelectTab(MainTab.Connection);
         SelectConnectionTab(ConnectionTab.Gateway);
+    }
+
+    private void OnConnectionVoiceTabClick(object? sender, RoutedEventArgs e)
+    {
+        SelectTab(MainTab.Connection);
+        SelectConnectionTab(ConnectionTab.Voice);
+    }
+
+    private VoiceSettings CollectVoiceSettings() => new()
+    {
+        Enabled = VoiceEnabledCheckBox.IsChecked == true,
+        ListenAddress = VoiceListenAddressTextBox.Text?.Trim() ?? "127.0.0.1",
+        ListenPort = (int?)VoiceListenPortNumericUpDown.Value ?? 5082,
+        BackendPort = (int?)VoiceBackendPortNumericUpDown.Value ?? 15082,
+        UseHttps = VoiceHttpsCheckBox.IsChecked == true,
+        CertificatePath = VoiceCertificateTextBox.Text?.Trim() ?? "",
+        PrivateKeyPath = VoicePrivateKeyTextBox.Text?.Trim() ?? "",
+        PublicUrl = VoicePublicUrlTextBox.Text?.Trim() ?? ""
+    };
+
+    private void RefreshVoiceProfiles()
+    {
+        if (_isRefreshingVoice || _isTogglingVoice) return;
+        _isRefreshingVoice = true;
+        try
+        {
+            RefreshVoiceConfigItems();
+            if (VoiceEditorPanel.IsVisible)
+            {
+                if (_profileService.GetProfileById(_editingVoiceProfileId) is { } profile) LoadVoiceEditor(profile);
+                else ShowVoiceList();
+            }
+            VoiceStatusTextBlock.Text = T("每个档案独立启停语音网页。网页服务与游戏服务器分别运行。", "Each profile has an independent voice web service, separate from the game server.");
+        }
+        catch (Exception ex) { VoiceStatusTextBlock.Text = ex.Message; }
+        finally { _isRefreshingVoice = false; }
+    }
+
+    private void RefreshVoiceConfigItems()
+    {
+        _voiceConfigItems.Clear();
+        foreach (var profile in _profileService.GetProfiles().OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase))
+        {
+            try
+            {
+                var status = _voiceWebService.GetStatus(profile);
+                var item = VoiceConfigListItem.FromProfile(profile, status.Url, status.IsRunning);
+                item.StatusText = status.Error.Length > 0 ? T("网页异常", "Web error") : status.IsRunning ? T("网页运行中", "Web running") : T("网页未启动", "Web stopped");
+                _voiceConfigItems.Add(item);
+            }
+            catch (Exception)
+            {
+                var item = VoiceConfigListItem.FromProfile(profile, "", false);
+                item.StatusText = T("配置错误", "Invalid configuration");
+                _voiceConfigItems.Add(item);
+            }
+        }
+        VoiceConfigItemsControl.ItemsSource = _voiceConfigItems;
+    }
+
+    private void ShowVoiceList()
+    {
+        if (_isTogglingVoice) return;
+        _editingVoiceProfileId = string.Empty;
+        VoiceListPanel.IsVisible = true;
+        VoiceEditorPanel.IsVisible = false;
+        VoiceClearButton.IsVisible = true;
+        VoiceBackButton.IsVisible = false;
+        VoiceSaveButton.IsVisible = false;
+        VoiceToggleButton.IsVisible = false;
+        VoiceOpenWebButton.IsVisible = false;
+        RefreshVoiceConfigItems();
+    }
+
+    private void LoadVoiceEditor(InstanceProfile profile)
+    {
+        try
+        {
+            var settings = _voiceWebService.LoadSettings(profile);
+            VoiceEnabledCheckBox.IsChecked = settings.Enabled;
+            VoiceHttpsCheckBox.IsChecked = settings.UseHttps;
+            VoiceListenAddressTextBox.Text = settings.ListenAddress;
+            VoiceListenPortNumericUpDown.Value = settings.ListenPort;
+            VoiceBackendPortNumericUpDown.Value = settings.BackendPort;
+            VoiceCertificateTextBox.Text = settings.CertificatePath;
+            VoicePrivateKeyTextBox.Text = settings.PrivateKeyPath;
+            VoicePublicUrlTextBox.Text = settings.PublicUrl;
+            RefreshVoiceRuntime(profile);
+        }
+        catch (Exception ex) { VoiceStatusTextBlock.Text = ex.Message; }
+    }
+
+    private void RefreshVoiceRuntime(InstanceProfile profile)
+    {
+        var status = _voiceWebService.GetStatus(profile);
+        VoiceToggleButton.Content = status.IsRunning ? T("停止语音网页", "Stop voice web") : T("启动语音网页", "Start voice web");
+        VoiceOpenWebButton.IsEnabled = status.IsRunning && status.Error.Length == 0;
+        if (status.Error.Length > 0) VoiceStatusTextBlock.Text = status.Error;
+    }
+
+    private void OnVoiceEditConfigClick(object? sender, RoutedEventArgs e)
+    {
+        if (_isTogglingVoice) return;
+        if (sender is Button { Tag: VoiceConfigListItem item } && _profileService.GetProfileById(item.ProfileId) is { } profile)
+        {
+            _editingVoiceProfileId = profile.Id;
+            VoiceListPanel.IsVisible = false; VoiceEditorPanel.IsVisible = true;
+            VoiceClearButton.IsVisible = false; VoiceBackButton.IsVisible = true; VoiceSaveButton.IsVisible = true;
+            VoiceToggleButton.IsVisible = true; VoiceOpenWebButton.IsVisible = true;
+            VoiceStatusTextBlock.Text = T($"当前档案：{profile.Name}", $"Profile: {profile.Name}");
+            LoadVoiceEditor(profile);
+        }
+    }
+
+    private void OnVoiceBackClick(object? sender, RoutedEventArgs e) => ShowVoiceList();
+    private void OnVoiceRefreshClick(object? sender, RoutedEventArgs e) => RefreshVoiceProfiles();
+
+    private void OnVoiceSaveClick(object? sender, RoutedEventArgs e)
+    {
+        if (_isTogglingVoice || _profileService.GetProfileById(_editingVoiceProfileId) is not { } profile) return;
+        try
+        {
+            _voiceWebService.SaveSettings(profile, CollectVoiceSettings());
+            LoadVoiceEditor(profile); RefreshVoiceConfigItems();
+            VoiceStatusTextBlock.Text = T("已保存。网页配置在下次启动网页时生效；修改模组接入端口后需手动重启游戏服务器。", "Saved. Restart the web service to apply web settings; restart the game server manually only when the mod port changes.");
+        }
+        catch (Exception ex) { VoiceStatusTextBlock.Text = T($"保存失败：{ex.Message}", $"Save failed: {ex.Message}"); }
+    }
+
+    private async void OnVoiceToggleClick(object? sender, RoutedEventArgs e)
+    {
+        if (_isTogglingVoice || _profileService.GetProfileById(_editingVoiceProfileId) is not { } profile) return;
+        _isTogglingVoice = true;
+        VoiceStatusTextBlock.Text = string.Empty;
+        VoiceToggleButton.IsEnabled = VoiceSaveButton.IsEnabled = VoiceBackButton.IsEnabled = VoiceRefreshButton.IsEnabled = false;
+        try
+        {
+            if (_voiceWebService.GetStatus(profile).IsRunning) await _voiceWebService.StopAsync(profile);
+            else
+            {
+                _voiceWebService.SaveSettings(profile, CollectVoiceSettings());
+                await _voiceWebService.StartAsync(profile);
+            }
+            RefreshVoiceRuntime(profile);
+            RefreshVoiceConfigItems();
+        }
+        catch (Exception ex) { VoiceStatusTextBlock.Text = T($"网页操作失败：{ex.Message}", $"Web operation failed: {ex.Message}"); }
+        finally
+        {
+            _isTogglingVoice = false;
+            VoiceToggleButton.IsEnabled = VoiceSaveButton.IsEnabled = VoiceBackButton.IsEnabled = VoiceRefreshButton.IsEnabled = true;
+        }
+    }
+
+    private async void OnVoiceClearClick(object? sender, RoutedEventArgs e)
+    {
+        if (_isTogglingVoice) return;
+        _isTogglingVoice = true;
+        VoiceClearButton.IsEnabled = false;
+        try
+        {
+            foreach (var item in _voiceConfigItems.Where(i => i.IsSelected).ToArray())
+                if (_profileService.GetProfileById(item.ProfileId) is { } profile)
+                {
+                    await _voiceWebService.StopAsync(profile);
+                    var previous = _voiceWebService.LoadSettings(profile);
+                    _voiceWebService.SaveSettings(profile, new VoiceSettings { Enabled = false, ListenPort = previous.ListenPort, BackendPort = previous.BackendPort });
+                }
+            RefreshVoiceConfigItems();
+        }
+        catch (Exception ex) { VoiceStatusTextBlock.Text = ex.Message; }
+        finally { _isTogglingVoice = false; VoiceClearButton.IsEnabled = true; }
+    }
+
+    private void OnVoiceOpenWebClick(object? sender, RoutedEventArgs e)
+    {
+        if (_profileService.GetProfileById(_editingVoiceProfileId) is not { } profile) return;
+        try
+        {
+            var status = _voiceWebService.GetStatus(profile);
+            if (!status.IsRunning || status.Error.Length > 0) { VoiceStatusTextBlock.Text = T("请先启动语音网页。", "Start the voice web service first."); return; }
+            Process.Start(new ProcessStartInfo(status.Url) { UseShellExecute = true });
+        }
+        catch (Exception ex) { VoiceStatusTextBlock.Text = ex.Message; }
+    }
+
+    private async void OnVoiceCopyUrlClick(object? sender, RoutedEventArgs e)
+    {
+        if (_profileService.GetProfileById(_editingVoiceProfileId) is not { } profile) return;
+        try { await CopyVoiceTextAsync(_voiceWebService.GetStatus(profile).Url, "语音网页地址"); }
+        catch (Exception ex) { VoiceStatusTextBlock.Text = ex.Message; }
+    }
+    private async Task CopyVoiceTextAsync(string? value, string name)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            VoiceStatusTextBlock.Text = T($"没有可复制的{name}。", $"There is no {name} to copy.");
+            return;
+        }
+        try
+        {
+            await TopLevel.GetTopLevel(this)!.Clipboard!.SetTextAsync(value);
+            VoiceStatusTextBlock.Text = T($"{name}已复制。", $"{name} copied.");
+        }
+        catch (Exception ex) { VoiceStatusTextBlock.Text = T($"复制失败：{ex.Message}", $"Copy failed: {ex.Message}"); }
     }
 
     private async void OnGatewaySaveClick(object? sender, RoutedEventArgs e)
@@ -12111,7 +12330,8 @@ public partial class LauncherMainWindow : Window
         Discord,
         Gateway,
         Auth,
-        ServerMap
+        ServerMap,
+        Voice
     }
 
     private enum ConnectionProcessKind
@@ -12361,6 +12581,33 @@ public partial class LauncherMainWindow : Window
         public string DownloadedText { get; } = downloadedText;
 
         public string ActionText { get; } = actionText;
+    }
+
+    public sealed class VoiceConfigListItem : INotifyPropertyChanged
+    {
+        private bool _isSelected;
+        public string ProfileId { get; init; } = string.Empty;
+        public string ProfileName { get; init; } = string.Empty;
+        public string Url { get; init; } = string.Empty;
+        private string _statusText = string.Empty;
+        public string StatusText
+        {
+            get => _statusText;
+            set { if (_statusText == value) return; _statusText = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusText))); }
+        }
+        public bool IsSelected
+        {
+            get => _isSelected;
+            set { if (_isSelected == value) return; _isSelected = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected))); }
+        }
+        public event PropertyChangedEventHandler? PropertyChanged;
+        public static VoiceConfigListItem FromProfile(InstanceProfile profile, string url, bool running) => new()
+        {
+            ProfileId = profile.Id,
+            ProfileName = profile.Name,
+            Url = url,
+            StatusText = running ? "运行中" : "未运行"
+        };
     }
 
     public sealed class ProfileConfigListItem : INotifyPropertyChanged
