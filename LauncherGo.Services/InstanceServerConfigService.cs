@@ -65,8 +65,10 @@ public sealed class InstanceServerConfigService : IInstanceServerConfigService
             Seed = ReadString(worldConfig["Seed"], "123456789"),
             WorldName = ReadString(worldConfig["WorldName"], "A new world"),
             SaveFileLocation = ReadString(worldConfig["SaveFileLocation"], ResolveCurrentSaveFilePath(profile)),
-            PlayStyle = ReadString(worldConfig["PlayStyle"], "surviveandbuild"),
-            WorldType = ReadString(worldConfig["WorldType"], "standard"),
+            PlayStyle = ReadString(worldRules["playstyle"],
+                ReadString(worldConfig["PlayStyle"], "surviveandbuild")),
+            WorldType = ReadString(worldRules["worldtype"],
+                ReadString(worldConfig["WorldType"], "standard")),
             WorldHeight = mapSizeY ?? 256
         };
     }
@@ -153,6 +155,10 @@ public sealed class InstanceServerConfigService : IInstanceServerConfigService
         worldConfig["MapSizeY"] = Math.Clamp(worldSettings.WorldHeight ?? 256, 64, 2048);
 
         var worldRules = GetOrCreateObject(worldConfig, "WorldConfiguration");
+        // Keep metadata fields in WorldConfig rather than leaving stale
+        // lower-case export attributes behind after the form is saved.
+        worldRules.Remove("playstyle");
+        worldRules.Remove("worldtype");
         if (worldSettings.WorldHeight.HasValue)
         {
             worldRules["worldHeight"] = Math.Clamp(worldSettings.WorldHeight.Value, 64, 2048);
@@ -236,7 +242,12 @@ public sealed class InstanceServerConfigService : IInstanceServerConfigService
 
         if (root["WorldConfig"] is not JsonObject)
         {
-            throw new InvalidOperationException("配置必须包含 WorldConfig 对象。");
+            // The game also exports world settings as a flat object (the
+            // worldConfigAttributes format). Merge that form into the
+            // profile's existing serverconfig instead of discarding server
+            // settings such as ports, passwords and mod paths.
+            var currentRoot = await LoadRootAsync(profile, cancellationToken);
+            root = MergeFlatWorldConfig(currentRoot, root);
         }
 
         NormalizeImportedConfigPaths(profile, root);
@@ -313,6 +324,85 @@ public sealed class InstanceServerConfigService : IInstanceServerConfigService
         root["ModPaths"] = BuildDefaultModPaths(profile);
         var worldConfig = GetOrCreateObject(root, "WorldConfig");
         worldConfig["SaveFileLocation"] = ResolveCurrentSaveFilePath(profile);
+    }
+
+    private static JsonObject MergeFlatWorldConfig(JsonObject currentRoot, JsonObject imported)
+    {
+        var worldConfig = GetOrCreateObject(currentRoot, "WorldConfig");
+        var worldRules = GetOrCreateObject(worldConfig, "WorldConfiguration");
+
+        // Some tools wrap the flat attributes in WorldConfiguration without
+        // including the rest of serverconfig.json. Accept that form too.
+        var source = imported["WorldConfiguration"] as JsonObject ?? imported;
+        foreach (var property in source)
+        {
+            if (property.Value is null)
+            {
+                worldRules[property.Key] = null;
+                continue;
+            }
+
+            // World configuration exports use lower-case attribute names,
+            // while serverconfig.json stores these metadata fields under
+            // WorldConfig with PascalCase names.
+            if (property.Key.Equals("playstyle", StringComparison.OrdinalIgnoreCase))
+            {
+                worldConfig["PlayStyle"] = property.Value.DeepClone();
+                worldRules.Remove(property.Key);
+                continue;
+            }
+
+            if (property.Key.Equals("worldtype", StringComparison.OrdinalIgnoreCase))
+            {
+                worldConfig["WorldType"] = property.Value.DeepClone();
+                worldRules.Remove(property.Key);
+                continue;
+            }
+
+            switch (property.Key)
+            {
+                case "Seed":
+                case "WorldName":
+                case "PlayStyle":
+                case "WorldType":
+                case "SaveFileLocation":
+                case "MapSizeY":
+                    worldConfig[property.Key] = property.Value.DeepClone();
+                    break;
+                case "worldWidth":
+                    var width = CloneIntegerValue(property.Value);
+                    SetRootMapSize(currentRoot, "MapSizeX", width);
+                    worldRules[property.Key] = width.DeepClone();
+                    break;
+                case "worldLength":
+                    var length = CloneIntegerValue(property.Value);
+                    SetRootMapSize(currentRoot, "MapSizeZ", length);
+                    worldRules[property.Key] = length.DeepClone();
+                    break;
+                case "worldHeight":
+                    var height = CloneIntegerValue(property.Value);
+                    worldConfig["MapSizeY"] = height.DeepClone();
+                    worldRules[property.Key] = height;
+                    break;
+                default:
+                    worldRules[property.Key] = property.Value.DeepClone();
+                    break;
+            }
+        }
+
+        return currentRoot;
+    }
+
+    private static void SetRootMapSize(JsonObject root, string key, JsonNode value)
+    {
+        root[key] = value.DeepClone();
+    }
+
+    private static JsonNode CloneIntegerValue(JsonNode value)
+    {
+        return int.TryParse(value.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? JsonValue.Create(parsed)!
+            : value.DeepClone();
     }
 
     private static JsonArray BuildDefaultModPaths(InstanceProfile profile)

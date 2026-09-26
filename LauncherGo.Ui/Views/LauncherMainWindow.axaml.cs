@@ -10451,8 +10451,10 @@ public partial class LauncherMainWindow : Window
             Seed = ReadConfigString(worldConfig["Seed"], "123456789"),
             WorldName = ReadConfigString(worldConfig["WorldName"], "A new world"),
             SaveFileLocation = ReadConfigString(worldConfig["SaveFileLocation"], ResolveCurrentConfigSaveFilePath(profile)),
-            PlayStyle = ReadConfigString(worldConfig["PlayStyle"], "surviveandbuild"),
-            WorldType = ReadConfigString(worldConfig["WorldType"], "standard"),
+            PlayStyle = ReadConfigString(worldRules["playstyle"],
+                ReadConfigString(worldConfig["PlayStyle"], "surviveandbuild")),
+            WorldType = ReadConfigString(worldRules["worldtype"],
+                ReadConfigString(worldConfig["WorldType"], "standard")),
             WorldHeight = mapSizeY ?? 256
         };
     }
@@ -10557,7 +10559,7 @@ public partial class LauncherMainWindow : Window
 
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = T("导入 serverconfig.json", "Import serverconfig.json"),
+            Title = T("导入游戏/服务器配置 JSON", "Import game/server JSON"),
             AllowMultiple = false,
             FileTypeFilter =
             [
