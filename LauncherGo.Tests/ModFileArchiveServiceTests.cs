@@ -21,6 +21,8 @@ public sealed class ModFileArchiveServiceTests
             var universalDirectory = Directory.CreateDirectory(Path.Combine(directory.FullName, "universal"));
             await File.WriteAllTextAsync(Path.Combine(universalDirectory.FullName, "modinfo.json"), "{}");
             await File.WriteAllTextAsync(Path.Combine(universalDirectory.FullName, "data.txt"), "universal");
+            var config = Directory.CreateDirectory(Path.Combine(directory.FullName, "ModConfig", "nested"));
+            await File.WriteAllTextAsync(Path.Combine(config.FullName, "settings.json"), "{}");
 
             var mods = new ModEntry[]
             {
@@ -38,6 +40,9 @@ public sealed class ModFileArchiveServiceTests
             output.Position = 0;
             using var archive = new ZipArchive(output, ZipArchiveMode.Read);
             var names = archive.Entries.Select(static entry => entry.FullName).ToList();
+            Assert.Contains("Mods/", names);
+            Assert.Contains("ModConfig/", names);
+            Assert.Contains("ModConfig/nested/settings.json", names);
             Assert.Contains("Mods/universal/modinfo.json", names);
             Assert.Contains("Mods/universal/data.txt", names);
             Assert.DoesNotContain("Mods/server.zip", names);
@@ -61,6 +66,8 @@ public sealed class ModFileArchiveServiceTests
                 CreateFileMod(directory.FullName, "client", "Client"),
                 CreateFileMod(directory.FullName, "universal", "Universal")
             };
+            var config = Directory.CreateDirectory(Path.Combine(directory.FullName, "ModConfig"));
+            await File.WriteAllTextAsync(Path.Combine(config.FullName, "mod.json"), "{}");
             await using var output = new MemoryStream();
 
             await new ModFileArchiveService().CreateModArchiveAsync(
@@ -72,6 +79,9 @@ public sealed class ModFileArchiveServiceTests
             output.Position = 0;
             using var archive = new ZipArchive(output, ZipArchiveMode.Read);
             var names = archive.Entries.Select(static entry => entry.FullName).ToList();
+            Assert.Contains("Mods/", names);
+            Assert.Contains("ModConfig/", names);
+            Assert.Contains("ModConfig/mod.json", names);
             Assert.Contains("Mods/server.zip", names);
             Assert.Contains("Mods/client.zip", names);
             Assert.Contains("Mods/universal.zip", names);

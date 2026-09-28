@@ -1064,8 +1064,9 @@ public partial class LauncherMainWindow : Window
 
     private void InitializeModStaticTexts()
     {
-        ModZipPathTextBox.PlaceholderText = T("Mod ZIP", "Mod ZIP");
-        BrowseModZipButton.Content = T("浏览", "Browse");
+        ModZipPathTextBox.PlaceholderText = T("Mod ZIP 或文件夹", "Mod ZIP or folder");
+        BrowseModZipButton.Content = T("ZIP", "ZIP");
+        BrowseModFoldersButton.Content = T("文件夹", "Folders");
         ToolTip.SetTip(ModSelectAllCheckBox, T("全选/取消全选模组", "Select or clear all mods"));
         ImportModZipButton.Content = T("导入", "Import");
         DeleteSelectedModsButton.Content = T("删除", "Delete");
@@ -1345,6 +1346,10 @@ public partial class LauncherMainWindow : Window
         RobotDefaultEncodingLabelTextBlock.Text = T("默认编码", "Default Encoding");
         RobotFallbackEncodingLabelTextBlock.Text = T("回退编码", "Fallback Encoding");
         RobotSuperUsersLabelTextBlock.Text = T("超级管理员 QQ", "Super Admin QQ IDs");
+        RobotRelayChatLabelTextBlock.Text = T("转发游戏聊天", "Relay game chat");
+        RobotRelayPlayerLabelTextBlock.Text = T("转发玩家事件", "Relay player events");
+        RobotRelayServerLabelTextBlock.Text = T("转发服务器通知", "Relay server notifications");
+        RobotPlayerBindingLabelTextBlock.Text = T("允许 QQ 玩家绑定", "Allow QQ player binding");
         RobotTeleportPointsTitleTextBlock.Text = T("传送设置点", "Teleport Points");
         RobotTeleportPointNameHeaderTextBlock.Text = T("设置点名称", "Point Name");
         RobotTeleportPointAddButton.Content = T("添加", "Add");
@@ -2985,6 +2990,10 @@ public partial class LauncherMainWindow : Window
             DefaultEncoding = "utf-8",
             FallbackEncoding = "gbk",
             SuperUsersText = string.Empty,
+            RelayChatMessages = true,
+            RelayPlayerEvents = true,
+            RelayServerNotifications = true,
+            EnablePlayerBinding = true,
             CustomCommands = [],
             TeleportPoints = []
         };
@@ -3852,6 +3861,10 @@ public partial class LauncherMainWindow : Window
         RobotFallbackEncodingTextBox.LostFocus += OnRobotAutoSaveChanged;
         RobotSuperUsersTextBox.LostFocus += OnRobotAutoSaveChanged;
         RobotReconnectNumericUpDown.LostFocus += OnRobotAutoSaveChanged;
+        RobotRelayChatCheckBox.IsCheckedChanged += OnRobotAutoSaveChanged;
+        RobotRelayPlayerCheckBox.IsCheckedChanged += OnRobotAutoSaveChanged;
+        RobotRelayServerCheckBox.IsCheckedChanged += OnRobotAutoSaveChanged;
+        RobotPlayerBindingCheckBox.IsCheckedChanged += OnRobotAutoSaveChanged;
     }
 
     private void OnServerSettingsAutoSaveChanged(object? sender, RoutedEventArgs e)
@@ -4791,6 +4804,10 @@ public partial class LauncherMainWindow : Window
         RobotDefaultEncodingTextBox.Text = settings.DefaultEncoding;
         RobotFallbackEncodingTextBox.Text = settings.FallbackEncoding;
         RobotSuperUsersTextBox.Text = settings.SuperUsersText;
+        RobotRelayChatCheckBox.IsChecked = settings.RelayChatMessages;
+        RobotRelayPlayerCheckBox.IsChecked = settings.RelayPlayerEvents;
+        RobotRelayServerCheckBox.IsChecked = settings.RelayServerNotifications;
+        RobotPlayerBindingCheckBox.IsChecked = settings.EnablePlayerBinding;
         RebuildRobotBindingItems(settings);
         RebuildRobotTeleportPointItems(settings);
         RebuildRobotCustomCommandItems(settings);
@@ -5087,6 +5104,10 @@ public partial class LauncherMainWindow : Window
                 ? "gbk"
                 : RobotFallbackEncodingTextBox.Text.Trim(),
             SuperUsersText = FormatQqIdText(bindings.Select(static binding => binding.SuperUserId)),
+            RelayChatMessages = RobotRelayChatCheckBox.IsChecked == true,
+            RelayPlayerEvents = RobotRelayPlayerCheckBox.IsChecked == true,
+            RelayServerNotifications = RobotRelayServerCheckBox.IsChecked == true,
+            EnablePlayerBinding = RobotPlayerBindingCheckBox.IsChecked == true,
             ProfileBindings = bindings,
             CustomCommands = CollectRobotCustomCommands(),
             TeleportPoints = CollectRobotTeleportPoints()
@@ -5261,6 +5282,10 @@ public partial class LauncherMainWindow : Window
             DefaultEncoding = settings.DefaultEncoding,
             FallbackEncoding = settings.FallbackEncoding,
             SuperUsers = ParseQqIds(settings.SuperUsersText),
+            RelayChatMessages = settings.RelayChatMessages,
+            RelayPlayerEvents = settings.RelayPlayerEvents,
+            RelayServerNotifications = settings.RelayServerNotifications,
+            EnablePlayerBinding = settings.EnablePlayerBinding,
             CustomCommands = settings.CustomCommands ?? [],
             TeleportPoints = settings.TeleportPoints ?? []
         };
@@ -8374,7 +8399,22 @@ public partial class LauncherMainWindow : Window
             .Cast<string>()
             .ToList();
         if (paths.Count > 0)
-            SetModImportPaths(paths);
+            AddModImportPaths(paths);
+    }
+
+    private async void OnBrowseModFoldersClick(object? sender, RoutedEventArgs e)
+    {
+        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = T("选择模组文件夹（可多选）", "Select mod folders"),
+            AllowMultiple = true
+        });
+        var paths = folders.Select(TryGetLocalPath)
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Cast<string>()
+            .ToList();
+        if (paths.Count > 0)
+            AddModImportPaths(paths);
     }
 
     private async void OnImportModZipClick(object? sender, RoutedEventArgs e)
@@ -8388,7 +8428,7 @@ public partial class LauncherMainWindow : Window
         var paths = GetModImportPaths();
         if (paths.Count == 0)
         {
-            SetModStatus(T("请选择 Mod ZIP 文件。", "Select Mod ZIP files."));
+            SetModStatus(T("请选择 Mod ZIP 文件或模组文件夹。", "Select Mod ZIP files or mod folders."));
             return;
         }
 
@@ -8420,6 +8460,9 @@ public partial class LauncherMainWindow : Window
             .Distinct(StringComparer.OrdinalIgnoreCase));
         ModZipPathTextBox.Text = string.Join(" ", _modImportPaths.Select(ModImportPathParser.Quote));
     }
+
+    private void AddModImportPaths(IEnumerable<string> paths) =>
+        SetModImportPaths(GetModImportPaths().Concat(paths));
 
     private IReadOnlyList<string> GetModImportPaths()
     {
@@ -8462,7 +8505,22 @@ public partial class LauncherMainWindow : Window
 
     private async void OnRefreshModsClick(object? sender, RoutedEventArgs e)
     {
-        await RefreshModsAsync();
+        if (ModProfileComboBox.SelectedItem is not InstanceProfile profile)
+        {
+            await RefreshModsAsync();
+            return;
+        }
+
+        try
+        {
+            var renamed = await _instanceModService.NormalizeModNamesAsync(profile);
+            await RefreshModsAsync();
+            SetModStatus(T($"模组已刷新，重命名 {renamed} 个。", $"Mods refreshed; renamed {renamed}."));
+        }
+        catch (Exception ex)
+        {
+            SetModStatus(T($"刷新模组名称失败：{ex.Message}", $"Failed to refresh mod names: {ex.Message}"));
+        }
     }
 
     private async void OnCheckModUpdatesClick(object? sender, RoutedEventArgs e)

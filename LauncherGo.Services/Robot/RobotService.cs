@@ -130,6 +130,10 @@ public class RobotService : IRobotService
             DefaultEncoding = "utf-8",
             FallbackEncoding = "gbk",
             SuperUsers = [],
+            RelayChatMessages = true,
+            RelayPlayerEvents = true,
+            RelayServerNotifications = true,
+            EnablePlayerBinding = true,
         };
     }
 
@@ -201,7 +205,11 @@ public class RobotService : IRobotService
             DatabasePath = dbPath,
             DefaultEncoding = defaultEncoding,
             FallbackEncoding = fallbackEncoding,
-            SuperUsers = superUsers
+            SuperUsers = superUsers,
+            RelayChatMessages = settings.RelayChatMessages,
+            RelayPlayerEvents = settings.RelayPlayerEvents,
+            RelayServerNotifications = settings.RelayServerNotifications,
+            EnablePlayerBinding = settings.EnablePlayerBinding
         };
     }
 

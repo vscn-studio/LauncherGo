@@ -2225,7 +2225,7 @@
                                     </Grid>
 
                                     <Grid x:Name="ModsPanel" RowDefinitions="Auto,Auto,*" RowSpacing="8" IsVisible="False">
-                                        <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+                                        <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8" RowSpacing="8">
                                             <ComboBox x:Name="ModProfileComboBox" Grid.Column="0" Classes="CompactCombo" SelectionChanged="OnModProfileSelectionChanged">
                                                 <ComboBox.ItemTemplate>
                                                     <DataTemplate>
@@ -2235,11 +2235,14 @@
                                             </ComboBox>
                                             <TextBox x:Name="ModZipPathTextBox" Grid.Column="1" Classes="CompactInput" PlaceholderText="Mod ZIP" />
                                             <Button x:Name="BrowseModZipButton" Grid.Column="2" Classes="SecondaryActionButton" Content="浏览" Click="OnBrowseModZipClick" />
-                                            <Button x:Name="ImportModZipButton" Grid.Column="3" Classes="SecondaryActionButton" Content="导入" Click="OnImportModZipClick" />
-                                            <Button x:Name="CheckModUpdatesButton" Grid.Column="4" Classes="SecondaryActionButton" Content="检查更新" Click="OnCheckModUpdatesClick" />
-                                            <Button x:Name="ExportModsButton" Grid.Column="5" Classes="SecondaryActionButton" Content="导出" Click="OnExportModsClick" />
-                                            <Button x:Name="DeleteSelectedModsButton" Grid.Column="6" Classes="SecondaryActionButton DangerButton" Content="删除" Click="OnDeleteSelectedModsClick" />
-                                            <Button x:Name="RefreshModsButton" Grid.Column="7" Classes="SecondaryActionButton" Content="刷新" Click="OnRefreshModsClick" />
+                                            <Button x:Name="BrowseModFoldersButton" Grid.Column="3" Classes="SecondaryActionButton" Content="文件夹" Click="OnBrowseModFoldersClick" />
+                                            <Button x:Name="ImportModZipButton" Grid.Column="4" Classes="SecondaryActionButton" Content="导入" Click="OnImportModZipClick" />
+                                            <StackPanel Grid.Row="1" Grid.ColumnSpan="5" Orientation="Horizontal" Spacing="8">
+                                                <Button x:Name="CheckModUpdatesButton" Classes="SecondaryActionButton" Content="检查更新" Click="OnCheckModUpdatesClick" />
+                                                <Button x:Name="ExportModsButton" Classes="SecondaryActionButton" Content="导出" Click="OnExportModsClick" />
+                                                <Button x:Name="DeleteSelectedModsButton" Classes="SecondaryActionButton DangerButton" Content="删除" Click="OnDeleteSelectedModsClick" />
+                                                <Button x:Name="RefreshModsButton" Classes="SecondaryActionButton" Content="刷新" Click="OnRefreshModsClick" />
+                                            </StackPanel>
                                         </Grid>
                                         <TextBlock x:Name="ModStatusTextBlock" Grid.Row="1" Classes="ConfigHintText" TextWrapping="Wrap" />
                                         <Grid Grid.Row="2" RowDefinitions="Auto,*">
@@ -2970,6 +2973,24 @@
                                                         <StackPanel Classes="ConfigFormField">
                                                             <TextBlock x:Name="RobotFallbackEncodingLabelTextBlock" Classes="ConfigFieldLabel" Text="回退编码" />
                                                             <TextBox x:Name="RobotFallbackEncodingTextBox" Classes="CompactInput" />
+                                                        </StackPanel>
+                                                    </WrapPanel>
+                                                    <WrapPanel Orientation="Horizontal">
+                                                        <StackPanel Classes="ToggleField">
+                                                            <TextBlock x:Name="RobotRelayChatLabelTextBlock" Classes="ConfigFieldLabel" Text="转发游戏聊天" />
+                                                            <ToggleSwitch x:Name="RobotRelayChatCheckBox" Classes="LabelledToggle" />
+                                                        </StackPanel>
+                                                        <StackPanel Classes="ToggleField">
+                                                            <TextBlock x:Name="RobotRelayPlayerLabelTextBlock" Classes="ConfigFieldLabel" Text="转发玩家事件" />
+                                                            <ToggleSwitch x:Name="RobotRelayPlayerCheckBox" Classes="LabelledToggle" />
+                                                        </StackPanel>
+                                                        <StackPanel Classes="ToggleField">
+                                                            <TextBlock x:Name="RobotRelayServerLabelTextBlock" Classes="ConfigFieldLabel" Text="转发服务器通知" />
+                                                            <ToggleSwitch x:Name="RobotRelayServerCheckBox" Classes="LabelledToggle" />
+                                                        </StackPanel>
+                                                        <StackPanel Classes="ToggleField">
+                                                            <TextBlock x:Name="RobotPlayerBindingLabelTextBlock" Classes="ConfigFieldLabel" Text="允许 QQ 玩家绑定" />
+                                                            <ToggleSwitch x:Name="RobotPlayerBindingCheckBox" Classes="LabelledToggle" />
                                                         </StackPanel>
                                                     </WrapPanel>
                                                     <TextBlock x:Name="RobotBridgeSourceHintTextBlock" Classes="ConfigHintText" Text="机器人通过服务器桥接按需查询并订阅事件。" IsVisible="False" />

@@ -17,6 +17,17 @@ public class RobotSettings
 
     public IReadOnlyList<RobotTeleportPoint> TeleportPoints { get; init; } = [];
 
+    /// <summary>Whether game chat events are relayed from the server to QQ groups.</summary>
+    public bool RelayChatMessages { get; init; } = true;
+
+    /// <summary>Whether player lifecycle events (join, leave, death) are relayed to QQ groups.</summary>
+    public bool RelayPlayerEvents { get; init; } = true;
+
+    /// <summary>Whether server notification events are relayed to QQ groups.</summary>
+    public bool RelayServerNotifications { get; init; } = true;
+
+    public bool EnablePlayerBinding { get; init; } = true;
+
     public int ReconnectIntervalSec { get; init; } = 5;
 
     public string DatabasePath { get; init; } = string.Empty;

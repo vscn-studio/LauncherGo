@@ -427,6 +427,12 @@ public sealed class Vs2QQProcessService
         string playerName,
         CancellationToken cancellationToken)
     {
+        if (!runtime.Settings.EnablePlayerBinding)
+        {
+            await ReplyAsync(runtime, eventPayload, "QQ 玩家绑定已关闭。", cancellationToken);
+            return;
+        }
+
         if (!IsGroupMessage(eventPayload))
         {
             await ReplyAsync(runtime, eventPayload, "请在已绑定服务器的 QQ 群中使用 /bind <游戏玩家名>。", cancellationToken);
@@ -1227,7 +1233,7 @@ public sealed class Vs2QQProcessService
         cancellationToken.ThrowIfCancellationRequested();
         var name = NormalizeDisplayText(evt.Data["name"]?.GetValue<string>());
         var content = NormalizeInboundServerText(name, evt.Data["message"]?.GetValue<string>());
-        if (evt.Event == "chat")
+        if (evt.Event == "chat" && runtime.Settings.EnablePlayerBinding)
         {
             var completed = runtime.PlayerBindings.TryComplete(
                 profileId,
@@ -1243,6 +1249,14 @@ public sealed class Vs2QQProcessService
                 try { await runtime.OneBot.SendPrivateMsgAsync(completed.QqUserId, confirmation, cancellationToken).ConfigureAwait(false); } catch { }
             }
         }
+
+        // Chat is still consumed above for player-binding verification even when
+        // its relay is disabled. The switches only control server-to-QQ relays.
+        if (!ShouldRelayBridgeEvent(runtime.Settings, evt.Event))
+        {
+            return;
+        }
+
         var deathReason = evt.Event == "player.died" ? FormatDeathReason(evt.Data) : string.Empty;
         var deathNotification = evt.Event == "player.died" ? FormatDeathNotification(evt.Data, name) : string.Empty;
         // The server may echo the bridge's own /announce payload back through
@@ -1269,6 +1283,17 @@ public sealed class Vs2QQProcessService
             cancellationToken.ThrowIfCancellationRequested();
             try { await runtime.OneBot.SendGroupMsgAsync(groupId, message, cancellationToken).ConfigureAwait(false); } catch { }
         }
+    }
+
+    private static bool ShouldRelayBridgeEvent(RobotSettings settings, string eventName)
+    {
+        return eventName.Trim().ToLowerInvariant() switch
+        {
+            "chat" => settings.RelayChatMessages,
+            "player.joined" or "player.left" or "player.died" => settings.RelayPlayerEvents,
+            "server.notification" => settings.RelayServerNotifications,
+            _ => false
+        };
     }
 
     private async Task MaintainBridgeSubscriptionAsync(
@@ -2385,7 +2410,11 @@ public sealed class Vs2QQProcessService
             DatabasePath = dbPath,
             DefaultEncoding = defaultEncoding,
             FallbackEncoding = fallbackEncoding,
-            SuperUsers = normalizedSuperUsers
+            SuperUsers = normalizedSuperUsers,
+            RelayChatMessages = settings.RelayChatMessages,
+            RelayPlayerEvents = settings.RelayPlayerEvents,
+            RelayServerNotifications = settings.RelayServerNotifications,
+            EnablePlayerBinding = settings.EnablePlayerBinding
         });
     }
 

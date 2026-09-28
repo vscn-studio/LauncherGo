@@ -207,6 +207,10 @@ public sealed class LauncherPreferencesService : ILauncherPreferencesService
             DefaultEncoding = string.IsNullOrWhiteSpace(source.DefaultEncoding) ? "utf-8" : source.DefaultEncoding.Trim(),
             FallbackEncoding = string.IsNullOrWhiteSpace(source.FallbackEncoding) ? "gbk" : source.FallbackEncoding.Trim(),
             SuperUsersText = superUsersText,
+            RelayChatMessages = source.RelayChatMessages,
+            RelayPlayerEvents = source.RelayPlayerEvents,
+            RelayServerNotifications = source.RelayServerNotifications,
+            EnablePlayerBinding = source.EnablePlayerBinding,
             ProfileBindings = bindings,
             CustomCommands = RobotCustomCommandRules.NormalizeMany(source.CustomCommands),
             TeleportPoints = RobotTeleportPointRules.NormalizeMany(source.TeleportPoints)

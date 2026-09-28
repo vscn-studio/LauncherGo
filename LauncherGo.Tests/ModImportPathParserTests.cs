@@ -34,4 +34,18 @@ public sealed class ModImportPathParserTests
             ["C:\\Mods\\Easy Building.zip", "C:\\Mods\\Another Mod.zip"],
             paths);
     }
+
+    [Fact]
+    public void ParseModImportPaths_TreatsExistingFolderWithSpacesAsSinglePath()
+    {
+        var directory = Directory.CreateTempSubdirectory("launchergo-mod folder-");
+        try
+        {
+            Assert.Equal([directory.FullName], ModImportPathParser.Parse(directory.FullName));
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
 }

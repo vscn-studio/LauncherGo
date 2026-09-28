@@ -24,6 +24,14 @@ public sealed class RobotIntegrationSettings
 
     public List<RobotTeleportPoint> TeleportPoints { get; set; } = [];
 
+    public bool RelayChatMessages { get; set; } = true;
+
+    public bool RelayPlayerEvents { get; set; } = true;
+
+    public bool RelayServerNotifications { get; set; } = true;
+
+    public bool EnablePlayerBinding { get; set; } = true;
+
 }
 
 public sealed class RobotProfileBinding

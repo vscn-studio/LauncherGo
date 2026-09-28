@@ -10,7 +10,7 @@ internal static class ModImportPathParser
     internal static IReadOnlyList<string> Parse(string raw)
     {
         var trimmedRaw = raw.Trim();
-        if (File.Exists(trimmedRaw))
+        if (File.Exists(trimmedRaw) || Directory.Exists(trimmedRaw))
             return [trimmedRaw];
 
         var paths = new List<string>();

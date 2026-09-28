@@ -98,17 +98,10 @@ public class InstanceModService(IInstanceServerConfigService serverConfigService
             throw new InvalidOperationException("Mod ZIP 文件不存在。");
         if (!Path.GetExtension(zipPath).Equals(".zip", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("仅支持导入 ZIP 格式 Mod。");
-
-        var modsPath = WorkspacePathHelper.GetProfileModsPath(profile.DirectoryPath);
-        Directory.CreateDirectory(modsPath);
-
-        var fileName = WorkspacePathHelper.SanitizeFileName(Path.GetFileName(zipPath));
-        var destinationPath = Path.Combine(modsPath, fileName);
-        File.Copy(zipPath, destinationPath, overwrite: true);
-
-        var disabledSet = await LoadDisabledModSetAsync(profile, cancellationToken);
-        var modConfigPath = Path.Combine(WorkspacePathHelper.ResolveProfileDataPath(profile.DirectoryPath), "ModConfig");
-        return ReadModFromZip(destinationPath, disabledSet, modConfigPath);
+        var imported = await ImportModsAsync(profile, [zipPath], cancellationToken);
+        return imported.Count == 1
+            ? imported[0]
+            : throw new InvalidOperationException("ZIP 文件不包含有效的 modinfo.json。");
     }
 
     /// <inheritdoc />
@@ -139,6 +132,7 @@ public class InstanceModService(IInstanceServerConfigService serverConfigService
         var modConfigPath = Path.Combine(WorkspacePathHelper.ResolveProfileDataPath(profile.DirectoryPath), "ModConfig");
         var disabledSet = await LoadDisabledModSetAsync(profile, cancellationToken);
         var tempPath = Path.Combine(modsPath, $".launchergoupdate-{Guid.NewGuid():N}.zip");
+        var extractedPath = Path.Combine(Path.GetDirectoryName(modsPath)!, $".launchergoupdate-{Guid.NewGuid():N}");
         var backupPath = existingPath + $".launchergobak-{Guid.NewGuid():N}";
 
         try
@@ -160,22 +154,28 @@ public class InstanceModService(IInstanceServerConfigService serverConfigService
                 throw new InvalidOperationException("下载的模组包与当前模组不匹配。");
             }
 
-            var destinationPath = File.Exists(existingPath) &&
-                                  Path.GetExtension(existingPath).Equals(".zip", StringComparison.OrdinalIgnoreCase)
-                ? existingPath
-                : Path.Combine(
-                    modsPath,
-                    WorkspacePathHelper.SanitizeFileName($"{downloadedMod.ModId}-{downloadedMod.Version}.zip"));
+            var updateDirectory = Directory.Exists(existingPath);
+            var destinationPath = Path.Combine(modsPath,
+                BuildCanonicalModName(downloadedMod) + (updateDirectory ? string.Empty : ".zip"));
             if (!PathsEqual(destinationPath, existingPath) &&
                 (File.Exists(destinationPath) || Directory.Exists(destinationPath)))
             {
                 throw new InvalidOperationException("更新目标文件已存在。");
             }
 
+            string? extractedModRoot = null;
+            if (updateDirectory)
+            {
+                extractedModRoot = ExtractModDirectory(tempPath, extractedPath, installedMod.ModId);
+            }
+
             MoveToBackup(existingPath, backupPath);
             try
             {
-                File.Move(tempPath, destinationPath);
+                if (updateDirectory)
+                    Directory.Move(extractedModRoot!, destinationPath);
+                else
+                    File.Move(tempPath, destinationPath);
                 await SetModEnabledAsync(profile, downloadedMod.ModId, downloadedMod.Version, !installedMod.IsDisabled, cancellationToken);
             }
             catch
@@ -203,6 +203,7 @@ public class InstanceModService(IInstanceServerConfigService serverConfigService
         finally
         {
             TryDeletePath(tempPath);
+            TryDeletePath(extractedPath);
         }
     }
 
@@ -228,13 +229,99 @@ public class InstanceModService(IInstanceServerConfigService serverConfigService
         foreach (var sourcePath in candidates)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var destination = Path.Combine(modsPath, WorkspacePathHelper.SanitizeFileName(Path.GetFileName(sourcePath)));
+            var isDirectory = Directory.Exists(sourcePath);
+            var sourceMod = isDirectory
+                ? ReadModFromDirectory(sourcePath, disabledSet, modConfigPath)
+                : ReadModFromZip(sourcePath, disabledSet, modConfigPath);
+            if (sourceMod.Status == "InvalidMetadata")
+                continue;
+
+            var destination = Path.Combine(modsPath, BuildCanonicalModName(sourceMod) + (isDirectory ? string.Empty : ".zip"));
             if (!PathsEqual(sourcePath, destination))
-                File.Copy(sourcePath, destination, overwrite: true);
-            imported.Add(ReadModFromZip(destination, disabledSet, modConfigPath));
+            {
+                var stagedPath = Path.Combine(Path.GetDirectoryName(modsPath)!,
+                    $".launchergoimport-{Guid.NewGuid():N}" + (isDirectory ? string.Empty : ".zip"));
+                try
+                {
+                    if (isDirectory)
+                        CopyDirectory(sourcePath, stagedPath, cancellationToken);
+                    else
+                        File.Copy(sourcePath, stagedPath);
+
+                    var destinationExists = File.Exists(destination) || Directory.Exists(destination);
+                    if (destinationExists)
+                    {
+                        var existingMod = Directory.Exists(destination)
+                            ? ReadModFromDirectory(destination, disabledSet, modConfigPath)
+                            : ReadModFromZip(destination, disabledSet, modConfigPath);
+                        if (!existingMod.ModId.Equals(sourceMod.ModId, StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidOperationException($"模组目标名称已被其他模组占用：{Path.GetFileName(destination)}");
+                    }
+
+                    var backupPath = destination + $".launchergobak-{Guid.NewGuid():N}";
+                    if (destinationExists)
+                        MoveToBackup(destination, backupPath);
+                    try
+                    {
+                        if (isDirectory)
+                            Directory.Move(stagedPath, destination);
+                        else
+                            File.Move(stagedPath, destination);
+                    }
+                    catch
+                    {
+                        TryRestoreBackup(backupPath, destination);
+                        throw;
+                    }
+
+                    TryDeletePath(backupPath);
+                }
+                finally
+                {
+                    TryDeletePath(stagedPath);
+                }
+            }
+
+            imported.Add(isDirectory
+                ? ReadModFromDirectory(destination, disabledSet, modConfigPath)
+                : ReadModFromZip(destination, disabledSet, modConfigPath));
         }
 
         return imported;
+    }
+
+    public Task<int> NormalizeModNamesAsync(InstanceProfile profile, CancellationToken cancellationToken = default)
+    {
+        var modsPath = WorkspacePathHelper.GetProfileModsPath(profile.DirectoryPath);
+        Directory.CreateDirectory(modsPath);
+        var renamed = 0;
+        foreach (var sourcePath in Directory.EnumerateFileSystemEntries(modsPath, "*", SearchOption.TopDirectoryOnly))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var isDirectory = Directory.Exists(sourcePath);
+            if (!isDirectory && !Path.GetExtension(sourcePath).Equals(".zip", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var mod = isDirectory
+                ? ReadModFromDirectory(sourcePath, [], string.Empty)
+                : ReadModFromZip(sourcePath, [], string.Empty);
+            if (mod.Status == "InvalidMetadata")
+                continue;
+
+            var destination = Path.Combine(modsPath, BuildCanonicalModName(mod) + (isDirectory ? string.Empty : ".zip"));
+            if (PathsEqual(sourcePath, destination))
+                continue;
+            if (File.Exists(destination) || Directory.Exists(destination))
+                throw new InvalidOperationException($"模组目标名称已存在：{Path.GetFileName(destination)}");
+
+            if (isDirectory)
+                Directory.Move(sourcePath, destination);
+            else
+                File.Move(sourcePath, destination);
+            renamed++;
+        }
+
+        return Task.FromResult(renamed);
     }
 
     /// <inheritdoc />
@@ -501,6 +588,8 @@ public class InstanceModService(IInstanceServerConfigService serverConfigService
                 continue;
             }
 
+            if (Directory.Exists(path) && File.Exists(Path.Combine(path, "modinfo.json")))
+                AddCandidate(path, candidates, seen);
         }
 
         return candidates;
@@ -544,6 +633,51 @@ public class InstanceModService(IInstanceServerConfigService serverConfigService
         }
 
         return null;
+    }
+
+    private static string BuildCanonicalModName(ModEntry mod)
+    {
+        var name = string.IsNullOrWhiteSpace(mod.Name) ? mod.ModId : mod.Name;
+        var version = string.IsNullOrWhiteSpace(mod.Version) ? "unknown" : mod.Version;
+        var sanitized = WorkspacePathHelper.SanitizeFileName($"{name.Trim()}-{version.Trim()}")
+            .TrimEnd(' ', '.');
+        return string.IsNullOrWhiteSpace(sanitized) ? "unnamed-unknown" : sanitized;
+    }
+
+    internal static string ExtractModDirectory(string zipPath, string destinationPath, string expectedModId)
+    {
+        ZipFile.ExtractToDirectory(zipPath, destinationPath);
+        return Directory.EnumerateFiles(destinationPath, "*", SearchOption.AllDirectories)
+            .Where(path => Path.GetFileName(path).Equals("modinfo.json", StringComparison.OrdinalIgnoreCase))
+            .Select(Path.GetDirectoryName)
+            .FirstOrDefault(path => path is not null &&
+                ReadModFromDirectory(path, [], string.Empty).ModId.Equals(
+                    expectedModId, StringComparison.OrdinalIgnoreCase))
+            ?? throw new InvalidOperationException("下载的模组包没有可导入的模组文件夹。");
+    }
+
+    private static void CopyDirectory(string sourcePath, string destinationPath, CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(destinationPath);
+        try
+        {
+            foreach (var directory in Directory.EnumerateDirectories(sourcePath, "*", SearchOption.AllDirectories))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Directory.CreateDirectory(Path.Combine(destinationPath, Path.GetRelativePath(sourcePath, directory)));
+            }
+
+            foreach (var file in Directory.EnumerateFiles(sourcePath, "*", SearchOption.AllDirectories))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                File.Copy(file, Path.Combine(destinationPath, Path.GetRelativePath(sourcePath, file)));
+            }
+        }
+        catch
+        {
+            Directory.Delete(destinationPath, recursive: true);
+            throw;
+        }
     }
 
     private static string? ReadMetadataString(JsonNode? value)
