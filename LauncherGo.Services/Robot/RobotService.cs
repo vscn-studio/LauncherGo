@@ -131,6 +131,7 @@ public class RobotService : IRobotService
             FallbackEncoding = "gbk",
             SuperUsers = [],
             RelayChatMessages = true,
+            RelayGroupChatToServer = true,
             RelayPlayerEvents = true,
             RelayServerNotifications = true,
             EnablePlayerBinding = true,
@@ -207,6 +208,7 @@ public class RobotService : IRobotService
             FallbackEncoding = fallbackEncoding,
             SuperUsers = superUsers,
             RelayChatMessages = settings.RelayChatMessages,
+            RelayGroupChatToServer = settings.RelayGroupChatToServer,
             RelayPlayerEvents = settings.RelayPlayerEvents,
             RelayServerNotifications = settings.RelayServerNotifications,
             EnablePlayerBinding = settings.EnablePlayerBinding

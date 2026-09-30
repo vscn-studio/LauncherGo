@@ -26,6 +26,8 @@ public sealed class RobotIntegrationSettings
 
     public bool RelayChatMessages { get; set; } = true;
 
+    public bool RelayGroupChatToServer { get; set; } = true;
+
     public bool RelayPlayerEvents { get; set; } = true;
 
     public bool RelayServerNotifications { get; set; } = true;

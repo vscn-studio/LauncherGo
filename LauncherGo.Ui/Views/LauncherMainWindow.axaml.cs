@@ -1347,6 +1347,7 @@ public partial class LauncherMainWindow : Window
         RobotFallbackEncodingLabelTextBlock.Text = T("回退编码", "Fallback Encoding");
         RobotSuperUsersLabelTextBlock.Text = T("超级管理员 QQ", "Super Admin QQ IDs");
         RobotRelayChatLabelTextBlock.Text = T("转发游戏聊天", "Relay game chat");
+        RobotRelayGroupChatToServerLabelTextBlock.Text = T("转发 QQ 聊天到服务器", "Relay QQ chat to server");
         RobotRelayPlayerLabelTextBlock.Text = T("转发玩家事件", "Relay player events");
         RobotRelayServerLabelTextBlock.Text = T("转发服务器通知", "Relay server notifications");
         RobotPlayerBindingLabelTextBlock.Text = T("允许 QQ 玩家绑定", "Allow QQ player binding");
@@ -2991,6 +2992,7 @@ public partial class LauncherMainWindow : Window
             FallbackEncoding = "gbk",
             SuperUsersText = string.Empty,
             RelayChatMessages = true,
+            RelayGroupChatToServer = true,
             RelayPlayerEvents = true,
             RelayServerNotifications = true,
             EnablePlayerBinding = true,
@@ -3862,6 +3864,7 @@ public partial class LauncherMainWindow : Window
         RobotSuperUsersTextBox.LostFocus += OnRobotAutoSaveChanged;
         RobotReconnectNumericUpDown.LostFocus += OnRobotAutoSaveChanged;
         RobotRelayChatCheckBox.IsCheckedChanged += OnRobotAutoSaveChanged;
+        RobotRelayGroupChatToServerCheckBox.IsCheckedChanged += OnRobotAutoSaveChanged;
         RobotRelayPlayerCheckBox.IsCheckedChanged += OnRobotAutoSaveChanged;
         RobotRelayServerCheckBox.IsCheckedChanged += OnRobotAutoSaveChanged;
         RobotPlayerBindingCheckBox.IsCheckedChanged += OnRobotAutoSaveChanged;
@@ -4805,6 +4808,7 @@ public partial class LauncherMainWindow : Window
         RobotFallbackEncodingTextBox.Text = settings.FallbackEncoding;
         RobotSuperUsersTextBox.Text = settings.SuperUsersText;
         RobotRelayChatCheckBox.IsChecked = settings.RelayChatMessages;
+        RobotRelayGroupChatToServerCheckBox.IsChecked = settings.RelayGroupChatToServer;
         RobotRelayPlayerCheckBox.IsChecked = settings.RelayPlayerEvents;
         RobotRelayServerCheckBox.IsChecked = settings.RelayServerNotifications;
         RobotPlayerBindingCheckBox.IsChecked = settings.EnablePlayerBinding;
@@ -5105,6 +5109,7 @@ public partial class LauncherMainWindow : Window
                 : RobotFallbackEncodingTextBox.Text.Trim(),
             SuperUsersText = FormatQqIdText(bindings.Select(static binding => binding.SuperUserId)),
             RelayChatMessages = RobotRelayChatCheckBox.IsChecked == true,
+            RelayGroupChatToServer = RobotRelayGroupChatToServerCheckBox.IsChecked == true,
             RelayPlayerEvents = RobotRelayPlayerCheckBox.IsChecked == true,
             RelayServerNotifications = RobotRelayServerCheckBox.IsChecked == true,
             EnablePlayerBinding = RobotPlayerBindingCheckBox.IsChecked == true,
@@ -5283,6 +5288,7 @@ public partial class LauncherMainWindow : Window
             FallbackEncoding = settings.FallbackEncoding,
             SuperUsers = ParseQqIds(settings.SuperUsersText),
             RelayChatMessages = settings.RelayChatMessages,
+            RelayGroupChatToServer = settings.RelayGroupChatToServer,
             RelayPlayerEvents = settings.RelayPlayerEvents,
             RelayServerNotifications = settings.RelayServerNotifications,
             EnablePlayerBinding = settings.EnablePlayerBinding,

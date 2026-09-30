@@ -23,7 +23,6 @@ public sealed class ModFileArchiveService : IModFileArchiveService
 
         using var archive = new ZipArchive(destination, ZipArchiveMode.Create, leaveOpen: true);
         archive.CreateEntry("Mods/");
-        archive.CreateEntry("ModConfig/");
         var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var mod in mods.Where(mod => ShouldInclude(mod, scope)))
         {
@@ -56,20 +55,6 @@ public sealed class ModFileArchiveService : IModFileArchiveService
                     .Replace(Path.AltDirectorySeparatorChar, '/');
                 var entryName = $"{folderName}/{relativePath}";
                 archive.CreateEntryFromFile(file, entryName, CompressionLevel.Fastest);
-            }
-        }
-
-        var modConfigPath = Path.Combine(
-            WorkspacePathHelper.ResolveProfileDataPath(profile.DirectoryPath), "ModConfig");
-        if (Directory.Exists(modConfigPath))
-        {
-            foreach (var file in Directory.EnumerateFiles(modConfigPath, "*", SearchOption.AllDirectories))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var relativePath = Path.GetRelativePath(modConfigPath, file)
-                    .Replace(Path.DirectorySeparatorChar, '/')
-                    .Replace(Path.AltDirectorySeparatorChar, '/');
-                archive.CreateEntryFromFile(file, $"ModConfig/{relativePath}", CompressionLevel.Fastest);
             }
         }
 

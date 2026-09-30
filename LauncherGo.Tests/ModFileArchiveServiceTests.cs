@@ -41,8 +41,8 @@ public sealed class ModFileArchiveServiceTests
             using var archive = new ZipArchive(output, ZipArchiveMode.Read);
             var names = archive.Entries.Select(static entry => entry.FullName).ToList();
             Assert.Contains("Mods/", names);
-            Assert.Contains("ModConfig/", names);
-            Assert.Contains("ModConfig/nested/settings.json", names);
+            Assert.DoesNotContain("ModConfig/", names);
+            Assert.DoesNotContain("ModConfig/nested/settings.json", names);
             Assert.Contains("Mods/universal/modinfo.json", names);
             Assert.Contains("Mods/universal/data.txt", names);
             Assert.DoesNotContain("Mods/server.zip", names);
@@ -80,8 +80,8 @@ public sealed class ModFileArchiveServiceTests
             using var archive = new ZipArchive(output, ZipArchiveMode.Read);
             var names = archive.Entries.Select(static entry => entry.FullName).ToList();
             Assert.Contains("Mods/", names);
-            Assert.Contains("ModConfig/", names);
-            Assert.Contains("ModConfig/mod.json", names);
+            Assert.DoesNotContain("ModConfig/", names);
+            Assert.DoesNotContain("ModConfig/mod.json", names);
             Assert.Contains("Mods/server.zip", names);
             Assert.Contains("Mods/client.zip", names);
             Assert.Contains("Mods/universal.zip", names);

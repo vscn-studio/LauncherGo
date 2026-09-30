@@ -20,6 +20,9 @@ public class RobotSettings
     /// <summary>Whether game chat events are relayed from the server to QQ groups.</summary>
     public bool RelayChatMessages { get; init; } = true;
 
+    /// <summary>Whether non-command QQ group messages are relayed to the game server.</summary>
+    public bool RelayGroupChatToServer { get; init; } = true;
+
     /// <summary>Whether player lifecycle events (join, leave, death) are relayed to QQ groups.</summary>
     public bool RelayPlayerEvents { get; init; } = true;
 

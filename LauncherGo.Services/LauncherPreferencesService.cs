@@ -208,6 +208,7 @@ public sealed class LauncherPreferencesService : ILauncherPreferencesService
             FallbackEncoding = string.IsNullOrWhiteSpace(source.FallbackEncoding) ? "gbk" : source.FallbackEncoding.Trim(),
             SuperUsersText = superUsersText,
             RelayChatMessages = source.RelayChatMessages,
+            RelayGroupChatToServer = source.RelayGroupChatToServer,
             RelayPlayerEvents = source.RelayPlayerEvents,
             RelayServerNotifications = source.RelayServerNotifications,
             EnablePlayerBinding = source.EnablePlayerBinding,

@@ -2981,6 +2981,10 @@
                                                             <ToggleSwitch x:Name="RobotRelayChatCheckBox" Classes="LabelledToggle" />
                                                         </StackPanel>
                                                         <StackPanel Classes="ToggleField">
+                                                            <TextBlock x:Name="RobotRelayGroupChatToServerLabelTextBlock" Classes="ConfigFieldLabel" Text="转发 QQ 聊天到服务器" />
+                                                            <ToggleSwitch x:Name="RobotRelayGroupChatToServerCheckBox" Classes="LabelledToggle" />
+                                                        </StackPanel>
+                                                        <StackPanel Classes="ToggleField">
                                                             <TextBlock x:Name="RobotRelayPlayerLabelTextBlock" Classes="ConfigFieldLabel" Text="转发玩家事件" />
                                                             <ToggleSwitch x:Name="RobotRelayPlayerCheckBox" Classes="LabelledToggle" />
                                                         </StackPanel>

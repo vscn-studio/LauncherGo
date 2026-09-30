@@ -1696,7 +1696,7 @@ public sealed class Vs2QQProcessService
     private static bool TryBuildOutboundGroupMessage(Vs2QQRuntimeContext runtime, JsonObject eventPayload, string rawMessage, out string outboundMessage)
     {
         outboundMessage = string.Empty;
-        if (!IsGroupMessage(eventPayload))
+        if (!runtime.Settings.RelayGroupChatToServer || !IsGroupMessage(eventPayload))
         {
             return false;
         }
@@ -2412,6 +2412,7 @@ public sealed class Vs2QQProcessService
             FallbackEncoding = fallbackEncoding,
             SuperUsers = normalizedSuperUsers,
             RelayChatMessages = settings.RelayChatMessages,
+            RelayGroupChatToServer = settings.RelayGroupChatToServer,
             RelayPlayerEvents = settings.RelayPlayerEvents,
             RelayServerNotifications = settings.RelayServerNotifications,
             EnablePlayerBinding = settings.EnablePlayerBinding
