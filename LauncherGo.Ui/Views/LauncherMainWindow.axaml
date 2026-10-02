@@ -2233,11 +2233,11 @@
                                                     </DataTemplate>
                                                 </ComboBox.ItemTemplate>
                                             </ComboBox>
-                                            <TextBox x:Name="ModZipPathTextBox" Grid.Column="1" Classes="CompactInput" PlaceholderText="Mod ZIP" />
-                                            <Button x:Name="BrowseModZipButton" Grid.Column="2" Classes="SecondaryActionButton" Content="浏览" Click="OnBrowseModZipClick" />
-                                            <Button x:Name="BrowseModFoldersButton" Grid.Column="3" Classes="SecondaryActionButton" Content="文件夹" Click="OnBrowseModFoldersClick" />
+                                            <TextBox x:Name="ModZipPathTextBox" Grid.Column="1" Classes="CompactInput" PlaceholderText="ZIP 或模组文件夹" />
+                                            <Button x:Name="BrowseModZipButton" Grid.Column="2" Classes="SecondaryActionButton" Content="选择文件/文件夹" Click="OnBrowseModZipClick" />
                                             <Button x:Name="ImportModZipButton" Grid.Column="4" Classes="SecondaryActionButton" Content="导入" Click="OnImportModZipClick" />
                                             <StackPanel Grid.Row="1" Grid.ColumnSpan="5" Orientation="Horizontal" Spacing="8">
+                                                <TextBox x:Name="ModSearchTextBox" Width="220" Classes="CompactInput" PlaceholderText="搜索模组名称、Mod ID 或版本" TextChanged="OnModSearchTextChanged" />
                                                 <Button x:Name="CheckModUpdatesButton" Classes="SecondaryActionButton" Content="检查更新" Click="OnCheckModUpdatesClick" />
                                                 <Button x:Name="ExportModsButton" Classes="SecondaryActionButton" Content="导出" Click="OnExportModsClick" />
                                                 <Button x:Name="DeleteSelectedModsButton" Classes="SecondaryActionButton DangerButton" Content="删除" Click="OnDeleteSelectedModsClick" />
@@ -2266,14 +2266,14 @@
                                                 <ListBox x:Name="ModsListBox" Classes="FlatList TableList" SelectionMode="Multiple" SelectionChanged="OnModsSelectionChanged">
                                                     <ListBox.ItemTemplate>
                                                         <DataTemplate>
-                                                            <Grid ColumnDefinitions="44,1.15*,1.1*,.7*,.7*,1.1*,1.1*,1.8*,2.2*,58,96,82" ColumnSpacing="8" MinHeight="36">
+                                                            <Grid ColumnDefinitions="44,1.15*,1.1*,.7*,.7*,1.1*,1.1*,1.8*,2.2*,58,96,82" ColumnSpacing="8" MinHeight="36" Background="{Binding RowBackground}">
                                                                 <CheckBox Classes="TableSelectCheck" IsChecked="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}, Mode=TwoWay}" />
                                                                 <TextBlock Grid.Column="1" Classes="TableCellText" Text="{Binding Name}" />
                                                                 <TextBlock Grid.Column="2" Classes="TableCellText" Text="{Binding ModId}" FontWeight="SemiBold" />
-                                                                <TextBlock Grid.Column="3" Classes="TableCellText" Text="{Binding Version}" />
+                                                                <TextBlock Grid.Column="3" Classes="TableCellText" Text="{Binding Version}" Foreground="{Binding VersionBrush}" FontWeight="{Binding VersionFontWeight}" />
                                                                 <TextBlock Grid.Column="4" Classes="TableCellText" Text="{Binding Side}" />
                                                                 <TextBlock Grid.Column="5" Classes="TableCellText" Text="{Binding DependenciesText}" />
-                                                                <TextBlock Grid.Column="6" Classes="TableCellText" Text="{Binding IssuesText}" />
+                                                                <TextBlock Grid.Column="6" Classes="TableCellText" Text="{Binding IssuesText}" Foreground="{Binding ConflictBrush}" />
                                                                 <Button Grid.Column="7" Classes="DownloadTextButton TablePathButton" Tag="{Binding ConfigPath}" HorizontalAlignment="Stretch" Click="OnOpenModConfigPathClick">
                                                                     <TextBlock Classes="TableCellText TablePathText" Text="{Binding ConfigPath}" Foreground="{DynamicResource DownloadActionTextBrush}" />
                                                                 </Button>

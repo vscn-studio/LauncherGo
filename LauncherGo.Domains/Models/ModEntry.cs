@@ -21,6 +21,12 @@ public class ModEntry
 
     public bool IsDisabled { get; init; }
 
+    /// <summary>同一 modid 在当前 Mods 目录中存在多个安装项。</summary>
+    public bool IsDuplicate { get; init; }
+
+    /// <summary>同一 modid 存在多个版本。</summary>
+    public bool IsVersionConflict { get; init; }
+
     public IReadOnlyList<ModDependency> Dependencies { get; init; } = [];
 
     public IReadOnlyList<string> DependencyIssues { get; init; } = [];

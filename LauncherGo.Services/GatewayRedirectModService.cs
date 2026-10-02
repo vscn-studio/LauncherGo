@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using LauncherGo.Abstractions.Services;
@@ -57,7 +58,9 @@ public sealed class GatewayRedirectModService(IInstanceServerConfigService serve
             cancellationToken.ThrowIfCancellationRequested();
             var profile = profilesById[backend.ProfileId];
             var modsPath = WorkspacePathHelper.GetProfileModsPath(profile.DirectoryPath);
+            Directory.CreateDirectory(modsPath);
             var destination = Path.Combine(modsPath, ModFolderName);
+            RemoveOtherInstalledCopies(modsPath, destination);
             SyncDirectory(sourceRoot, destination);
 
             var configPath = Path.Combine(
@@ -136,6 +139,44 @@ public sealed class GatewayRedirectModService(IInstanceServerConfigService serve
         if (Directory.Exists(fallback)) return fallback;
 
         throw new InvalidOperationException($"未找到内置重定向模组文件：{primary}；{fallback}");
+    }
+
+    private static void RemoveOtherInstalledCopies(string modsPath, string destination)
+    {
+        var destinationFull = Path.GetFullPath(destination).TrimEnd(Path.DirectorySeparatorChar);
+        foreach (var path in Directory.EnumerateFileSystemEntries(modsPath, "*", SearchOption.TopDirectoryOnly))
+        {
+            if (string.Equals(Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar), destinationFull, StringComparison.OrdinalIgnoreCase)) continue;
+            try
+            {
+                string? modId = null;
+                if (Directory.Exists(path))
+                {
+                    var info = Path.Combine(path, "modinfo.json");
+                    if (File.Exists(info)) modId = ReadModId(File.ReadAllText(info));
+                }
+                else if (Path.GetExtension(path).Equals(".zip", StringComparison.OrdinalIgnoreCase))
+                {
+                    using var archive = ZipFile.OpenRead(path);
+                    var entry = archive.Entries.FirstOrDefault(item => item.FullName.EndsWith("modinfo.json", StringComparison.OrdinalIgnoreCase));
+                    if (entry is not null) using (var reader = new StreamReader(entry.Open())) modId = ReadModId(reader.ReadToEnd());
+                }
+                if (!string.Equals(modId, ModId, StringComparison.OrdinalIgnoreCase)) continue;
+                if (Directory.Exists(path)) Directory.Delete(path, true); else File.Delete(path);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private static string? ReadModId(string json)
+    {
+        try
+        {
+            var node = JsonNode.Parse(json) as JsonObject;
+            return node?.FirstOrDefault(pair => pair.Key.Equals("modid", StringComparison.OrdinalIgnoreCase)).Value?.GetValue<string>();
+        }
+        catch { return null; }
     }
 
     private static void SyncDirectory(string sourcePath, string destinationPath)

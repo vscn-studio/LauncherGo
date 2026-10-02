@@ -1065,8 +1065,7 @@ public partial class LauncherMainWindow : Window
     private void InitializeModStaticTexts()
     {
         ModZipPathTextBox.PlaceholderText = T("Mod ZIP 或文件夹", "Mod ZIP or folder");
-        BrowseModZipButton.Content = T("ZIP", "ZIP");
-        BrowseModFoldersButton.Content = T("文件夹", "Folders");
+        BrowseModZipButton.Content = T("选择文件/文件夹", "Select file/folder");
         ToolTip.SetTip(ModSelectAllCheckBox, T("全选/取消全选模组", "Select or clear all mods"));
         ImportModZipButton.Content = T("导入", "Import");
         DeleteSelectedModsButton.Content = T("删除", "Delete");
@@ -3089,9 +3088,16 @@ public partial class LauncherMainWindow : Window
         }
 
         var mods = await _instanceModService.GetModsAsync(profile);
+        var search = ModSearchTextBox?.Text?.Trim() ?? string.Empty;
+        var visibleMods = string.IsNullOrWhiteSpace(search)
+            ? mods
+            : mods.Where(mod => mod.Name.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                                mod.ModId.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                                mod.Version.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                                mod.FilePath.Contains(search, StringComparison.OrdinalIgnoreCase)).ToList();
         var cachedChecks = _preferencesService.Load().ModUpdateChecks.Values.ToList();
         _modItems.Clear();
-        foreach (var mod in mods)
+        foreach (var mod in visibleMods)
         {
             _modItems.Add(ModListItem.FromModel(
                 mod,
@@ -3104,8 +3110,18 @@ public partial class LauncherMainWindow : Window
         var enabledCount = mods.Count(static mod => !mod.IsDisabled);
         var disabledCount = mods.Count - enabledCount;
         SetModStatus(T(
-            $"已加载 {mods.Count} 个模组，启用 {enabledCount} 个，关闭 {disabledCount} 个。",
-            $"Loaded {mods.Count} mods, {enabledCount} enabled, {disabledCount} disabled."), notify: false);
+            string.IsNullOrWhiteSpace(search)
+                ? $"已加载 {mods.Count} 个模组，启用 {enabledCount} 个，关闭 {disabledCount} 个。"
+                : $"显示 {visibleMods.Count}/{mods.Count} 个模组，启用 {enabledCount} 个，关闭 {disabledCount} 个。",
+            string.IsNullOrWhiteSpace(search)
+                ? $"Loaded {mods.Count} mods, {enabledCount} enabled, {disabledCount} disabled."
+                : $"Showing {visibleMods.Count}/{mods.Count} mods, {enabledCount} enabled, {disabledCount} disabled."), notify: false);
+    }
+
+    private void OnModSearchTextChanged(object? sender, TextChangedEventArgs e)
+    {
+        if (!_isRefreshingMods)
+            _ = LoadModsForSelectedProfileAsync();
     }
 
     private void UpdateCheckModButtonText(string? profileId = null)
@@ -8404,21 +8420,15 @@ public partial class LauncherMainWindow : Window
             .Where(static path => !string.IsNullOrWhiteSpace(path))
             .Cast<string>()
             .ToList();
-        if (paths.Count > 0)
-            AddModImportPaths(paths);
-    }
-
-    private async void OnBrowseModFoldersClick(object? sender, RoutedEventArgs e)
-    {
         var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
             Title = T("选择模组文件夹（可多选）", "Select mod folders"),
             AllowMultiple = true
         });
-        var paths = folders.Select(TryGetLocalPath)
+        paths.AddRange(folders.Select(TryGetLocalPath)
             .Where(static path => !string.IsNullOrWhiteSpace(path))
             .Cast<string>()
-            .ToList();
+            );
         if (paths.Count > 0)
             AddModImportPaths(paths);
     }
@@ -13999,6 +14009,9 @@ public partial class LauncherMainWindow : Window
         private static readonly IBrush UpdateLatestBrush = new SolidColorBrush(Color.Parse("#4CAF50"));
         private static readonly IBrush UpdateFailedBrush = new SolidColorBrush(Color.Parse("#F44336"));
         private static readonly IBrush UpdateNeutralBrush = new SolidColorBrush(Color.Parse("#8A8A8A"));
+        private static readonly IBrush ConflictRedBrush = new SolidColorBrush(Color.Parse("#D32F2F"));
+        private static readonly IBrush ConflictRowBrush = new SolidColorBrush(Color.Parse("#22D32F2F"));
+        private static readonly IBrush NormalRowBrush = Brushes.Transparent;
         private bool _isSelected;
         private bool _isChinese;
         private ModUpdateState _updateState;
@@ -14020,6 +14033,18 @@ public partial class LauncherMainWindow : Window
         public bool CanEditConfig => IsEditableConfigFile(ConfigPath);
 
         public bool IsDisabled { get; init; }
+
+        public bool IsDuplicate { get; init; }
+
+        public bool IsVersionConflict { get; init; }
+
+        public IBrush ConflictBrush => IsDuplicate || IsVersionConflict ? ConflictRedBrush : Brushes.Gray;
+
+        public IBrush VersionBrush => IsDuplicate || IsVersionConflict ? ConflictRedBrush : Brushes.Gray;
+
+        public FontWeight VersionFontWeight => IsDuplicate || IsVersionConflict ? FontWeight.Bold : FontWeight.Normal;
+
+        public IBrush RowBackground => IsDuplicate || IsVersionConflict ? ConflictRowBrush : NormalRowBrush;
 
         public bool ModEnabled => !IsDisabled;
 
@@ -14062,6 +14087,8 @@ public partial class LauncherMainWindow : Window
                 ConfigPath = model.ConfigPath,
                 EditConfigText = isChinese ? "编辑" : "Edit",
                 IsDisabled = model.IsDisabled,
+                IsDuplicate = model.IsDuplicate,
+                IsVersionConflict = model.IsVersionConflict,
                 DependenciesText = model.DependenciesText,
                 IssuesText = BuildModIssuesText(model, isChinese)
             };
@@ -14154,6 +14181,8 @@ public partial class LauncherMainWindow : Window
                 ConfigPath = item.ConfigPath,
                 Status = item.IsDisabled ? "Disabled" : "OK",
                 IsDisabled = item.IsDisabled,
+                IsDuplicate = item.IsDuplicate,
+                IsVersionConflict = item.IsVersionConflict,
                 Dependencies = [],
                 DependencyIssues = []
             };
@@ -14196,6 +14225,13 @@ public partial class LauncherMainWindow : Window
                     ? $"缺少依赖: {dependency}"
                     : $"Missing dependency: {dependency}";
             }
+
+            if (value.Equals("重复模组", StringComparison.OrdinalIgnoreCase) ||
+                value.Equals("Duplicate mod", StringComparison.OrdinalIgnoreCase))
+                return isChinese ? "重复模组" : "Duplicate mod";
+            if (value.Equals("版本冲突", StringComparison.OrdinalIgnoreCase) ||
+                value.Equals("Version conflict", StringComparison.OrdinalIgnoreCase))
+                return isChinese ? "版本冲突" : "Version conflict";
 
             return issue;
         }

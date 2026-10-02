@@ -70,6 +70,14 @@ public class InstanceModService(IInstanceServerConfigService serverConfigService
             }
 
             var status = issues.Count > 0 ? "MissingDependency" : mod.Status;
+            var sameId = entries.Where(other => other.ModId.Equals(mod.ModId, StringComparison.OrdinalIgnoreCase)).ToList();
+            var duplicate = sameId.Count > 1;
+            var versionConflict = sameId.Select(static other => other.Version)
+                .Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1;
+            if (duplicate)
+                issues.Add("重复模组");
+            if (versionConflict)
+                issues.Add("版本冲突");
             return new ModEntry
             {
                 Name = mod.Name,
@@ -80,6 +88,8 @@ public class InstanceModService(IInstanceServerConfigService serverConfigService
                 ConfigPath = mod.ConfigPath,
                 Status = status,
                 IsDisabled = mod.IsDisabled,
+                IsDuplicate = duplicate,
+                IsVersionConflict = versionConflict,
                 Dependencies = mod.Dependencies,
                 DependencyIssues = issues
             };
@@ -197,7 +207,9 @@ public class InstanceModService(IInstanceServerConfigService serverConfigService
                 Status = downloadedMod.Status,
                 IsDisabled = installedMod.IsDisabled,
                 Dependencies = downloadedMod.Dependencies,
-                DependencyIssues = downloadedMod.DependencyIssues
+                DependencyIssues = downloadedMod.DependencyIssues,
+                IsDuplicate = downloadedMod.IsDuplicate,
+                IsVersionConflict = downloadedMod.IsVersionConflict
             };
         }
         finally
@@ -312,7 +324,21 @@ public class InstanceModService(IInstanceServerConfigService serverConfigService
             if (PathsEqual(sourcePath, destination))
                 continue;
             if (File.Exists(destination) || Directory.Exists(destination))
-                throw new InvalidOperationException($"模组目标名称已存在：{Path.GetFileName(destination)}");
+            {
+                var existing = Directory.Exists(destination)
+                    ? ReadModFromDirectory(destination, [], string.Empty)
+                    : ReadModFromZip(destination, [], string.Empty);
+                if (!existing.ModId.Equals(mod.ModId, StringComparison.OrdinalIgnoreCase))
+                {
+                    var suffix = WorkspacePathHelper.SanitizeFileName(mod.ModId).TrimEnd(' ', '.');
+                    destination = Path.Combine(
+                        modsPath,
+                        $"{BuildCanonicalModName(mod)}-{suffix}" + (isDirectory ? string.Empty : ".zip"));
+                }
+
+                if (File.Exists(destination) || Directory.Exists(destination))
+                    throw new InvalidOperationException($"模组目标名称已存在：{Path.GetFileName(destination)}");
+            }
 
             if (isDirectory)
                 Directory.Move(sourcePath, destination);
@@ -637,6 +663,8 @@ public class InstanceModService(IInstanceServerConfigService serverConfigService
 
     private static string BuildCanonicalModName(ModEntry mod)
     {
+        // Keep the familiar name-version layout for compatibility; identity and
+        // duplicate detection always come from modinfo.json.ModId.
         var name = string.IsNullOrWhiteSpace(mod.Name) ? mod.ModId : mod.Name;
         var version = string.IsNullOrWhiteSpace(mod.Version) ? "unknown" : mod.Version;
         var sanitized = WorkspacePathHelper.SanitizeFileName($"{name.Trim()}-{version.Trim()}")

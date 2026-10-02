@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using LauncherGo.Abstractions.Services;
@@ -158,6 +159,7 @@ public sealed class ServerAuthService : IServerAuthService
         var sourceRoot = ResolveEmbeddedAuthSourceRoot();
 
         MigrateLegacyAuthModDirectory(modsPath, destination);
+        RemoveOtherInstalledCopies(modsPath, destination, AuthModId, LegacyAuthModId);
         SyncDirectory(sourceRoot, destination);
         CleanupLegacyAuthModDirectory(modsPath, destination);
         await SetAuthModEnabledAsync(profile, enableMod, cancellationToken);
@@ -266,6 +268,56 @@ public sealed class ServerAuthService : IServerAuthService
                 continue;
             TryDeleteDirectory(directory);
         }
+    }
+
+    private static void RemoveOtherInstalledCopies(string modsPath, string destination, params string[] modIds)
+    {
+        var ids = modIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in Directory.EnumerateFileSystemEntries(modsPath, "*", SearchOption.TopDirectoryOnly))
+        {
+            if (string.Equals(Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar),
+                    Path.GetFullPath(destination).TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+                continue;
+            try
+            {
+                var modId = Directory.Exists(path)
+                    ? ReadModIdFromDirectory(path)
+                    : Path.GetExtension(path).Equals(".zip", StringComparison.OrdinalIgnoreCase)
+                        ? ReadModIdFromZip(path)
+                        : null;
+                if (!string.IsNullOrWhiteSpace(modId) && ids.Contains(modId))
+                {
+                    if (Directory.Exists(path)) Directory.Delete(path, true); else File.Delete(path);
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private static string? ReadModIdFromDirectory(string path)
+    {
+        var info = Path.Combine(path, "modinfo.json");
+        return File.Exists(info) ? ReadModId(File.ReadAllText(info)) : null;
+    }
+
+    private static string? ReadModIdFromZip(string path)
+    {
+        using var archive = ZipFile.OpenRead(path);
+        var entry = archive.Entries.FirstOrDefault(item => item.FullName.EndsWith("modinfo.json", StringComparison.OrdinalIgnoreCase));
+        if (entry is null) return null;
+        using var reader = new StreamReader(entry.Open());
+        return ReadModId(reader.ReadToEnd());
+    }
+
+    private static string? ReadModId(string json)
+    {
+        try
+        {
+            var node = JsonNode.Parse(json) as JsonObject;
+            return node?.FirstOrDefault(pair => pair.Key.Equals("modid", StringComparison.OrdinalIgnoreCase)).Value?.GetValue<string>();
+        }
+        catch { return null; }
     }
 
     private static void TryCopyFile(string sourcePath, string targetPath)

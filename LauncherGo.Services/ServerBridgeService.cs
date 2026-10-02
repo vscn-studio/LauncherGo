@@ -1,4 +1,5 @@
 using System.Net;
+using System.IO.Compression;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
@@ -109,6 +110,7 @@ public sealed class ServerBridgeService : IServerBridgeService
         var modsPath = WorkspacePathHelper.GetProfileModsPath(profile.DirectoryPath);
         Directory.CreateDirectory(modsPath);
         var destination = Path.Combine(modsPath, ModFolderName);
+        RemoveOtherInstalledCopies(modsPath, destination);
         SyncDirectory(ResolveEmbeddedSourceRoot(), destination);
         await SetServerBridgeModEnabledAsync(profile, enableMod, cancellationToken);
     }
@@ -587,6 +589,44 @@ public sealed class ServerBridgeService : IServerBridgeService
             return fallback;
 
         throw new InvalidOperationException($"未找到内置服务器桥接模组文件：{primary}；{fallback}");
+    }
+
+    private static void RemoveOtherInstalledCopies(string modsPath, string destination)
+    {
+        var destinationFull = Path.GetFullPath(destination).TrimEnd(Path.DirectorySeparatorChar);
+        foreach (var path in Directory.EnumerateFileSystemEntries(modsPath, "*", SearchOption.TopDirectoryOnly))
+        {
+            if (string.Equals(Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar), destinationFull, StringComparison.OrdinalIgnoreCase)) continue;
+            try
+            {
+                string? modId = null;
+                if (Directory.Exists(path))
+                {
+                    var info = Path.Combine(path, "modinfo.json");
+                    if (File.Exists(info)) modId = ReadModId(File.ReadAllText(info));
+                }
+                else if (Path.GetExtension(path).Equals(".zip", StringComparison.OrdinalIgnoreCase))
+                {
+                    using var archive = ZipFile.OpenRead(path);
+                    var entry = archive.Entries.FirstOrDefault(item => item.FullName.EndsWith("modinfo.json", StringComparison.OrdinalIgnoreCase));
+                    if (entry is not null) using (var reader = new StreamReader(entry.Open())) modId = ReadModId(reader.ReadToEnd());
+                }
+                if (!string.Equals(modId, ModId, StringComparison.OrdinalIgnoreCase)) continue;
+                if (Directory.Exists(path)) Directory.Delete(path, true); else File.Delete(path);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private static string? ReadModId(string json)
+    {
+        try
+        {
+            var node = JsonNode.Parse(json) as JsonObject;
+            return node?.FirstOrDefault(pair => pair.Key.Equals("modid", StringComparison.OrdinalIgnoreCase)).Value?.GetValue<string>();
+        }
+        catch { return null; }
     }
 
     private async Task<bool> IsModDisabledAsync(InstanceProfile profile, CancellationToken cancellationToken)
