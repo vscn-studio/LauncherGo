@@ -14020,6 +14020,10 @@ public partial class LauncherMainWindow : Window
 
         public required string ModId { get; init; }
 
+        public string DisplayModId => string.IsNullOrWhiteSpace(ModId) ? "-" : ModId;
+
+        public bool CanToggleMod => !string.IsNullOrWhiteSpace(ModId);
+
         public required string Version { get; init; }
 
         public required string Side { get; init; }

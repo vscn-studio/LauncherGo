@@ -9,6 +9,36 @@ namespace LauncherGo.Tests;
 public sealed class InstanceModServiceTests
 {
     [Fact]
+    public async Task GetModsAsync_DoesNotTreatInvalidFolderNameAsModId()
+    {
+        var directory = Directory.CreateTempSubdirectory("launchergo-mod-invalid-");
+        try
+        {
+            var modsPath = Directory.CreateDirectory(Path.Combine(directory.FullName, "Mods"));
+            var authPath = Directory.CreateDirectory(Path.Combine(modsPath.FullName, "ServerAuth-1.1.0"));
+            await File.WriteAllTextAsync(Path.Combine(authPath.FullName, "modinfo.json"),
+                """{"name":"ServerAuth","version":"1.1.0"}""");
+            Directory.CreateDirectory(Path.Combine(modsPath.FullName, "Other-1.0"));
+
+            var service = new InstanceModService(new StubServerConfigService());
+            var mods = await service.GetModsAsync(new InstanceProfile { DirectoryPath = directory.FullName });
+
+            Assert.Equal(2, mods.Count);
+            Assert.All(mods, mod =>
+            {
+                Assert.Equal(string.Empty, mod.ModId);
+                Assert.Equal("InvalidMetadata", mod.Status);
+                Assert.False(mod.IsDuplicate);
+            });
+            Assert.Contains(mods, mod => mod.Name == "ServerAuth-1.1.0");
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task GetModsAsync_ReadsPascalCaseModMetadataFields()
     {
         var directory = Directory.CreateTempSubdirectory("launchergo-mod-metadata-");

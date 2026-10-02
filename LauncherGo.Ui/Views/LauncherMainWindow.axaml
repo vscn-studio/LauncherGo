@@ -2269,7 +2269,7 @@
                                                             <Grid ColumnDefinitions="44,1.15*,1.1*,.7*,.7*,1.1*,1.1*,1.8*,2.2*,58,96,82" ColumnSpacing="8" MinHeight="36" Background="{Binding RowBackground}">
                                                                 <CheckBox Classes="TableSelectCheck" IsChecked="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}, Mode=TwoWay}" />
                                                                 <TextBlock Grid.Column="1" Classes="TableCellText" Text="{Binding Name}" />
-                                                                <TextBlock Grid.Column="2" Classes="TableCellText" Text="{Binding ModId}" FontWeight="SemiBold" />
+                                                                <TextBlock Grid.Column="2" Classes="TableCellText" Text="{Binding DisplayModId}" FontWeight="SemiBold" />
                                                                 <TextBlock Grid.Column="3" Classes="TableCellText" Text="{Binding Version}" Foreground="{Binding VersionBrush}" FontWeight="{Binding VersionFontWeight}" />
                                                                 <TextBlock Grid.Column="4" Classes="TableCellText" Text="{Binding Side}" />
                                                                 <TextBlock Grid.Column="5" Classes="TableCellText" Text="{Binding DependenciesText}" />
@@ -2278,7 +2278,7 @@
                                                                     <TextBlock Classes="TableCellText TablePathText" Text="{Binding ConfigPath}" Foreground="{DynamicResource DownloadActionTextBrush}" />
                                                                 </Button>
                                                                 <TextBlock Grid.Column="8" Classes="TableCellText" Text="{Binding FilePath}" />
-                                                                <ToggleSwitch Grid.Column="9" Classes="TableSwitch" IsChecked="{Binding ModEnabled, Mode=OneWay}" Tag="{Binding}" Click="OnModEnabledSwitchClick" />
+                                                                <ToggleSwitch Grid.Column="9" Classes="TableSwitch" IsChecked="{Binding ModEnabled, Mode=OneWay}" IsEnabled="{Binding CanToggleMod}" Tag="{Binding}" Click="OnModEnabledSwitchClick" />
                                                                 <Button Grid.Column="10" Classes="SecondaryActionButton" Tag="{Binding}" Content="{Binding EditConfigText}" IsEnabled="{Binding CanEditConfig}" Click="OnEditModConfigClick" />
                                                                 <Button Grid.Column="11" Classes="ModUpdateButton" Tag="{Binding}" Content="{Binding UpdateButtonText}" Foreground="{Binding UpdateStatusBrush}" IsVisible="{Binding IsUpdateButtonVisible}" Click="OnModUpdateClick" />
                                                                 <TextBlock Grid.Column="11" Classes="TableCellText" Text="{Binding UpdateStatusText}" Foreground="{Binding UpdateStatusBrush}" HorizontalAlignment="Center" IsVisible="{Binding IsUpdateStatusVisible}" />

@@ -8,6 +8,83 @@ namespace LauncherGo.Tests;
 public sealed class ServerAuthOAuth2SettingsTests
 {
     [Fact]
+    public async Task DeployAuthMod_UsesMetadataNameAndIdAndRemovesOldCopy()
+    {
+        var directory = Directory.CreateTempSubdirectory("launchergo-auth-deploy-");
+        try
+        {
+            var profile = new InstanceProfile { DirectoryPath = directory.FullName };
+            var modsPath = Directory.CreateDirectory(Path.Combine(directory.FullName, "Mods"));
+            var oldPath = Directory.CreateDirectory(Path.Combine(modsPath.FullName, "launchergoauth"));
+            await File.WriteAllTextAsync(Path.Combine(oldPath.FullName, "modinfo.json"),
+                """{"modid":"launchergoauth","name":"ServerAuth","version":"1.1.0"}""");
+            var configService = new UnusedServerConfigService();
+            var auth = new ServerAuthService(configService);
+
+            await auth.EnsureAuthModDeployedAsync(profile);
+
+            Assert.False(Directory.Exists(oldPath.FullName));
+            var installed = Assert.Single(await new InstanceModService(configService).GetModsAsync(profile));
+            Assert.Equal("launchergoauth", installed.ModId);
+            Assert.Equal("ServerAuth", installed.Name);
+            Assert.Equal("1.1.0", installed.Version);
+            Assert.Equal("ServerAuth-1.1.0", Path.GetFileName(installed.FilePath));
+            Assert.True(await auth.GetAuthModEnabledAsync(profile));
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task DeployAuthMod_DoesNotOverwriteDifferentModWithSameFolderName()
+    {
+        var directory = Directory.CreateTempSubdirectory("launchergo-auth-collision-");
+        try
+        {
+            var profile = new InstanceProfile { DirectoryPath = directory.FullName };
+            var occupied = Directory.CreateDirectory(Path.Combine(directory.FullName, "Mods", "ServerAuth-1.1.0"));
+            var infoPath = Path.Combine(occupied.FullName, "modinfo.json");
+            var info = """{"modid":"other","name":"ServerAuth","version":"1.1.0"}""";
+            await File.WriteAllTextAsync(infoPath, info);
+
+            var auth = new ServerAuthService(new UnusedServerConfigService());
+            await Assert.ThrowsAsync<InvalidOperationException>(() => auth.EnsureAuthModDeployedAsync(profile));
+            Assert.Equal(info, await File.ReadAllTextAsync(infoPath));
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task DeployAuthMod_RepairsOwnedFolderWithMissingModId()
+    {
+        var directory = Directory.CreateTempSubdirectory("launchergo-auth-repair-");
+        try
+        {
+            var profile = new InstanceProfile { DirectoryPath = directory.FullName };
+            var installed = Directory.CreateDirectory(Path.Combine(directory.FullName, "Mods", "ServerAuth-1.1.0"));
+            await File.WriteAllTextAsync(Path.Combine(installed.FullName, "modinfo.json"),
+                """{"name":"ServerAuth","version":"1.1.0"}""");
+            await File.WriteAllTextAsync(Path.Combine(installed.FullName, "serverauth.dll"), "old");
+            var configService = new UnusedServerConfigService();
+
+            await new ServerAuthService(configService).EnsureAuthModDeployedAsync(profile);
+
+            var mod = Assert.Single(await new InstanceModService(configService).GetModsAsync(profile));
+            Assert.Equal("launchergoauth", mod.ModId);
+            Assert.Equal("OK", mod.Status);
+        }
+        finally
+        {
+            directory.Delete(true);
+        }
+    }
+
+    [Fact]
     public async Task SaveAndLoad_PreservesAndNormalizesOAuth2Settings()
     {
         var directory = Directory.CreateTempSubdirectory("launchergo-auth-");

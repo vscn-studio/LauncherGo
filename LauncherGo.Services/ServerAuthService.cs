@@ -151,12 +151,14 @@ public sealed class ServerAuthService : IServerAuthService
         var modsPath = WorkspacePathHelper.GetProfileModsPath(profile.DirectoryPath);
         Directory.CreateDirectory(modsPath);
 
+        var sourceRoot = ResolveEmbeddedAuthSourceRoot();
+        var folderName = EmbeddedModIdentity.GetDeploymentFolderName(sourceRoot, AuthModId, AuthModVersion, AuthModDllName);
+        var destination = Path.Combine(modsPath, folderName);
+        EmbeddedModIdentity.EnsureDestinationAvailable(destination, AuthModId, AuthModDllName);
+
         var zipPath = Path.Combine(modsPath, AuthModZipName);
         TryDeleteFile(zipPath);
         TryDeleteFile(Path.Combine(modsPath, LegacyAuthModZipName));
-
-        var destination = Path.Combine(modsPath, AuthModFolderName);
-        var sourceRoot = ResolveEmbeddedAuthSourceRoot();
 
         MigrateLegacyAuthModDirectory(modsPath, destination);
         RemoveOtherInstalledCopies(modsPath, destination, AuthModId, LegacyAuthModId);
@@ -433,14 +435,7 @@ public sealed class ServerAuthService : IServerAuthService
     private static bool IsAuthModPresent(InstanceProfile profile)
     {
         var modsPath = WorkspacePathHelper.GetProfileModsPath(profile.DirectoryPath);
-        var folderPath = Path.Combine(modsPath, AuthModFolderName);
-        var legacyFolderPath = Path.Combine(modsPath, LegacyAuthModFolderName);
-        var zipPath = Path.Combine(modsPath, AuthModZipName);
-        var legacyZipPath = Path.Combine(modsPath, LegacyAuthModZipName);
-        return Directory.Exists(folderPath) ||
-               Directory.Exists(legacyFolderPath) ||
-               File.Exists(zipPath) ||
-               File.Exists(legacyZipPath);
+        return EmbeddedModIdentity.IsInstalled(modsPath, AuthModId, LegacyAuthModId);
     }
 
     private static void MigrateLegacyAuthModDirectory(string modsPath, string destinationPath)

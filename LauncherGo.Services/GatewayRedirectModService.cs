@@ -59,7 +59,9 @@ public sealed class GatewayRedirectModService(IInstanceServerConfigService serve
             var profile = profilesById[backend.ProfileId];
             var modsPath = WorkspacePathHelper.GetProfileModsPath(profile.DirectoryPath);
             Directory.CreateDirectory(modsPath);
-            var destination = Path.Combine(modsPath, ModFolderName);
+            var destination = Path.Combine(modsPath,
+                EmbeddedModIdentity.GetDeploymentFolderName(sourceRoot, ModId, ModVersion, ModDllName));
+            EmbeddedModIdentity.EnsureDestinationAvailable(destination, ModId, ModDllName);
             RemoveOtherInstalledCopies(modsPath, destination);
             SyncDirectory(sourceRoot, destination);
 

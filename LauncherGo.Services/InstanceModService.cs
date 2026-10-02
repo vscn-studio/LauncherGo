@@ -70,7 +70,9 @@ public class InstanceModService(IInstanceServerConfigService serverConfigService
             }
 
             var status = issues.Count > 0 ? "MissingDependency" : mod.Status;
-            var sameId = entries.Where(other => other.ModId.Equals(mod.ModId, StringComparison.OrdinalIgnoreCase)).ToList();
+            var sameId = string.IsNullOrWhiteSpace(mod.ModId)
+                ? []
+                : entries.Where(other => other.ModId.Equals(mod.ModId, StringComparison.OrdinalIgnoreCase)).ToList();
             var duplicate = sameId.Count > 1;
             var versionConflict = sameId.Select(static other => other.Version)
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1;
@@ -358,6 +360,8 @@ public class InstanceModService(IInstanceServerConfigService serverConfigService
         bool enabled,
         CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(modId))
+            throw new InvalidOperationException("模组缺少有效的 modid。");
         var rawJson = await serverConfigService.LoadRawJsonAsync(profile, cancellationToken);
         var root = JsonNode.Parse(rawJson) as JsonObject
                    ?? throw new InvalidOperationException("配置格式错误。");
@@ -495,7 +499,9 @@ public class InstanceModService(IInstanceServerConfigService serverConfigService
         if (node is null)
             return BuildFallbackEntry(filePath, "InvalidMetadata", disabledSet, modConfigPath);
 
-        var modId = ReadMetadataString(GetMetadataProperty(node, "modid")) ?? Path.GetFileNameWithoutExtension(filePath);
+        var modId = ReadMetadataString(GetMetadataProperty(node, "modid"));
+        if (string.IsNullOrWhiteSpace(modId))
+            return BuildFallbackEntry(filePath, "InvalidMetadata", disabledSet, modConfigPath);
         var name = ReadMetadataString(GetMetadataProperty(node, "name"));
         var version = ReadMetadataString(GetMetadataProperty(node, "version")) ?? "unknown";
         var side = ReadMetadataString(GetMetadataProperty(node, "side"));
@@ -523,17 +529,19 @@ public class InstanceModService(IInstanceServerConfigService serverConfigService
         HashSet<string> disabledSet,
         string modConfigPath)
     {
-        var fallbackId = Path.GetFileNameWithoutExtension(filePath);
+        var fallbackName = Directory.Exists(filePath)
+            ? Path.GetFileName(filePath)
+            : Path.GetFileNameWithoutExtension(filePath);
         return new ModEntry
         {
-            Name = fallbackId,
-            ModId = fallbackId,
+            Name = fallbackName,
+            ModId = string.Empty,
             Version = "unknown",
             Side = "Universal",
             FilePath = filePath,
-            ConfigPath = ResolveModConfigPath(modConfigPath, fallbackId),
+            ConfigPath = ResolveModConfigPath(modConfigPath, fallbackName),
             Status = status,
-            IsDisabled = disabledSet.Contains(fallbackId),
+            IsDisabled = disabledSet.Contains(fallbackName),
             Dependencies = [],
             DependencyIssues = []
         };
@@ -667,9 +675,7 @@ public class InstanceModService(IInstanceServerConfigService serverConfigService
         // duplicate detection always come from modinfo.json.ModId.
         var name = string.IsNullOrWhiteSpace(mod.Name) ? mod.ModId : mod.Name;
         var version = string.IsNullOrWhiteSpace(mod.Version) ? "unknown" : mod.Version;
-        var sanitized = WorkspacePathHelper.SanitizeFileName($"{name.Trim()}-{version.Trim()}")
-            .TrimEnd(' ', '.');
-        return string.IsNullOrWhiteSpace(sanitized) ? "unnamed-unknown" : sanitized;
+        return EmbeddedModIdentity.BuildFolderName(name, version);
     }
 
     internal static string ExtractModDirectory(string zipPath, string destinationPath, string expectedModId)

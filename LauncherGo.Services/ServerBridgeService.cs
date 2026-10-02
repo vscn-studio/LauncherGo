@@ -109,9 +109,12 @@ public sealed class ServerBridgeService : IServerBridgeService
         cancellationToken.ThrowIfCancellationRequested();
         var modsPath = WorkspacePathHelper.GetProfileModsPath(profile.DirectoryPath);
         Directory.CreateDirectory(modsPath);
-        var destination = Path.Combine(modsPath, ModFolderName);
+        var sourceRoot = ResolveEmbeddedSourceRoot();
+        var destination = Path.Combine(modsPath,
+            EmbeddedModIdentity.GetDeploymentFolderName(sourceRoot, ModId, ModVersion, ModDllName));
+        EmbeddedModIdentity.EnsureDestinationAvailable(destination, ModId, ModDllName);
         RemoveOtherInstalledCopies(modsPath, destination);
-        SyncDirectory(ResolveEmbeddedSourceRoot(), destination);
+        SyncDirectory(sourceRoot, destination);
         await SetServerBridgeModEnabledAsync(profile, enableMod, cancellationToken);
     }
 
@@ -120,7 +123,7 @@ public sealed class ServerBridgeService : IServerBridgeService
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!Directory.Exists(Path.Combine(WorkspacePathHelper.GetProfileModsPath(profile.DirectoryPath), ModFolderName)))
+        if (!EmbeddedModIdentity.IsInstalled(WorkspacePathHelper.GetProfileModsPath(profile.DirectoryPath), ModId))
             return false;
 
         return !await IsModDisabledAsync(profile, cancellationToken);
