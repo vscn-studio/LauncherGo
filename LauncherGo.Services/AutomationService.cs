@@ -277,14 +277,16 @@ public partial class AutomationService : IAutomationService, IDisposable
     {
         foreach (var item in settings.ScheduledCommands.Where(x => x.Enabled))
         {
-            if (!TryParseHm(item.Time, out var at))
+            var schedule = item.Schedule ?? new BackupSchedule
+            {
+                Type = BackupScheduleType.Daily,
+                Time = item.Time,
+                AnchorDate = minute.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+            };
+            if (!BackupScheduleCalculator.IsDue(schedule, minute))
                 continue;
 
-            var point = minute.Date.Add(at);
-            if (point != minute)
-                continue;
-
-            var key = $"{profile.Id}|command|{minute:yyyyMMddHHmm}|{item.Command}";
+            var key = $"{profile.Id}|command|{schedule.Id}|{minute:yyyyMMddHHmm}|{item.Command}";
             if (!MarkExecuted(key))
                 continue;
 

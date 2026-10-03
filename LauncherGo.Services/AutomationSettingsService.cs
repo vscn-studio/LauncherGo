@@ -236,11 +236,23 @@ public class AutomationSettingsService : IAutomationSettingsService
 
         var normalizedCommands = (settings.ScheduledCommands ?? [])
             .Where(item => item is not null)
-            .Select(item => new ScheduledServerCommand
+            .Select(item =>
             {
-                Time = NormalizeTime(item.Time, "12:00"),
-                Command = item.Command?.Trim() ?? string.Empty,
-                Enabled = item.Enabled
+                var sourceSchedule = item.Schedule ?? new BackupSchedule
+                {
+                    Enabled = item.Enabled,
+                    Type = BackupScheduleType.Daily,
+                    Time = item.Time,
+                    AnchorDate = DateTime.Now.ToString("yyyy-MM-dd")
+                };
+                var schedule = BackupScheduleCalculator.Normalize(sourceSchedule, DateTime.Now);
+                return new ScheduledServerCommand
+                {
+                    Time = schedule.Type == BackupScheduleType.Daily ? schedule.Time : NormalizeTime(item.Time, "12:00"),
+                    Schedule = schedule,
+                    Command = item.Command?.Trim() ?? string.Empty,
+                    Enabled = item.Enabled
+                };
             })
             .Where(item => !string.IsNullOrWhiteSpace(item.Command))
             .ToList();

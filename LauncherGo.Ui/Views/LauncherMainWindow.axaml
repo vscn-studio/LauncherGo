@@ -2159,11 +2159,13 @@
                                                         </Grid>
                                                         <Grid RowDefinitions="Auto,*">
                                                             <Border Grid.Row="0" Classes="TableHeader">
-                                                                <Grid ColumnDefinitions="50,90,*,Auto" ColumnSpacing="8">
+                                                                <Grid ColumnDefinitions="50,165,*,165,2.5*,Auto" ColumnSpacing="8">
                                                                     <TextBlock Classes="TableHeaderText" Text="启用" HorizontalAlignment="Center" />
-                                                                    <TextBlock Grid.Column="1" Classes="TableHeaderText" Text="时间" />
-                                                                    <TextBlock Grid.Column="2" Classes="TableHeaderText" Text="命令" />
-                                                                    <TextBlock Grid.Column="3" Classes="TableHeaderText" Text="操作" HorizontalAlignment="Center" />
+                                                                    <TextBlock Grid.Column="1" Classes="TableHeaderText" Text="周期" />
+                                                                    <TextBlock Grid.Column="2" Classes="TableHeaderText" Text="执行设置" />
+                                                                    <TextBlock Grid.Column="3" Classes="TableHeaderText" Text="预览" />
+                                                                    <TextBlock Grid.Column="4" Classes="TableHeaderText" Text="命令" />
+                                                                    <TextBlock Grid.Column="5" Classes="TableHeaderText" Text="操作" HorizontalAlignment="Center" />
                                                                 </Grid>
                                                             </Border>
                                                             <Border Grid.Row="1" Classes="TableBody">
@@ -2171,11 +2173,50 @@
                                                                     <ItemsControl.ItemTemplate>
                                                                         <DataTemplate>
                                                                             <Border Classes="TableRow">
-                                                                                <Grid ColumnDefinitions="50,90,*,Auto" ColumnSpacing="8">
-                                                                                    <ToggleSwitch Classes="TableSwitch" IsChecked="{Binding Enabled, Mode=TwoWay}" />
-                                                                                    <TextBox Grid.Column="1" Classes="CompactInput" PlaceholderText="12:00" Text="{Binding Time, Mode=TwoWay}" />
-                                                                                    <TextBox Grid.Column="2" Classes="CompactInput" Text="{Binding Command, Mode=TwoWay}" />
-                                                                                    <Button Grid.Column="3" Classes="SecondaryActionButton DangerButton" Tag="{Binding}" Content="删除" Click="OnAutomationRemoveCommandClick" />
+                                                                                <Grid ColumnDefinitions="50,165,*,165,2.5*,Auto" ColumnSpacing="8" MinHeight="38">
+                                                                                    <ToggleSwitch Classes="TableSwitch" IsChecked="{Binding Schedule.Enabled, Mode=TwoWay}" />
+                                                                                    <ComboBox Grid.Column="1" Classes="CompactCombo" ItemsSource="{Binding Schedule.ScheduleTypeOptions}" SelectedItem="{Binding Schedule.SelectedScheduleType, Mode=TwoWay}" />
+                                                                                    <WrapPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                                                                        <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,8,0" VerticalAlignment="Center" IsVisible="{Binding Schedule.IsMonthly}">
+                                                                                            <TextBlock Classes="ConfigHintText" Text="{Binding Schedule.DayLabel}" VerticalAlignment="Center" />
+                                                                                            <TextBox Width="54" Classes="CompactInput" PlaceholderText="1" Text="{Binding Schedule.DayOfMonth, Mode=TwoWay}" />
+                                                                                        </StackPanel>
+                                                                                        <ComboBox Width="116" Margin="0,0,8,0" Classes="CompactCombo" ItemsSource="{Binding Schedule.DayOfWeekOptions}" SelectedItem="{Binding Schedule.SelectedDayOfWeek, Mode=TwoWay}" IsVisible="{Binding Schedule.IsWeekly}" />
+                                                                                        <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,8,0" VerticalAlignment="Center" IsVisible="{Binding Schedule.IsInterval}">
+                                                                                            <TextBlock Classes="ConfigHintText" Text="{Binding Schedule.EveryLabel}" VerticalAlignment="Center" />
+                                                                                            <TextBox Width="58" Classes="CompactInput" PlaceholderText="1" Text="{Binding Schedule.Interval, Mode=TwoWay}" />
+                                                                                            <TextBlock Classes="ConfigHintText" Text="{Binding Schedule.IntervalUnitLabel}" VerticalAlignment="Center" />
+                                                                                        </StackPanel>
+                                                                                        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" IsVisible="{Binding Schedule.ShowsTime}">
+                                                                                            <TextBlock Classes="ConfigHintText" Text="{Binding Schedule.AtLabel}" VerticalAlignment="Center" />
+                                                                                            <TextBox Width="76" Classes="CompactInput" PlaceholderText="12:00" Text="{Binding Schedule.Time, Mode=TwoWay}" />
+                                                                                        </StackPanel>
+                                                                                        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" IsVisible="{Binding Schedule.IsHourly}">
+                                                                                            <TextBlock Classes="ConfigHintText" Text="{Binding Schedule.MinuteLabel}" VerticalAlignment="Center" />
+                                                                                            <TextBox Width="58" Classes="CompactInput" PlaceholderText="0" Text="{Binding Schedule.MinuteOfHour, Mode=TwoWay}" />
+                                                                                            <TextBlock Classes="ConfigHintText" Text="{Binding Schedule.MinuteUnitLabel}" VerticalAlignment="Center" />
+                                                                                        </StackPanel>
+                                                                                    </WrapPanel>
+                                                                                    <Button Grid.Column="3" Classes="SecondaryActionButton" Content="{Binding Schedule.PreviewButtonText}" Tag="{Binding}" Click="OnAutomationPreviewCommandScheduleClick">
+                                                                                        <Button.Flyout>
+                                                                                            <Flyout Placement="Bottom">
+                                                                                                <Border Classes="ConfigCard" Padding="12" MinWidth="260">
+                                                                                                    <StackPanel Spacing="8">
+                                                                                                        <TextBlock Classes="ConfigSectionTitle" Text="{Binding Schedule.PreviewTitle}" />
+                                                                                                        <ItemsControl ItemsSource="{Binding Schedule.PreviewExecutionItems}">
+                                                                                                            <ItemsControl.ItemTemplate>
+                                                                                                                <DataTemplate>
+                                                                                                                    <TextBlock Classes="ConfigHintText" Text="{Binding}" />
+                                                                                                                </DataTemplate>
+                                                                                                            </ItemsControl.ItemTemplate>
+                                                                                                        </ItemsControl>
+                                                                                                    </StackPanel>
+                                                                                                </Border>
+                                                                                            </Flyout>
+                                                                                        </Button.Flyout>
+                                                                                    </Button>
+                                                                                    <TextBox Grid.Column="4" Classes="CompactInput" Text="{Binding Command, Mode=TwoWay}" />
+                                                                                    <Button Grid.Column="5" Classes="SecondaryActionButton DangerButton" Tag="{Binding}" Content="删除" Click="OnAutomationRemoveCommandClick" />
                                                                                 </Grid>
                                                                             </Border>
                                                                         </DataTemplate>

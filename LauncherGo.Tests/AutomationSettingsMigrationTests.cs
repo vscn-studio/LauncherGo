@@ -58,6 +58,56 @@ public sealed class AutomationSettingsMigrationTests
     }
 
     [Fact]
+    public void LegacyScheduledCommandTimeMigratesToDailySchedule()
+    {
+        var settings = AutomationSettingsService.Normalize(new AutomationSettings
+        {
+            CommandEnabled = true,
+            ScheduledCommands =
+            [
+                new ScheduledServerCommand
+                {
+                    Time = "21:30",
+                    Command = "/time night"
+                }
+            ]
+        });
+
+        var command = Assert.Single(settings.ScheduledCommands);
+        Assert.NotNull(command.Schedule);
+        Assert.Equal(BackupScheduleType.Daily, command.Schedule!.Type);
+        Assert.Equal("21:30", command.Schedule.Time);
+        Assert.Equal("21:30", command.Time);
+    }
+
+    [Fact]
+    public void ScheduledCommandKeepsNonDailySchedule()
+    {
+        var settings = AutomationSettingsService.Normalize(new AutomationSettings
+        {
+            ScheduledCommands =
+            [
+                new ScheduledServerCommand
+                {
+                    Command = "/server save",
+                    Schedule = new BackupSchedule
+                    {
+                        Type = BackupScheduleType.EveryNHours,
+                        Interval = 6,
+                        Time = "02:00",
+                        AnchorDate = "2026-08-11"
+                    }
+                }
+            ]
+        });
+
+        var command = Assert.Single(settings.ScheduledCommands);
+        Assert.Equal(BackupScheduleType.EveryNHours, command.Schedule!.Type);
+        Assert.Equal(6, command.Schedule.Interval);
+        Assert.True(BackupScheduleCalculator.IsDue(command.Schedule, new DateTime(2026, 8, 11, 8, 0, 0)));
+    }
+
+    [Fact]
     public void AutomationScriptsKeepSupportedTriggersAndDropInvalidFiles()
     {
         var settings = AutomationSettingsService.Normalize(new AutomationSettings

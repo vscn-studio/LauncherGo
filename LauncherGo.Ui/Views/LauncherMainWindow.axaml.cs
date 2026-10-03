@@ -1060,6 +1060,10 @@ public partial class LauncherMainWindow : Window
         {
             item.SetLanguage(_isChinese);
         }
+        foreach (var item in _automationCommandItems)
+        {
+            item.SetLanguage(_isChinese);
+        }
     }
 
     private void InitializeModStaticTexts()
@@ -2649,7 +2653,7 @@ public partial class LauncherMainWindow : Window
         _automationCommandItems.Clear();
         foreach (var command in settings.ScheduledCommands ?? [])
         {
-            _automationCommandItems.Add(ScheduledCommandItem.FromModel(command));
+            _automationCommandItems.Add(ScheduledCommandItem.FromModel(command, _isChinese));
         }
         if (_automationCommandItems.Count == 0)
         {
@@ -8433,6 +8437,18 @@ public partial class LauncherMainWindow : Window
             AddModImportPaths(paths);
     }
 
+    private void OnAutomationPreviewCommandScheduleClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button button && button.Tag is ScheduledCommandItem item)
+        {
+            item.Schedule.RefreshPreview();
+            if (button.Flyout is Flyout flyout && flyout.Content is Control content)
+            {
+                content.DataContext = item;
+            }
+        }
+    }
+
     private async void OnImportModZipClick(object? sender, RoutedEventArgs e)
     {
         if (ModProfileComboBox.SelectedItem is not InstanceProfile profile)
@@ -13941,23 +13957,19 @@ public partial class LauncherMainWindow : Window
 
     public sealed class ScheduledCommandItem : INotifyPropertyChanged
     {
-        private string _time = "12:00";
         private string _command = string.Empty;
-        private bool _enabled = true;
+
+        public ScheduledCommandItem(bool isChinese = true)
+        {
+            Schedule = new AutomationBackupScheduleItem(isChinese)
+            {
+                Time = "12:00"
+            };
+        }
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
-        public bool Enabled
-        {
-            get => _enabled;
-            set => SetField(ref _enabled, value);
-        }
-
-        public string Time
-        {
-            get => _time;
-            set => SetField(ref _time, value);
-        }
+        public AutomationBackupScheduleItem Schedule { get; private set; }
 
         public string Command
         {
@@ -13969,20 +13981,33 @@ public partial class LauncherMainWindow : Window
         {
             return new ScheduledServerCommand
             {
-                Enabled = _enabled,
-                Time = _time?.Trim() ?? string.Empty,
+                Enabled = Schedule.Enabled,
+                Time = Schedule.ToModel().Time,
+                Schedule = Schedule.ToModel(),
                 Command = _command?.Trim() ?? string.Empty
             };
         }
 
-        public static ScheduledCommandItem FromModel(ScheduledServerCommand model)
+        public static ScheduledCommandItem FromModel(ScheduledServerCommand model, bool isChinese = true)
         {
-            return new ScheduledCommandItem
+            var item = new ScheduledCommandItem(isChinese)
             {
-                Enabled = model.Enabled,
-                Time = model.Time,
                 Command = model.Command
             };
+            var schedule = model.Schedule ?? new BackupSchedule
+            {
+                Type = BackupScheduleType.Daily,
+                Time = model.Time,
+                AnchorDate = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                Enabled = model.Enabled
+            };
+            item.Schedule = AutomationBackupScheduleItem.FromModel(schedule, isChinese);
+            return item;
+        }
+
+        public void SetLanguage(bool isChinese)
+        {
+            Schedule.SetLanguage(isChinese);
         }
 
         private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
