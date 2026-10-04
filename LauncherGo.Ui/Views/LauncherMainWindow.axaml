@@ -3561,7 +3561,7 @@
                                                             </ItemsControl>
                                                         </Border>
                                                     </Grid>
-                                                    <TextBlock Classes="ConfigHintText" Text="接口：/api、/api/server、/api/mods" />
+                                                    <TextBlock Classes="ConfigHintText" Text="接口：/api、/api/server、/api/mods、/api/players/history、/api/cover" />
                                                 </StackPanel>
                                             </Border>
                                         </StackPanel>

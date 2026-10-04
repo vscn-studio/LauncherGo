@@ -19,11 +19,14 @@ public sealed class OpenApiService(
     IInstanceModService modService,
     ILogger<OpenApiService>? logger = null) : IOpenApiService
 {
+    private const int PlayerCountHistoryHours = 24 * 7;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HttpClient ModDbClient = new() { Timeout = TimeSpan.FromSeconds(3) };
     private static readonly ConcurrentDictionary<string, string> ModUrlCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, WebApplication> _applications = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _profileGates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, Timer> _playerHistoryTimers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, object> _playerHistoryGates = new(StringComparer.OrdinalIgnoreCase);
     private readonly ILogger<OpenApiService>? _logger = logger;
 
     public bool IsRunning(string profileId) => _applications.ContainsKey(profileId);
@@ -100,11 +103,12 @@ public sealed class OpenApiService(
             app.MapGet("/", () => Results.Json(new
             {
                 name = "LauncherGo Open API",
-                endpoints = new[] { "/api", "/api/server", "/api/mods" }
+                endpoints = new[] { "/api", "/api/server", "/api/mods", "/api/players/history", "/api/cover" }
             }, JsonOptions));
             app.MapGet("/api", async (CancellationToken token) => Results.Json(await BuildServerInfoAsync(profile, token), JsonOptions));
             app.MapGet("/api/server", async (CancellationToken token) => Results.Json(await BuildServerInfoAsync(profile, token), JsonOptions));
             app.MapGet("/api/mods", async (CancellationToken token) => Results.Json(await BuildModsAsync(profile, token), JsonOptions));
+            app.MapGet("/api/players/history", () => Results.Json(GetPlayerCountHistory(profile), JsonOptions));
             app.MapGet("/api/cover", () =>
             {
                 var coverPath = GetCoverPath(profile);
@@ -118,6 +122,7 @@ public sealed class OpenApiService(
             {
                 await app.StartAsync(cancellationToken);
                 _applications[profile.Id] = app;
+                StartPlayerCountSampling(profile);
             }
             catch
             {
@@ -133,6 +138,7 @@ public sealed class OpenApiService(
 
     public async Task StopAsync(string profileId, CancellationToken cancellationToken = default)
     {
+        StopPlayerCountSampling(profileId);
         if (!_applications.TryRemove(profileId, out var app))
             return;
         await app.StopAsync(cancellationToken);
@@ -163,8 +169,114 @@ public sealed class OpenApiService(
                 ? Math.Max(0, (long)(DateTimeOffset.UtcNow - startedAt).TotalSeconds)
                 : 0,
             CoverUrl = GetCoverPath(profile) is null ? string.Empty : "/api/cover",
+            PlayerCountHistoryHours = PlayerCountHistoryHours,
+            HourlyPlayerCounts = GetPlayerCountHistory(profile),
             Mods = await BuildModsAsync(profile, cancellationToken)
         };
+    }
+
+    private void StartPlayerCountSampling(InstanceProfile profile)
+    {
+        RecordPlayerCount(profile);
+
+        var untilNextHour = TruncateToHour(DateTimeOffset.UtcNow).AddHours(1) - DateTimeOffset.UtcNow;
+        if (untilNextHour < TimeSpan.FromSeconds(1))
+            untilNextHour = TimeSpan.FromSeconds(1);
+
+        var timer = new Timer(
+            static state =>
+            {
+                if (state is OpenApiSamplingState sampling)
+                    sampling.Service.RecordPlayerCount(sampling.Profile);
+            },
+            new OpenApiSamplingState(this, profile),
+            untilNextHour,
+            TimeSpan.FromHours(1));
+
+        if (!_playerHistoryTimers.TryAdd(profile.Id, timer))
+            timer.Dispose();
+    }
+
+    private void StopPlayerCountSampling(string profileId)
+    {
+        if (_playerHistoryTimers.TryRemove(profileId, out var timer))
+            timer.Dispose();
+    }
+
+    private void RecordPlayerCount(InstanceProfile profile)
+    {
+        try
+        {
+            var status = serverProcessService.GetCurrentStatus(profile.Id);
+            var timestamp = TruncateToHour(DateTimeOffset.UtcNow);
+            var gate = _playerHistoryGates.GetOrAdd(profile.Id, static _ => new object());
+            lock (gate)
+            {
+                var records = LoadPlayerCountHistory(profile);
+                if (records.Any(record => record.TimestampUtc == timestamp))
+                    return;
+
+                records.Add(new OpenApiPlayerCountRecord
+                {
+                    TimestampUtc = timestamp,
+                    OnlinePlayers = Math.Max(0, status.OnlinePlayers)
+                });
+
+                var retained = records
+                    .OrderBy(record => record.TimestampUtc)
+                    .TakeLast(PlayerCountHistoryHours)
+                    .ToList();
+                SavePlayerCountHistory(profile, retained);
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger?.LogDebug(exception, "记录开放 API 玩家数量失败。ProfileId={ProfileId}", profile.Id);
+        }
+    }
+
+    private IReadOnlyList<OpenApiPlayerCountRecord> GetPlayerCountHistory(InstanceProfile profile)
+    {
+        var gate = _playerHistoryGates.GetOrAdd(profile.Id, static _ => new object());
+        lock (gate)
+        {
+            return LoadPlayerCountHistory(profile)
+                .OrderBy(record => record.TimestampUtc)
+                .TakeLast(PlayerCountHistoryHours)
+                .ToArray();
+        }
+    }
+
+    private static List<OpenApiPlayerCountRecord> LoadPlayerCountHistory(InstanceProfile profile)
+    {
+        var path = GetPlayerCountHistoryPath(profile);
+        try
+        {
+            if (!File.Exists(path))
+                return [];
+
+            var records = JsonSerializer.Deserialize<List<OpenApiPlayerCountRecord>>(File.ReadAllText(path), JsonOptions);
+            return records?
+                .Where(record => record.TimestampUtc != default && record.OnlinePlayers >= 0)
+                .GroupBy(record => record.TimestampUtc)
+                .Select(group => group.Last())
+                .OrderBy(record => record.TimestampUtc)
+                .TakeLast(PlayerCountHistoryHours)
+                .ToList() ?? [];
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static void SavePlayerCountHistory(InstanceProfile profile, IReadOnlyList<OpenApiPlayerCountRecord> records)
+    {
+        Directory.CreateDirectory(profile.DirectoryPath);
+        var path = GetPlayerCountHistoryPath(profile);
+        var temporaryPath = path + ".tmp";
+        File.WriteAllText(temporaryPath, JsonSerializer.Serialize(records, JsonOptions));
+        File.Move(temporaryPath, path, overwrite: true);
     }
 
     private async Task<IReadOnlyList<OpenApiModInfo>> BuildModsAsync(InstanceProfile profile, CancellationToken cancellationToken)
@@ -248,6 +360,12 @@ public sealed class OpenApiService(
 
     private static string GetSettingsPath(InstanceProfile profile) => Path.Combine(profile.DirectoryPath, "openapi-settings.json");
 
+    private static string GetPlayerCountHistoryPath(InstanceProfile profile) =>
+        Path.Combine(profile.DirectoryPath, "openapi-player-history.json");
+
+    private static DateTimeOffset TruncateToHour(DateTimeOffset value) =>
+        new(value.Year, value.Month, value.Day, value.Hour, 0, 0, value.Offset);
+
     private static void ValidatePort(int port)
     {
         if (port is < 1 or > 65535)
@@ -260,6 +378,8 @@ public sealed class OpenApiService(
         public string CoverFileName { get; init; } = string.Empty;
         public string CoverContentType { get; init; } = string.Empty;
     }
+
+    private sealed record OpenApiSamplingState(OpenApiService Service, InstanceProfile Profile);
 }
 
 public sealed class OpenApiServerInfo
@@ -274,7 +394,15 @@ public sealed class OpenApiServerInfo
     public DateTimeOffset? StartedAtUtc { get; init; }
     public long UptimeSeconds { get; init; }
     public string CoverUrl { get; init; } = string.Empty;
+    public int PlayerCountHistoryHours { get; init; }
+    public IReadOnlyList<OpenApiPlayerCountRecord> HourlyPlayerCounts { get; init; } = [];
     public IReadOnlyList<OpenApiModInfo> Mods { get; init; } = [];
+}
+
+public sealed class OpenApiPlayerCountRecord
+{
+    public DateTimeOffset TimestampUtc { get; init; }
+    public int OnlinePlayers { get; init; }
 }
 
 public sealed class OpenApiModInfo
