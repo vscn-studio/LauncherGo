@@ -31,6 +31,7 @@ public static class ServiceCollectionExtension
         services.AddSingleton<IServerAuthService, ServerAuthService>();
         services.AddSingleton<IServerMapService, ServerMapService>();
         services.AddSingleton<IVoiceWebService, VoiceWebService>();
+        services.AddSingleton<IOpenApiService, OpenApiService>();
         services.AddSingleton<IServerBridgeService, ServerBridgeService>();
         services.AddSingleton<ServerBridgeStateStore>();
         services.AddSingleton<IServerBridgeMigrationService, ServerBridgeMigrationService>();

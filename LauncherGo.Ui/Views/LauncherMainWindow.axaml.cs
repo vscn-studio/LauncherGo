@@ -288,6 +288,7 @@ public partial class LauncherMainWindow : Window
     private readonly IServerAuthService _serverAuthService;
     private readonly IServerMapService _serverMapService;
     private readonly IServerBridgeService _serverBridgeService;
+    private readonly IOpenApiService _openApiService;
     private readonly ILauncherUpdateService _launcherUpdateService;
     private readonly ILocalizationService _localizationService;
     private readonly ILogger<LauncherMainWindow> _logger;
@@ -346,6 +347,7 @@ public partial class LauncherMainWindow : Window
     private readonly ObservableCollection<InstanceProfile> _serverMapProfileItems = [];
     private readonly ObservableCollection<ProfileConfigListItem> _serverMapConfigItems = [];
     private readonly ObservableCollection<VoiceConfigListItem> _voiceConfigItems = [];
+    private readonly ObservableCollection<InstanceProfile> _openApiProfileItems = [];
     private readonly IVoiceWebService _voiceWebService;
     private readonly HashSet<GatewayBackendStatisticsWindow> _gatewayStatisticsWindows = [];
     private readonly ObservableCollection<DashboardServerItem> _dashboardServerItems = [];
@@ -459,6 +461,7 @@ public partial class LauncherMainWindow : Window
             ServiceLocator.GetRequiredService<IServerAuthService>(),
             ServiceLocator.GetRequiredService<IServerMapService>(),
             ServiceLocator.GetRequiredService<IServerBridgeService>(),
+            ServiceLocator.GetRequiredService<IOpenApiService>(),
             ServiceLocator.GetRequiredService<ILauncherUpdateService>(),
             ServiceLocator.GetRequiredService<ILogger<LauncherMainWindow>>(),
             ServiceLocator.GetRequiredService<ILocalizationService>())
@@ -487,6 +490,7 @@ public partial class LauncherMainWindow : Window
         IServerAuthService serverAuthService,
         IServerMapService serverMapService,
         IServerBridgeService serverBridgeService,
+        IOpenApiService openApiService,
         ILauncherUpdateService launcherUpdateService,
         ILogger<LauncherMainWindow>? logger = null,
         ILocalizationService? localizationService = null,
@@ -514,6 +518,7 @@ public partial class LauncherMainWindow : Window
         _serverMapService = serverMapService;
         _voiceWebService = voiceWebService ?? ServiceLocator.GetRequiredService<IVoiceWebService>();
         _serverBridgeService = serverBridgeService;
+        _openApiService = openApiService;
         _launcherUpdateService = launcherUpdateService;
         _localizationService = localizationService ?? new LocalizationService();
         _logger = logger ?? NullLogger<LauncherMainWindow>.Instance;
@@ -586,6 +591,7 @@ public partial class LauncherMainWindow : Window
             _thirdPartyFrpcService.StatusChanged -= OnThirdPartyFrpcStatusChanged;
             _easyTierService.StatusChanged -= OnEasyTierStatusChanged;
             _tcpGatewayService.StatusChanged -= OnTcpGatewayStatusChanged;
+            _ = _openApiService.StopAllAsync();
             _localizationService.LanguageChanged -= OnLanguageChanged;
             _ = _logTailService.StopAsync();
             _ = _robotService.StopAsync(TimeSpan.FromSeconds(2));
@@ -3706,6 +3712,7 @@ public partial class LauncherMainWindow : Window
         ConnectionEasyTierPanel.IsVisible = tab == ConnectionTab.EasyTier;
         ConnectionRobotPanel.IsVisible = tab == ConnectionTab.Robot;
         ConnectionGatewayPanel.IsVisible = tab == ConnectionTab.Gateway;
+        ConnectionOpenApiPanel.IsVisible = tab == ConnectionTab.OpenApi;
         ConnectionAuthPanel.IsVisible = tab == ConnectionTab.Auth;
         ConnectionVoicePanel.IsVisible = tab == ConnectionTab.Voice;
         RefreshSidebarSelection();
@@ -3730,6 +3737,10 @@ public partial class LauncherMainWindow : Window
         {
             RefreshVoiceProfiles();
         }
+        if (tab == ConnectionTab.OpenApi)
+        {
+            RefreshOpenApiProfiles();
+        }
 
         RequestStaticUiTranslations();
     }
@@ -3746,6 +3757,7 @@ public partial class LauncherMainWindow : Window
         SetSelectedClass(DownloadVersionsTabButton, false);
         SetSelectedClass(DownloadVersionsNavButton, !_logsNavSelected && _selectedTab == MainTab.InstanceManage && _selectedInstanceManageTab == InstanceManageTab.DownloadVersions);
         SetSelectedClass(ConnectionAuthTabButton, !_logsNavSelected && _selectedTab == MainTab.Connection && _selectedConnectionTab == ConnectionTab.Auth);
+        SetSelectedClass(ConnectionOpenApiTabButton, !_logsNavSelected && _selectedTab == MainTab.Connection && _selectedConnectionTab == ConnectionTab.OpenApi);
         SetSelectedClass(ServerBridgeTabButton, !_logsNavSelected && _selectedTab == MainTab.InstanceManage && _selectedInstanceManageTab == InstanceManageTab.ServerBridge);
         SetSelectedClass(LogsNavButton, _logsNavSelected);
         SetSelectedClass(ConnectionFrpTabButton, !_logsNavSelected && _selectedTab == MainTab.Connection && _selectedConnectionTab == ConnectionTab.Frp);
@@ -8370,6 +8382,65 @@ public partial class LauncherMainWindow : Window
             AddModImportPaths(paths);
     }
 
+    private void OnConnectionOpenApiTabClick(object? sender, RoutedEventArgs e)
+    {
+        SelectTab(MainTab.Connection);
+        SelectConnectionTab(ConnectionTab.OpenApi);
+    }
+
+    private void RefreshOpenApiProfiles()
+    {
+        var selectedId = (OpenApiProfileComboBox.SelectedItem as InstanceProfile)?.Id;
+        _openApiProfileItems.Clear();
+        foreach (var profile in _profileService.GetProfiles().OrderBy(static p => p.Name, StringComparer.CurrentCultureIgnoreCase))
+            _openApiProfileItems.Add(profile);
+        OpenApiProfileComboBox.ItemsSource = _openApiProfileItems;
+        OpenApiProfileComboBox.SelectedItem = _openApiProfileItems.FirstOrDefault(p => p.Id.Equals(selectedId, StringComparison.OrdinalIgnoreCase)) ?? _openApiProfileItems.FirstOrDefault();
+        RefreshOpenApiEditor();
+    }
+
+    private void OnOpenApiProfileSelectionChanged(object? sender, SelectionChangedEventArgs e) => RefreshOpenApiEditor();
+
+    private void RefreshOpenApiEditor()
+    {
+        if (OpenApiProfileComboBox.SelectedItem is not InstanceProfile profile)
+        {
+            OpenApiPortNumericUpDown.Value = 8085;
+            OpenApiToggleButton.IsEnabled = false;
+            OpenApiStatusTextBlock.Text = "请先创建服务器档案。";
+            return;
+        }
+        OpenApiPortNumericUpDown.Value = _openApiService.GetPort(profile);
+        OpenApiToggleButton.IsEnabled = true;
+        var running = _openApiService.IsRunning(profile.Id);
+        OpenApiToggleButton.Content = running ? "停止" : "启动";
+        OpenApiStatusTextBlock.Text = running
+            ? $"已启动：监听 0.0.0.0:{(int)(OpenApiPortNumericUpDown.Value ?? 8085)}，局域网设备可访问。"
+            : "未启动。";
+    }
+
+    private async void OnOpenApiToggleClick(object? sender, RoutedEventArgs e)
+    {
+        if (OpenApiProfileComboBox.SelectedItem is not InstanceProfile profile)
+            return;
+        try
+        {
+            if (_openApiService.IsRunning(profile.Id))
+                await _openApiService.StopAsync(profile.Id);
+            else
+            {
+                var port = (int)(OpenApiPortNumericUpDown.Value ?? 8085);
+                _openApiService.SavePort(profile, port);
+                await _openApiService.StartAsync(profile, port);
+            }
+            RefreshOpenApiEditor();
+        }
+        catch (Exception ex)
+        {
+            OpenApiStatusTextBlock.Text = $"操作失败：{ex.Message}";
+        }
+    }
+
     private async void OnBrowseModFolderClick(object? sender, RoutedEventArgs e)
     {
         var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
@@ -12115,6 +12186,7 @@ public partial class LauncherMainWindow : Window
         Robot,
         Gateway,
         Auth,
+        OpenApi,
         ServerMap,
         Voice
     }

@@ -1208,6 +1208,7 @@
                                     <Button x:Name="ConnectionFrpTabButton" Classes="SidebarNavButton" Content="FRP" Click="OnConnectionFrpTabClick" />
                                     <Button x:Name="ConnectionEasyTierTabButton" Classes="SidebarNavButton" Content="EasyTier" Click="OnConnectionEasyTierTabClick" />
                                     <Button x:Name="ConnectionGatewayTabButton" Classes="SidebarNavButton" Content="网关" Click="OnConnectionGatewayTabClick" />
+                                    <Button x:Name="ConnectionOpenApiTabButton" Classes="SidebarNavButton" Content="开放 API" Click="OnConnectionOpenApiTabClick" />
                                     <Button x:Name="ConnectionVoiceTabButton" Classes="SidebarNavButton" Content="语音" Click="OnConnectionVoiceTabClick" />
 
                                     <TextBlock x:Name="SettingsNavSectionTitleTextBlock" Classes="SidebarSectionTitle" Text="设置" />
@@ -3524,6 +3525,29 @@
                                             </Border>
                                                 </StackPanel>
                                             </Grid>
+                                        </StackPanel>
+                                    </ScrollViewer>
+
+                                    <ScrollViewer x:Name="ConnectionOpenApiPanel" Margin="0,-8,0,0" IsVisible="False" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Hidden">
+                                        <StackPanel Spacing="10">
+                                            <Border Classes="ConfigCard">
+                                                <StackPanel Spacing="12">
+                                                    <TextBlock Classes="ConfigSectionTitle" Text="开放 API" />
+                                                    <Grid ColumnDefinitions="Auto,180,Auto,110,Auto,*" ColumnSpacing="8" VerticalAlignment="Center">
+                                                        <TextBlock Classes="ConfigFieldLabel" Text="服务器档案" VerticalAlignment="Center" />
+                                                        <ComboBox x:Name="OpenApiProfileComboBox" Grid.Column="1" Classes="CompactCombo" SelectionChanged="OnOpenApiProfileSelectionChanged">
+                                                            <ComboBox.ItemTemplate>
+                                                                <DataTemplate><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" /></DataTemplate>
+                                                            </ComboBox.ItemTemplate>
+                                                        </ComboBox>
+                                                        <TextBlock Grid.Column="2" Classes="ConfigFieldLabel" Text="API 端口" VerticalAlignment="Center" />
+                                                        <NumericUpDown x:Name="OpenApiPortNumericUpDown" Grid.Column="3" Classes="CompactNumber" Minimum="1" Maximum="65535" Increment="1" Value="8085" />
+                                                        <Button x:Name="OpenApiToggleButton" Grid.Column="4" Classes="ActionButton" Content="启动" Click="OnOpenApiToggleClick" />
+                                                    </Grid>
+                                                    <TextBlock x:Name="OpenApiStatusTextBlock" Classes="ConfigHintText" TextWrapping="Wrap" />
+                                                    <TextBlock Classes="ConfigHintText" Text="接口：/api、/api/server、/api/mods" />
+                                                </StackPanel>
+                                            </Border>
                                         </StackPanel>
                                     </ScrollViewer>
 
