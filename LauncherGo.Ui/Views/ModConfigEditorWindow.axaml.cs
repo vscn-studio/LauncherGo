@@ -32,7 +32,6 @@ public partial class ModConfigEditorWindow : Window
         _encoding = DetectTextEncoding(_filePath);
 
         FileNameTextBlock.Text = Path.GetFileName(_filePath);
-        FilePathTextBlock.Text = _filePath;
         ReloadButton.Content = T("重新加载", "Reload");
         ValidateButton.Content = T("检查", "Validate");
         SaveButton.Content = T("保存", "Save");

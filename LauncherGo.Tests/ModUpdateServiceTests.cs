@@ -1,3 +1,4 @@
+using System.Text.Json;
 using LauncherGo.Services;
 using Xunit;
 
@@ -16,5 +17,36 @@ public sealed class ModUpdateServiceTests
         var comparison = ModUpdateService.CompareVersions(current, latest);
 
         Assert.Equal(expectedUpdate, comparison < 0);
+    }
+
+    [Fact]
+    public void SelectLatestReleaseUsesVersionBeforeCreatedTime()
+    {
+        using var document = JsonDocument.Parse("""
+            [
+              { "modversion": "1.19.8", "created": "2026-10-04T12:00:00Z" },
+              { "modversion": "2.0.0", "created": "2026-10-01T12:00:00Z" },
+              { "modversion": "1.20.0", "created": "2026-10-03T12:00:00Z" }
+            ]
+            """);
+
+        var selected = ModUpdateService.SelectLatestRelease(document.RootElement.EnumerateArray());
+
+        Assert.Equal("2.0.0", selected.GetProperty("modversion").GetString());
+    }
+
+    [Fact]
+    public void SelectLatestReleaseUsesNewestCreatedTimeForDuplicateVersions()
+    {
+        using var document = JsonDocument.Parse("""
+            [
+              { "modversion": "2.0.0", "created": "2026-10-01T12:00:00Z" },
+              { "modversion": "2.0.0", "created": "2026-10-04T12:00:00Z" }
+            ]
+            """);
+
+        var selected = ModUpdateService.SelectLatestRelease(document.RootElement.EnumerateArray());
+
+        Assert.Equal("2026-10-04T12:00:00Z", selected.GetProperty("created").GetString());
     }
 }

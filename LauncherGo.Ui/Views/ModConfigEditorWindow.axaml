@@ -72,9 +72,8 @@
     </Window.Styles>
 
     <Grid Margin="16" RowDefinitions="Auto,*,Auto" RowSpacing="10">
-        <StackPanel Spacing="3">
+        <StackPanel>
             <TextBlock x:Name="FileNameTextBlock" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource EditorTextBrush}" TextTrimming="CharacterEllipsis" />
-            <TextBlock x:Name="FilePathTextBlock" FontSize="12" Foreground="{DynamicResource EditorSubTextBrush}" TextTrimming="CharacterEllipsis" />
         </StackPanel>
         <Border Grid.Row="1" Background="{DynamicResource EditorPanelBrush}" BorderBrush="{DynamicResource EditorBorderBrush}" BorderThickness="1" CornerRadius="4" ClipToBounds="True">
             <avaloniaEdit:TextEditor x:Name="Editor" ShowLineNumbers="True" FontFamily="Cascadia Mono, Consolas" FontSize="13" Background="{DynamicResource EditorPanelBrush}" Foreground="{DynamicResource EditorTextBrush}" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" TextChanged="OnEditorTextChanged" />

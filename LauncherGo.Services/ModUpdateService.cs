@@ -9,8 +9,8 @@ namespace LauncherGo.Services;
 
 /// <summary>
 ///     Reads release information from mods.vintagestory.at/api/mod/{modid}.
-///     The endpoint and newest-release selection intentionally match the
-///     mod-version-check workflow used by the Chinese language package.
+///     Releases are selected by semantic version; the API may return a newer
+///     compatibility upload for an older game version after the newest release.
 /// </summary>
 public sealed class ModUpdateService : IModUpdateService
 {
@@ -48,11 +48,7 @@ public sealed class ModUpdateService : IModUpdateService
             throw new InvalidOperationException("模组库未返回版本信息。");
         }
 
-        var latestRelease = releasesElement.EnumerateArray()
-            .Where(static item => item.ValueKind == JsonValueKind.Object &&
-                                  GetString(item, "modversion").Length > 0)
-            .OrderByDescending(static item => ParseDate(GetString(item, "created")))
-            .FirstOrDefault();
+        var latestRelease = SelectLatestRelease(releasesElement.EnumerateArray());
         if (latestRelease.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
             throw new InvalidOperationException("模组库未返回可用版本。");
 
@@ -83,6 +79,17 @@ public sealed class ModUpdateService : IModUpdateService
             return CompareVersionParts(leftParsed.Value, rightParsed.Value);
 
         return string.Compare(left.Trim(), right.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static JsonElement SelectLatestRelease(IEnumerable<JsonElement> releases)
+    {
+        var versionComparer = Comparer<string>.Create(CompareVersions);
+        return releases
+            .Where(static item => item.ValueKind == JsonValueKind.Object &&
+                                  GetString(item, "modversion").Length > 0)
+            .OrderByDescending(static item => GetString(item, "modversion"), versionComparer)
+            .ThenByDescending(static item => ParseDate(GetString(item, "created")))
+            .FirstOrDefault();
     }
 
     private static bool IsSuccessfulResponse(JsonElement root)

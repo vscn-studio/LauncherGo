@@ -1,0 +1,31 @@
+<Window
+    x:Class="LauncherGo.Ui.Views.ModConfigSelectionWindow"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Width="680"
+    Height="460"
+    MinWidth="480"
+    MinHeight="320"
+    WindowStartupLocation="CenterOwner"
+    Icon="avares://LauncherGo.Ui/Assets/app-icon.ico">
+    <Grid Margin="20" RowDefinitions="Auto,Auto,*,Auto" RowSpacing="12">
+        <TextBlock x:Name="TitleTextBlock" FontSize="19" FontWeight="SemiBold" />
+        <TextBlock x:Name="HintTextBlock" Grid.Row="1" Opacity="0.76" TextWrapping="Wrap" />
+        <ListBox x:Name="ConfigFilesListBox" Grid.Row="2" DoubleTapped="OnConfigFileDoubleTapped">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <Border Padding="10,8">
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="{Binding}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+        <Grid Grid.Row="3" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+            <TextBlock x:Name="StatusTextBlock" VerticalAlignment="Center" Opacity="0.76" TextTrimming="CharacterEllipsis" />
+            <Button x:Name="CancelButton" Grid.Column="1" MinWidth="84" Click="OnCancelClick" />
+            <Button x:Name="SelectButton" Grid.Column="2" MinWidth="84" Click="OnSelectClick" />
+        </Grid>
+    </Grid>
+</Window>

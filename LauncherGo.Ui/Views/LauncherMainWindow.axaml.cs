@@ -1069,7 +1069,8 @@ public partial class LauncherMainWindow : Window
     private void InitializeModStaticTexts()
     {
         ModZipPathTextBox.PlaceholderText = T("Mod ZIP 或文件夹", "Mod ZIP or folder");
-        BrowseModZipButton.Content = T("选择文件/文件夹", "Select file/folder");
+        BrowseModFileButton.Content = T("选择文件", "Select file");
+        BrowseModFolderButton.Content = T("选择文件夹", "Select folder");
         ToolTip.SetTip(ModSelectAllCheckBox, T("全选/取消全选模组", "Select or clear all mods"));
         ImportModZipButton.Content = T("导入", "Import");
         DeleteSelectedModsButton.Content = T("删除", "Delete");
@@ -6256,6 +6257,35 @@ public partial class LauncherMainWindow : Window
         _consoleAutoScroll = IsConsoleScrolledToBottom();
     }
 
+    private void OnConsoleOutputDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        var text = ConsoleOutputTextBlock.Text ?? string.Empty;
+        if (string.IsNullOrEmpty(text) || ConsoleOutputTextBlock.TextLayout is not { } layout)
+        {
+            return;
+        }
+
+        var padding = ConsoleOutputTextBlock.Padding;
+        var position = e.GetPosition(ConsoleOutputTextBlock) - new Point(padding.Left, padding.Top);
+        var sourceIndex = layout.HitTestPoint(in position).TextPosition;
+        sourceIndex = Math.Clamp(sourceIndex, 0, text.Length);
+        var start = text.LastIndexOf('\n', Math.Max(0, sourceIndex - 1)) + 1;
+        var end = text.IndexOf('\n', sourceIndex);
+        if (end < 0)
+        {
+            end = text.Length;
+        }
+
+        if (end > start && text[end - 1] == '\r')
+        {
+            end--;
+        }
+
+        ConsoleOutputTextBlock.SelectionStart = start;
+        ConsoleOutputTextBlock.SelectionEnd = end;
+        e.Handled = true;
+    }
+
     private void OnFrpStatusChanged(object? sender, FrpRuntimeStatus status)
     {
         Dispatcher.UIThread.Post(() =>
@@ -8404,7 +8434,7 @@ public partial class LauncherMainWindow : Window
         }
     }
 
-    private async void OnBrowseModZipClick(object? sender, RoutedEventArgs e)
+    private async void OnBrowseModFileClick(object? sender, RoutedEventArgs e)
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
@@ -8424,15 +8454,21 @@ public partial class LauncherMainWindow : Window
             .Where(static path => !string.IsNullOrWhiteSpace(path))
             .Cast<string>()
             .ToList();
+        if (paths.Count > 0)
+            AddModImportPaths(paths);
+    }
+
+    private async void OnBrowseModFolderClick(object? sender, RoutedEventArgs e)
+    {
         var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
             Title = T("选择模组文件夹（可多选）", "Select mod folders"),
             AllowMultiple = true
         });
-        paths.AddRange(folders.Select(TryGetLocalPath)
+        var paths = folders.Select(TryGetLocalPath)
             .Where(static path => !string.IsNullOrWhiteSpace(path))
             .Cast<string>()
-            );
+            .ToList();
         if (paths.Count > 0)
             AddModImportPaths(paths);
     }
@@ -8467,6 +8503,7 @@ public partial class LauncherMainWindow : Window
         try
         {
             var imported = await _instanceModService.ImportModsAsync(profile, paths);
+            SetModImportPaths([]);
             await LoadModsForSelectedProfileAsync();
             if (imported.Count == 0)
             {
@@ -9117,7 +9154,14 @@ public partial class LauncherMainWindow : Window
 
         try
         {
-            var editor = new ModConfigEditorWindow(item.ConfigPath, _isChinese);
+            var configPaths = ModListItem.GetEditableConfigPaths(item.ConfigPath);
+            var configPath = configPaths.Count == 1
+                ? configPaths[0]
+                : await new ModConfigSelectionWindow(configPaths, _isChinese).ShowDialog<string?>(this);
+            if (string.IsNullOrWhiteSpace(configPath))
+                return;
+
+            var editor = new ModConfigEditorWindow(configPath, _isChinese);
             await editor.ShowDialog(this);
         }
         catch (Exception ex)
@@ -14059,7 +14103,7 @@ public partial class LauncherMainWindow : Window
 
         public required string EditConfigText { get; init; }
 
-        public bool CanEditConfig => IsEditableConfigFile(ConfigPath);
+        public bool CanEditConfig => GetEditableConfigPaths(ConfigPath).Count > 0;
 
         public bool IsDisabled { get; init; }
 
@@ -14217,11 +14261,16 @@ public partial class LauncherMainWindow : Window
             };
         }
 
-        private static bool IsEditableConfigFile(string? path)
+        internal static IReadOnlyList<string> GetEditableConfigPaths(string? path)
         {
-            return !string.IsNullOrWhiteSpace(path) &&
-                   !path.Contains(" | ", StringComparison.Ordinal) &&
-                   File.Exists(path);
+            if (string.IsNullOrWhiteSpace(path))
+                return [];
+
+            return path
+                .Split(" | ", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(File.Exists)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
         }
 
         private static string BuildModIssuesText(ModEntry model, bool isChinese)

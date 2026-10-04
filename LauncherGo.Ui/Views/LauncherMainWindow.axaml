@@ -1441,7 +1441,8 @@
                                             x:Name="ConsoleOutputTextBlock"
                                             FontFamily="Consolas"
                                             FontSize="12"
-                                            TextWrapping="Wrap" />
+                                            TextWrapping="Wrap"
+                                            DoubleTapped="OnConsoleOutputDoubleTapped" />
                                     </ScrollViewer>
                                 </Border>
                                 <Grid Grid.Row="2" Margin="24,0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
@@ -2275,7 +2276,8 @@
                                                 </ComboBox.ItemTemplate>
                                             </ComboBox>
                                             <TextBox x:Name="ModZipPathTextBox" Grid.Column="1" Classes="CompactInput" PlaceholderText="ZIP 或模组文件夹" />
-                                            <Button x:Name="BrowseModZipButton" Grid.Column="2" Classes="SecondaryActionButton" Content="选择文件/文件夹" Click="OnBrowseModZipClick" />
+                                            <Button x:Name="BrowseModFileButton" Grid.Column="2" Classes="SecondaryActionButton" Content="选择文件" Click="OnBrowseModFileClick" />
+                                            <Button x:Name="BrowseModFolderButton" Grid.Column="3" Classes="SecondaryActionButton" Content="选择文件夹" Click="OnBrowseModFolderClick" />
                                             <Button x:Name="ImportModZipButton" Grid.Column="4" Classes="SecondaryActionButton" Content="导入" Click="OnImportModZipClick" />
                                             <StackPanel Grid.Row="1" Grid.ColumnSpan="5" Orientation="Horizontal" Spacing="8">
                                                 <TextBox x:Name="ModSearchTextBox" Width="220" Classes="CompactInput" PlaceholderText="搜索模组名称、Mod ID 或版本" TextChanged="OnModSearchTextChanged" />
@@ -2288,7 +2290,7 @@
                                         <TextBlock x:Name="ModStatusTextBlock" Grid.Row="1" Classes="ConfigHintText" TextWrapping="Wrap" />
                                         <Grid Grid.Row="2" RowDefinitions="Auto,*">
                                             <Border Grid.Row="0" Classes="TableHeader">
-                                                <Grid ColumnDefinitions="44,1.15*,1.1*,.7*,.7*,1.1*,1.1*,1.8*,2.2*,58,96,82" ColumnSpacing="8">
+                                                <Grid ColumnDefinitions="44,1.15*,1.1*,.7*,.7*,1.1*,1.1*,58,96,82" ColumnSpacing="8">
                                                     <CheckBox x:Name="ModSelectAllCheckBox" Classes="TableSelectCheck" IsThreeState="True" Click="OnModSelectAllClick" />
                                                     <TextBlock x:Name="ModNameHeaderTextBlock" Grid.Column="1" Classes="TableHeaderText" Text="名称" />
                                                     <TextBlock Grid.Column="2" Classes="TableHeaderText" Text="Mod ID" />
@@ -2296,18 +2298,16 @@
                                                     <TextBlock x:Name="ModSideHeaderTextBlock" Grid.Column="4" Classes="TableHeaderText" Text="端" />
                                                     <TextBlock Grid.Column="5" Classes="TableHeaderText" Text="依赖" />
                                                     <TextBlock Grid.Column="6" Classes="TableHeaderText" Text="问题" />
-                                                    <TextBlock Grid.Column="7" Classes="TableHeaderText" Text="配置路径" />
-                                                    <TextBlock Grid.Column="8" Classes="TableHeaderText" Text="文件" />
-                                                    <TextBlock Grid.Column="9" Classes="TableHeaderText" Text="启用" HorizontalAlignment="Center" />
-                                                    <TextBlock x:Name="ModEditConfigHeaderTextBlock" Grid.Column="10" Classes="TableHeaderText" Text="编辑配置" HorizontalAlignment="Center" />
-                                                    <TextBlock x:Name="ModUpdateHeaderTextBlock" Grid.Column="11" Classes="TableHeaderText" Text="更新" HorizontalAlignment="Center" />
+                                                    <TextBlock Grid.Column="7" Classes="TableHeaderText" Text="启用" HorizontalAlignment="Center" />
+                                                    <TextBlock x:Name="ModEditConfigHeaderTextBlock" Grid.Column="8" Classes="TableHeaderText" Text="编辑配置" HorizontalAlignment="Center" />
+                                                    <TextBlock x:Name="ModUpdateHeaderTextBlock" Grid.Column="9" Classes="TableHeaderText" Text="更新" HorizontalAlignment="Center" />
                                                 </Grid>
                                             </Border>
                                             <Border Grid.Row="1" Classes="TableBody">
                                                 <ListBox x:Name="ModsListBox" Classes="FlatList TableList" SelectionMode="Multiple" SelectionChanged="OnModsSelectionChanged">
                                                     <ListBox.ItemTemplate>
                                                         <DataTemplate>
-                                                            <Grid ColumnDefinitions="44,1.15*,1.1*,.7*,.7*,1.1*,1.1*,1.8*,2.2*,58,96,82" ColumnSpacing="8" MinHeight="36" Background="{Binding RowBackground}">
+                                                            <Grid ColumnDefinitions="44,1.15*,1.1*,.7*,.7*,1.1*,1.1*,58,96,82" ColumnSpacing="8" MinHeight="36" Background="{Binding RowBackground}">
                                                                 <CheckBox Classes="TableSelectCheck" IsChecked="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}, Mode=TwoWay}" />
                                                                 <TextBlock Grid.Column="1" Classes="TableCellText" Text="{Binding Name}" />
                                                                 <TextBlock Grid.Column="2" Classes="TableCellText" Text="{Binding DisplayModId}" FontWeight="SemiBold" />
@@ -2315,14 +2315,10 @@
                                                                 <TextBlock Grid.Column="4" Classes="TableCellText" Text="{Binding Side}" />
                                                                 <TextBlock Grid.Column="5" Classes="TableCellText" Text="{Binding DependenciesText}" />
                                                                 <TextBlock Grid.Column="6" Classes="TableCellText" Text="{Binding IssuesText}" Foreground="{Binding ConflictBrush}" />
-                                                                <Button Grid.Column="7" Classes="DownloadTextButton TablePathButton" Tag="{Binding ConfigPath}" HorizontalAlignment="Stretch" Click="OnOpenModConfigPathClick">
-                                                                    <TextBlock Classes="TableCellText TablePathText" Text="{Binding ConfigPath}" Foreground="{DynamicResource DownloadActionTextBrush}" />
-                                                                </Button>
-                                                                <TextBlock Grid.Column="8" Classes="TableCellText" Text="{Binding FilePath}" />
-                                                                <ToggleSwitch Grid.Column="9" Classes="TableSwitch" IsChecked="{Binding ModEnabled, Mode=OneWay}" IsEnabled="{Binding CanToggleMod}" Tag="{Binding}" Click="OnModEnabledSwitchClick" />
-                                                                <Button Grid.Column="10" Classes="SecondaryActionButton" Tag="{Binding}" Content="{Binding EditConfigText}" IsEnabled="{Binding CanEditConfig}" Click="OnEditModConfigClick" />
-                                                                <Button Grid.Column="11" Classes="ModUpdateButton" Tag="{Binding}" Content="{Binding UpdateButtonText}" Foreground="{Binding UpdateStatusBrush}" IsVisible="{Binding IsUpdateButtonVisible}" Click="OnModUpdateClick" />
-                                                                <TextBlock Grid.Column="11" Classes="TableCellText" Text="{Binding UpdateStatusText}" Foreground="{Binding UpdateStatusBrush}" HorizontalAlignment="Center" IsVisible="{Binding IsUpdateStatusVisible}" />
+                                                                <ToggleSwitch Grid.Column="7" Classes="TableSwitch" IsChecked="{Binding ModEnabled, Mode=OneWay}" IsEnabled="{Binding CanToggleMod}" Tag="{Binding}" Click="OnModEnabledSwitchClick" />
+                                                                <Button Grid.Column="8" Classes="SecondaryActionButton" Tag="{Binding}" Content="{Binding EditConfigText}" IsEnabled="{Binding CanEditConfig}" Click="OnEditModConfigClick" />
+                                                                <Button Grid.Column="9" Classes="ModUpdateButton" Tag="{Binding}" Content="{Binding UpdateButtonText}" Foreground="{Binding UpdateStatusBrush}" IsVisible="{Binding IsUpdateButtonVisible}" Click="OnModUpdateClick" />
+                                                                <TextBlock Grid.Column="9" Classes="TableCellText" Text="{Binding UpdateStatusText}" Foreground="{Binding UpdateStatusBrush}" HorizontalAlignment="Center" IsVisible="{Binding IsUpdateStatusVisible}" />
                                                             </Grid>
                                                         </DataTemplate>
                                                     </ListBox.ItemTemplate>
