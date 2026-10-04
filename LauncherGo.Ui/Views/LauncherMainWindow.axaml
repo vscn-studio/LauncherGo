@@ -3535,11 +3535,12 @@
                                                     <TextBlock Classes="ConfigSectionTitle" Text="开放 API" />
                                                     <Grid RowDefinitions="Auto,*">
                                                         <Border Grid.Row="0" Classes="TableHeader">
-                                                            <Grid ColumnDefinitions="2*,120,1.3*,Auto" ColumnSpacing="8">
+                                                            <Grid ColumnDefinitions="1.7*,150,120,1.2*,Auto" ColumnSpacing="8">
                                                                 <TextBlock Classes="TableHeaderText" Text="服务器档案" />
-                                                                <TextBlock Grid.Column="1" Classes="TableHeaderText" Text="API 端口" />
-                                                                <TextBlock Grid.Column="2" Classes="TableHeaderText" Text="状态" />
-                                                                <TextBlock Grid.Column="3" Classes="TableHeaderText" Text="操作" HorizontalAlignment="Center" />
+                                                                <TextBlock Grid.Column="1" Classes="TableHeaderText" Text="服务器封面" />
+                                                                <TextBlock Grid.Column="2" Classes="TableHeaderText" Text="API 端口" />
+                                                                <TextBlock Grid.Column="3" Classes="TableHeaderText" Text="状态" />
+                                                                <TextBlock Grid.Column="4" Classes="TableHeaderText" Text="操作" HorizontalAlignment="Center" />
                                                             </Grid>
                                                         </Border>
                                                         <Border Grid.Row="1" Classes="TableBody">
@@ -3547,11 +3548,12 @@
                                                                 <ItemsControl.ItemTemplate>
                                                                     <DataTemplate>
                                                                         <Border Classes="TableRow">
-                                                                            <Grid ColumnDefinitions="2*,120,1.3*,Auto" ColumnSpacing="8">
+                                                                            <Grid ColumnDefinitions="1.7*,150,120,1.2*,Auto" ColumnSpacing="8">
                                                                                 <TextBlock Classes="TableCellText" Text="{Binding ProfileName}" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                                                                <NumericUpDown Grid.Column="1" Classes="CompactNumber" Minimum="1" Maximum="65535" Increment="1" Value="{Binding Port, Mode=TwoWay}" />
-                                                                                <TextBlock Grid.Column="2" Classes="TableCellText" Text="{Binding StatusText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                                                                <Button Grid.Column="3" Classes="SecondaryActionButton" Tag="{Binding}" Content="{Binding ActionText}" Click="OnOpenApiToggleClick" />
+                                                                                <Button Grid.Column="1" Classes="SecondaryActionButton" Tag="{Binding}" Content="{Binding CoverText}" Click="OnOpenApiCoverClick" />
+                                                                                <NumericUpDown Grid.Column="2" Classes="CompactNumber" Minimum="1" Maximum="65535" Increment="1" Value="{Binding Port, Mode=TwoWay}" />
+                                                                                <TextBlock Grid.Column="3" Classes="TableCellText" Text="{Binding StatusText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                                                <Button Grid.Column="4" Classes="SecondaryActionButton" Tag="{Binding}" Content="{Binding ActionText}" Click="OnOpenApiToggleClick" />
                                                                             </Grid>
                                                                         </Border>
                                                                     </DataTemplate>

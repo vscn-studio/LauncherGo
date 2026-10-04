@@ -8395,11 +8395,13 @@ public partial class LauncherMainWindow : Window
         {
             var running = _openApiService.IsRunning(profile.Id);
             var port = _openApiService.GetPort(profile);
+            var hasCover = _openApiService.GetCoverPath(profile) is not null;
             _openApiProfileItems.Add(new OpenApiProfileItem
             {
                 Profile = profile,
                 Port = port,
                 IsRunning = running,
+                CoverText = hasCover ? "更换封面" : "选择封面",
                 StatusText = running ? $"已启动：0.0.0.0:{port}" : "未启动"
             });
         }
@@ -8427,6 +8429,38 @@ public partial class LauncherMainWindow : Window
         catch (Exception ex)
         {
             item.StatusText = $"操作失败：{ex.Message}";
+        }
+    }
+
+    private async void OnOpenApiCoverClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: OpenApiProfileItem item })
+            return;
+
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "选择服务器封面",
+            AllowMultiple = false,
+            FileTypeFilter =
+            [
+                new FilePickerFileType("Image")
+                {
+                    Patterns = ["*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp"]
+                }
+            ]
+        });
+        var path = TryGetLocalPath(files.FirstOrDefault());
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        try
+        {
+            _openApiService.SaveCover(item.Profile, path);
+            item.CoverText = "更换封面";
+        }
+        catch (Exception ex)
+        {
+            item.StatusText = $"封面设置失败：{ex.Message}";
         }
     }
 
@@ -12338,10 +12372,22 @@ public partial class LauncherMainWindow : Window
         private int _port;
         private bool _isRunning;
         private string _statusText = string.Empty;
+        private string _coverText = "选择封面";
 
         public required InstanceProfile Profile { get; init; }
 
         public string ProfileName => string.IsNullOrWhiteSpace(Profile.Name) ? Profile.Id : Profile.Name;
+
+        public string CoverText
+        {
+            get => _coverText;
+            set
+            {
+                if (_coverText == value) return;
+                _coverText = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CoverText)));
+            }
+        }
 
         public int Port
         {

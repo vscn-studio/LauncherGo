@@ -33,7 +33,50 @@ public sealed class OpenApiService(
     public void SavePort(InstanceProfile profile, int port)
     {
         ValidatePort(port);
-        SaveSettings(profile, new OpenApiSettings { Port = port });
+        SaveSettings(profile, LoadSettings(profile) with { Port = port });
+    }
+
+    public string? GetCoverPath(InstanceProfile profile)
+    {
+        var settings = LoadSettings(profile);
+        var path = string.IsNullOrWhiteSpace(settings.CoverFileName)
+            ? string.Empty
+            : Path.Combine(profile.DirectoryPath, settings.CoverFileName);
+        return !string.IsNullOrWhiteSpace(path) && File.Exists(path) ? path : null;
+    }
+
+    public void SaveCover(InstanceProfile profile, string sourcePath)
+    {
+        if (!File.Exists(sourcePath))
+            throw new FileNotFoundException("封面图片不存在。", sourcePath);
+        var extension = Path.GetExtension(sourcePath).ToLowerInvariant();
+        var contentType = extension switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            _ => string.Empty
+        };
+        if (string.IsNullOrWhiteSpace(contentType))
+            throw new InvalidOperationException("封面仅支持 JPG、PNG、GIF 或 WebP 图片。");
+
+        Directory.CreateDirectory(profile.DirectoryPath);
+        var fileName = $"openapi-cover{extension}";
+        var destination = Path.Combine(profile.DirectoryPath, fileName);
+        File.Copy(sourcePath, destination, overwrite: true);
+        SaveSettings(profile, LoadSettings(profile) with { CoverFileName = fileName, CoverContentType = contentType });
+    }
+
+    public void ClearCover(InstanceProfile profile)
+    {
+        var settings = LoadSettings(profile);
+        if (!string.IsNullOrWhiteSpace(settings.CoverFileName))
+        {
+            var path = Path.Combine(profile.DirectoryPath, settings.CoverFileName);
+            if (File.Exists(path)) File.Delete(path);
+        }
+        SaveSettings(profile, settings with { CoverFileName = string.Empty, CoverContentType = string.Empty });
     }
 
     public async Task StartAsync(InstanceProfile profile, int port, CancellationToken cancellationToken = default)
@@ -46,7 +89,7 @@ public sealed class OpenApiService(
             if (_applications.ContainsKey(profile.Id))
                 return;
 
-            SaveSettings(profile, new OpenApiSettings { Port = port });
+            SaveSettings(profile, LoadSettings(profile) with { Port = port });
             var builder = WebApplication.CreateSlimBuilder();
             builder.Logging.ClearProviders();
             builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Any, port));
@@ -62,6 +105,13 @@ public sealed class OpenApiService(
             app.MapGet("/api", async (CancellationToken token) => Results.Json(await BuildServerInfoAsync(profile, token), JsonOptions));
             app.MapGet("/api/server", async (CancellationToken token) => Results.Json(await BuildServerInfoAsync(profile, token), JsonOptions));
             app.MapGet("/api/mods", async (CancellationToken token) => Results.Json(await BuildModsAsync(profile, token), JsonOptions));
+            app.MapGet("/api/cover", () =>
+            {
+                var coverPath = GetCoverPath(profile);
+                return coverPath is null
+                    ? Results.NotFound(new { error = "No server cover configured." })
+                    : Results.File(coverPath, LoadSettings(profile).CoverContentType);
+            });
             app.MapFallback(() => Results.NotFound(new { error = "Endpoint not found." }));
 
             try
@@ -112,6 +162,7 @@ public sealed class OpenApiService(
             UptimeSeconds = status.IsRunning && status.StartedAtUtc is { } startedAt
                 ? Math.Max(0, (long)(DateTimeOffset.UtcNow - startedAt).TotalSeconds)
                 : 0,
+            CoverUrl = GetCoverPath(profile) is null ? string.Empty : "/api/cover",
             Mods = await BuildModsAsync(profile, cancellationToken)
         };
     }
@@ -203,7 +254,12 @@ public sealed class OpenApiService(
             throw new ArgumentOutOfRangeException(nameof(port), "端口必须在 1 到 65535 之间。");
     }
 
-    private sealed class OpenApiSettings { public int Port { get; init; } = 8085; }
+    private sealed record OpenApiSettings
+    {
+        public int Port { get; init; } = 8085;
+        public string CoverFileName { get; init; } = string.Empty;
+        public string CoverContentType { get; init; } = string.Empty;
+    }
 }
 
 public sealed class OpenApiServerInfo
@@ -217,6 +273,7 @@ public sealed class OpenApiServerInfo
     public int OnlinePlayers { get; init; }
     public DateTimeOffset? StartedAtUtc { get; init; }
     public long UptimeSeconds { get; init; }
+    public string CoverUrl { get; init; } = string.Empty;
     public IReadOnlyList<OpenApiModInfo> Mods { get; init; } = [];
 }
 
