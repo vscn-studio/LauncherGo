@@ -27,7 +27,6 @@ LauncherGo.slnx package --include-transitive` and local `.nuspec` metadata.
 
 | Component | Version | License metadata found | Source / license |
 | --- | --- | --- | --- |
-| Discord.Net and its Commands/Core/Interactions/Rest/Webhook/WebSocket packages | 3.15.3 | MIT | https://github.com/discord-net/Discord.Net |
 | Newtonsoft.Json | 13.0.3 | MIT | https://github.com/JamesNK/Newtonsoft.Json |
 | System.Reactive | 6.0.0 | MIT | https://github.com/dotnet/reactive |
 | System.Interactive.Async, System.Linq.Async | 6.0.1 | MIT | https://github.com/dotnet/reactive |

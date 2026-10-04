@@ -51,7 +51,7 @@ public partial class LauncherMainWindow : Window
     private const double ChartHeight = 248;
     private const double ThumbnailWidth = 76;
     private const double ThumbnailHeight = 50;
-    private const string DefaultServerDownloadCatalogUrl = "https://cdn.vintagestory.top/stable-unstable.json";
+    private const string DefaultServerDownloadCatalogUrl = "https://api.vintagestory.at/stable-unstable.json";
     private const string GitHubContributorsApiUrl = "https://api.github.com/repos/vscn-studio/LauncherGo/contributors?per_page=100";
     private const string SponsorApiUrl = "https://vscn.studio/api/afdian/sponsors";
     private const string LaunchStartIconData =
@@ -274,7 +274,6 @@ public partial class LauncherMainWindow : Window
     private readonly IInstanceServerConfigService _instanceServerConfigService;
     private readonly IServerProcessService _serverProcessService;
     private readonly IRobotService _robotService;
-    private readonly IDiscordBotService _discordBotService;
     private readonly ILogTailService _logTailService;
     private readonly IAutomationService _automationService;
     private readonly IAutomationSettingsService _automationSettingsService;
@@ -342,8 +341,6 @@ public partial class LauncherMainWindow : Window
     private readonly ObservableCollection<RobotTeleportPointItem> _robotTeleportPointItems = [];
     private readonly ObservableCollection<RobotCustomCommandItem> _robotCustomCommandItems = [];
     private readonly ObservableCollection<InstanceProfile> _robotProfileItems = [];
-    private readonly ObservableCollection<DiscordProfileBindingItem> _discordBindingItems = [];
-    private readonly ObservableCollection<DiscordCustomCommandItem> _discordCustomCommandItems = [];
     private readonly ObservableCollection<TcpGatewayBackend> _gatewayBackendItems = [];
     private readonly ObservableCollection<GatewayBackendRuntimeItem> _gatewayBackendRuntimeItems = [];
     private readonly ObservableCollection<InstanceProfile> _serverMapProfileItems = [];
@@ -406,7 +403,6 @@ public partial class LauncherMainWindow : Window
     private bool _isTogglingGateway;
     private bool _isRefreshingGateway;
     private bool _isTogglingRobot;
-    private bool _isTogglingDiscord;
     private bool _isExitRequested;
     private bool _isExitConfirmationOpen;
     private bool _staticUiTranslationQueued;
@@ -465,8 +461,7 @@ public partial class LauncherMainWindow : Window
             ServiceLocator.GetRequiredService<IServerBridgeService>(),
             ServiceLocator.GetRequiredService<ILauncherUpdateService>(),
             ServiceLocator.GetRequiredService<ILogger<LauncherMainWindow>>(),
-            ServiceLocator.GetRequiredService<ILocalizationService>(),
-            ServiceLocator.GetRequiredService<IDiscordBotService>())
+            ServiceLocator.GetRequiredService<ILocalizationService>())
     {
     }
 
@@ -495,7 +490,6 @@ public partial class LauncherMainWindow : Window
         ILauncherUpdateService launcherUpdateService,
         ILogger<LauncherMainWindow>? logger = null,
         ILocalizationService? localizationService = null,
-        IDiscordBotService? discordBotService = null,
         IVoiceWebService? voiceWebService = null)
     {
         _preferencesService = preferencesService;
@@ -505,7 +499,6 @@ public partial class LauncherMainWindow : Window
         _instanceServerConfigService = instanceServerConfigService;
         _serverProcessService = serverProcessService;
         _robotService = robotService;
-        _discordBotService = discordBotService ?? ServiceLocator.GetRequiredService<IDiscordBotService>();
         _logTailService = logTailService;
         _automationService = automationService;
         _automationSettingsService = automationSettingsService;
@@ -555,8 +548,6 @@ public partial class LauncherMainWindow : Window
         _thirdPartyFrpcService.StatusChanged += OnThirdPartyFrpcStatusChanged;
         _easyTierService.StatusChanged += OnEasyTierStatusChanged;
         _tcpGatewayService.StatusChanged += OnTcpGatewayStatusChanged;
-        _discordBotService.StatusChanged += OnDiscordStatusChanged;
-        _discordBotService.OutputReceived += OnDiscordOutputReceived;
 
         InitializeStaticTexts();
         RefreshAppearanceSettingsEditor();
@@ -595,12 +586,9 @@ public partial class LauncherMainWindow : Window
             _thirdPartyFrpcService.StatusChanged -= OnThirdPartyFrpcStatusChanged;
             _easyTierService.StatusChanged -= OnEasyTierStatusChanged;
             _tcpGatewayService.StatusChanged -= OnTcpGatewayStatusChanged;
-            _discordBotService.StatusChanged -= OnDiscordStatusChanged;
-            _discordBotService.OutputReceived -= OnDiscordOutputReceived;
             _localizationService.LanguageChanged -= OnLanguageChanged;
             _ = _logTailService.StopAsync();
             _ = _robotService.StopAsync(TimeSpan.FromSeconds(2));
-            _ = _discordBotService.StopAsync(TimeSpan.FromSeconds(2));
             _ = _frpService.StopAsync(TimeSpan.FromSeconds(2));
             _ = _thirdPartyFrpcService.StopAsync(TimeSpan.FromSeconds(2));
             _ = _easyTierService.StopAsync(TimeSpan.FromSeconds(2));
@@ -751,12 +739,6 @@ public partial class LauncherMainWindow : Window
             {
                 SetConnectionStatus(T($"QQ机器人自启动失败：{ex.Message}", $"QQ robot auto-start failed: {ex.Message}"));
             }
-        }
-
-        if (preferences.AutoStartDiscordOnLaunch)
-        {
-            try { await _discordBotService.StartAsync(preferences.Discord); }
-            catch (Exception ex) { SetConnectionStatus(T($"Discord 自启动失败：{ex.Message}", $"Discord auto-start failed: {ex.Message}")); }
         }
 
         if (preferences.AutoStartFrpOnLaunch)
@@ -1183,7 +1165,6 @@ public partial class LauncherMainWindow : Window
         SettingsAutoStartServerProfileLabelTextBlock.Text = T("自启动服务器档案", "Auto-start server profile");
         SettingsAutoStartAddProfileComboBox.PlaceholderText = T("添加自启动服务器", "Add auto-start server");
         SettingsAutoStartRobotLabelTextBlock.Text = T("启动时自动启动QQ机器人", "Auto-start QQ robot on launch");
-        SettingsAutoStartDiscordLabelTextBlock.Text = T("启动时自动启动 Discord 机器人", "Auto-start Discord bot on launch");
         SettingsAutoStartFrpLabelTextBlock.Text = T("启动时自动开启内网穿透（常规）", "Auto-start FRP (regular) on launch");
         SettingsAutoStartThirdPartyFrpcLabelTextBlock.Text = T("启动时自动开启第三方内网穿透", "Auto-start third-party FRPC on launch");
         SettingsAutoStartEasyTierLabelTextBlock.Text = T("启动时自动开启 EasyTier", "Auto-start EasyTier on launch");
@@ -1257,33 +1238,6 @@ public partial class LauncherMainWindow : Window
         ConnectionFrpTabButton.Content = T("FRP", "FRP");
         ConnectionEasyTierTabButton.Content = T("EasyTier", "EasyTier");
         ConnectionRobotTabButton.Content = "OneBot";
-        ConnectionDiscordTabButton.Content = "Discord";
-        DiscordSaveButton.Content = T("保存", "Save");
-        DiscordToggleButton.Content = T("启动", "Start");
-        DiscordRedeployButton.Content = T("重新部署命令", "Redeploy Commands");
-        DiscordClearButton.Content = T("清空", "Clear");
-        DiscordRefreshButton.Content = T("刷新", "Refresh");
-        DiscordBindingAddButton.Content = T("添加", "Add");
-        DiscordCustomCommandAddButton.Content = T("添加", "Add");
-        DiscordConfigTitleTextBlock.Text = T("Discord 机器人配置", "Discord Bot Configuration");
-        DiscordTokenLabelTextBlock.Text = T("Bot Token", "Bot Token");
-        DiscordReconnectLabelTextBlock.Text = T("重连间隔秒数", "Reconnect Interval Seconds");
-        DiscordAdminUsersLabelTextBlock.Text = T("管理员用户 ID", "Administrator User IDs");
-        DiscordAdminRolesLabelTextBlock.Text = T("管理员角色 ID", "Administrator Role IDs");
-        DiscordBindingTitleTextBlock.Text = T("Profile / Guild / Channel 绑定", "Profile / Guild / Channel Bindings");
-        DiscordBindingProfileHeaderTextBlock.Text = T("服务器档案", "Server Profile");
-        DiscordBindingGuildHeaderTextBlock.Text = "Guild ID";
-        DiscordBindingChannelHeaderTextBlock.Text = "Channel ID";
-        DiscordBindingActionHeaderTextBlock.Text = T("操作", "Actions");
-        DiscordCustomCommandsTitleTextBlock.Text = T("自定义指令", "Custom Commands");
-        DiscordCustomCommandNameHeaderTextBlock.Text = T("指令", "Command");
-        DiscordCustomCommandTypeHeaderTextBlock.Text = T("类型", "Type");
-        DiscordCustomCommandContentHeaderTextBlock.Text = T("内容", "Content");
-        DiscordCustomCommandActionHeaderTextBlock.Text = T("操作", "Actions");
-        DiscordCustomCommandHintTextBlock.Text = T(
-            "指令名称仅允许 Discord 支持的 a-z、0-9、_、-；非法名称会提示并阻止保存。",
-            "Command names may contain only Discord-supported a-z, 0-9, _ and -; invalid names block saving.");
-        foreach (var item in _discordCustomCommandItems) item.SetLanguage(_isChinese);
         ConnectionAuthTabButton.Content = T("认证", "Authentication");
         ConnectionGatewayTabButton.Content = T("网关", "Gateway");
 
@@ -1340,7 +1294,6 @@ public partial class LauncherMainWindow : Window
 
 
         UpdateRobotToggleButtonText();
-        DiscordToggleButton.Content = _discordBotService.GetCurrentStatus().IsRunning ? T("停止", "Stop") : T("启动", "Start");
         RobotConfigTitleTextBlock.Text = T("QQ机器人配置", "QQ Robot Configuration");
         RobotOneBotLabelTextBlock.Text = T("OneBot WebSocket", "OneBot WebSocket");
         RobotAccessTokenLabelTextBlock.Text = T("访问令牌", "Access Token");
@@ -1472,8 +1425,6 @@ public partial class LauncherMainWindow : Window
         RobotBindingsItemsControl.ItemsSource = _robotBindingItems;
         RobotTeleportPointsItemsControl.ItemsSource = _robotTeleportPointItems;
         RobotCustomCommandsItemsControl.ItemsSource = _robotCustomCommandItems;
-        DiscordBindingsItemsControl.ItemsSource = _discordBindingItems;
-        DiscordCustomCommandsItemsControl.ItemsSource = _discordCustomCommandItems;
         GatewayBackendsItemsControl.ItemsSource = _gatewayBackendItems;
         GatewayBackendRuntimeItemsControl.ItemsSource = _gatewayBackendRuntimeItems;
         AuthConfigItemsControl.ItemsSource = _authConfigItems;
@@ -1518,8 +1469,6 @@ public partial class LauncherMainWindow : Window
             _serverBridgeConfigItems,
             _robotBindingItems,
             _robotCustomCommandItems,
-            _discordBindingItems,
-            _discordCustomCommandItems,
             _gatewayBackendItems,
             _gatewayBackendRuntimeItems,
             _dashboardServerItems,
@@ -3756,24 +3705,16 @@ public partial class LauncherMainWindow : Window
         ConnectionFrpPanel.IsVisible = tab == ConnectionTab.Frp;
         ConnectionEasyTierPanel.IsVisible = tab == ConnectionTab.EasyTier;
         ConnectionRobotPanel.IsVisible = tab == ConnectionTab.Robot;
-        ConnectionDiscordPanel.IsVisible = tab == ConnectionTab.Discord;
         ConnectionGatewayPanel.IsVisible = tab == ConnectionTab.Gateway;
         ConnectionAuthPanel.IsVisible = tab == ConnectionTab.Auth;
         ConnectionVoicePanel.IsVisible = tab == ConnectionTab.Voice;
         RefreshSidebarSelection();
         RefreshConnectionSettingsEditor();
         RefreshConnectionRuntimeStatus();
-        if (tab == ConnectionTab.Discord)
-        {
-            ConnectionStatusTextBlock.Text = string.Empty;
-            ConnectionStatusTextBlock.IsVisible = false;
-        }
         if (tab == ConnectionTab.Robot)
         {
             RefreshRobotProfileItems();
         }
-        if (tab == ConnectionTab.Discord) ApplyDiscordSettings(_preferencesService.Load().Discord);
-
         if (tab == ConnectionTab.Auth)
         {
             ShowAuthList();
@@ -3811,7 +3752,6 @@ public partial class LauncherMainWindow : Window
         SetSelectedClass(ConnectionEasyTierTabButton, !_logsNavSelected && _selectedTab == MainTab.Connection && _selectedConnectionTab == ConnectionTab.EasyTier);
         SetSelectedClass(ConnectionGatewayTabButton, !_logsNavSelected && _selectedTab == MainTab.Connection && _selectedConnectionTab == ConnectionTab.Gateway);
         SetSelectedClass(ConnectionRobotTabButton, !_logsNavSelected && _selectedTab == MainTab.Connection && _selectedConnectionTab == ConnectionTab.Robot);
-        SetSelectedClass(ConnectionDiscordTabButton, !_logsNavSelected && _selectedTab == MainTab.Connection && _selectedConnectionTab == ConnectionTab.Discord);
         SetSelectedClass(ConnectionVoiceTabButton, !_logsNavSelected && _selectedTab == MainTab.Connection && _selectedConnectionTab == ConnectionTab.Voice);
         SetSelectedClass(ServerMapTabButton, !_logsNavSelected && _selectedTab == MainTab.InstanceManage && _selectedInstanceManageTab == InstanceManageTab.ServerMap);
         SetSelectedClass(ServerSettingsTabButton, !_logsNavSelected && _selectedTab == MainTab.Settings && _selectedSettingsTab == SettingsTab.Server);
@@ -4094,7 +4034,6 @@ public partial class LauncherMainWindow : Window
             SettingsAutoStartServerCheckBox.IsChecked = preferences.AutoStartServerOnLaunch;
             SettingsAutoRestartServerAfterCrashCheckBox.IsChecked = preferences.AutoRestartServerAfterCrash;
             SettingsAutoStartRobotCheckBox.IsChecked = preferences.AutoStartRobotOnLaunch;
-            SettingsAutoStartDiscordCheckBox.IsChecked = preferences.AutoStartDiscordOnLaunch;
             SettingsAutoStartFrpCheckBox.IsChecked = preferences.AutoStartFrpOnLaunch;
             SettingsAutoStartThirdPartyFrpcCheckBox.IsChecked = preferences.AutoStartThirdPartyFrpcOnLaunch;
             SettingsAutoStartEasyTierCheckBox.IsChecked = preferences.AutoStartEasyTierOnLaunch;
@@ -4139,7 +4078,6 @@ public partial class LauncherMainWindow : Window
         preferences.AutoStartServerProfileIds = autoStartIds;
         preferences.AutoStartServerProfileId = string.Join(';', autoStartIds);
         preferences.AutoStartRobotOnLaunch = SettingsAutoStartRobotCheckBox.IsChecked == true;
-        preferences.AutoStartDiscordOnLaunch = SettingsAutoStartDiscordCheckBox.IsChecked == true;
         preferences.AutoStartFrpOnLaunch = SettingsAutoStartFrpCheckBox.IsChecked == true;
         preferences.AutoStartThirdPartyFrpcOnLaunch = SettingsAutoStartThirdPartyFrpcCheckBox.IsChecked == true;
         preferences.AutoStartEasyTierOnLaunch = SettingsAutoStartEasyTierCheckBox.IsChecked == true;
@@ -4726,7 +4664,6 @@ public partial class LauncherMainWindow : Window
             ApplyFrpSettings(preferences.Frp);
             ApplyEasyTierSettings(preferences.EasyTier);
             ApplyRobotSettings(preferences.Robot);
-            ApplyDiscordSettings(preferences.Discord);
             ApplyGatewaySettings(preferences.TcpGateway);
             RefreshRobotProfileItems();
             RefreshAuthConfigItems();
@@ -5480,21 +5417,18 @@ public partial class LauncherMainWindow : Window
         UpdateConnectionFrpActionButtons();
         UpdateEasyTierActionButtons();
         UpdateRobotToggleButtonText();
-        DiscordToggleButton.Content = _discordBotService.GetCurrentStatus().IsRunning ? T("停止", "Stop") : T("启动", "Start");
         UpdateGatewayToggleButtonText();
         var currentStatus = _selectedConnectionTab switch
         {
             ConnectionTab.Frp => BuildFrpRuntimeStatusText(),
             ConnectionTab.EasyTier => BuildEasyTierRuntimeStatusText(),
             ConnectionTab.Robot => BuildRobotRuntimeStatusText(),
-            ConnectionTab.Discord => string.Empty,
             ConnectionTab.Gateway => BuildGatewayRuntimeStatusText(_tcpGatewayService.GetCurrentStatus()),
             ConnectionTab.Auth => AuthStatusTextBlock.Text ?? string.Empty,
             _ => string.Empty
         };
 
-        if (_selectedConnectionTab != ConnectionTab.Discord)
-            SetConnectionStatus(currentStatus, notify: false);
+        SetConnectionStatus(currentStatus, notify: false);
         UpdateCardValues(_serverProcessService.GetCachedStatus());
     }
 
@@ -7267,28 +7201,6 @@ public partial class LauncherMainWindow : Window
     {
         SelectTab(MainTab.Connection);
         SelectConnectionTab(ConnectionTab.Robot);
-    }
-
-    private void OnDiscordStatusChanged(object? sender, DiscordRuntimeStatus status)
-    {
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (!status.IsRunning && !string.IsNullOrWhiteSpace(status.LastError))
-                ShowToast(T($"Discord 连接失败：{status.LastError}", $"Discord connection failed: {status.LastError}"));
-            if (_selectedConnectionTab == ConnectionTab.Discord)
-                RefreshConnectionRuntimeStatus();
-        });
-    }
-
-    private void OnDiscordOutputReceived(object? sender, string line)
-    {
-        Dispatcher.UIThread.Post(() => AppendConsoleLine(line));
-    }
-
-    private void OnConnectionDiscordTabClick(object? sender, RoutedEventArgs e)
-    {
-        SelectTab(MainTab.Connection);
-        SelectConnectionTab(ConnectionTab.Discord);
     }
 
     private void OnConnectionAuthTabClick(object? sender, RoutedEventArgs e)
@@ -9466,268 +9378,6 @@ public partial class LauncherMainWindow : Window
             _serverMapConfigItems.Add(ProfileConfigListItem.FromPath(profile, Path.Combine(_serverMapService.GetProfileDirectory(profile), "launchergo-map.json")));
         ServerMapConfigItemsControl.ItemsSource = _serverMapConfigItems;
     }
-
-    private async void OnDiscordSaveClick(object? sender, RoutedEventArgs e)
-    {
-        if (!TryCollectDiscordSettings(out var discord, out var validationMessage))
-        {
-            ShowDiscordValidation(validationMessage);
-            return;
-        }
-        var preferences = _preferencesService.Load();
-        preferences.Discord = discord;
-        _preferencesService.Save(preferences);
-        await _discordBotService.SaveSettingsAsync(preferences.Discord);
-        if (_discordBotService.GetCurrentStatus().IsRunning)
-        {
-            try
-            {
-                await _discordBotService.StopAsync(TimeSpan.FromSeconds(5));
-                await _discordBotService.StartAsync(preferences.Discord);
-            }
-            catch (Exception ex)
-            {
-                ShowToast(T($"Discord 配置已保存，但重载失败：{ex.Message}", $"Discord configuration saved, but reload failed: {ex.Message}"));
-                return;
-            }
-        }
-        ShowToast(T("Discord 配置已保存。", "Discord configuration saved."));
-    }
-
-    private async void OnDiscordToggleClick(object? sender, RoutedEventArgs e)
-    {
-        if (_isTogglingDiscord) return;
-        _isTogglingDiscord = true;
-        DiscordToggleButton.IsEnabled = false;
-        try
-        {
-            if (_discordBotService.GetCurrentStatus().IsRunning)
-            {
-                ShowToast(T("正在停止 Discord 机器人…", "Stopping Discord bot…"));
-                await _discordBotService.StopAsync(TimeSpan.FromSeconds(5));
-                ShowToast(T("Discord 机器人已停止。", "Discord bot stopped."));
-            }
-            else
-            {
-                if (!TryCollectDiscordSettings(out var discord, out var validationMessage))
-                {
-                    ShowDiscordValidation(validationMessage);
-                    return;
-                }
-                ShowToast(T("正在连接 Discord…", "Connecting to Discord…"));
-                await _discordBotService.StartAsync(discord);
-                ShowToast(T("Discord 机器人已连接。", "Discord bot connected."));
-            }
-            RefreshConnectionRuntimeStatus();
-        }
-        catch (Exception ex)
-        {
-            var message = _discordBotService.GetCurrentStatus().LastError;
-            if (string.IsNullOrWhiteSpace(message)) message = GetExceptionMessage(ex);
-            ShowToast(T($"Discord 连接失败：{message}", $"Discord connection failed: {message}"));
-        }
-        finally
-        {
-            _isTogglingDiscord = false;
-            DiscordToggleButton.IsEnabled = true;
-            DiscordToggleButton.Content = _discordBotService.GetCurrentStatus().IsRunning ? T("停止", "Stop") : T("启动", "Start");
-        }
-    }
-
-    private async void OnDiscordRedeployClick(object? sender, RoutedEventArgs e)
-    {
-        DiscordRedeployButton.IsEnabled = false;
-        try
-        {
-            if (!_discordBotService.GetCurrentStatus().IsConnected)
-            {
-                ShowToast(T("Discord 机器人尚未连接，请先启动。", "The Discord bot is not connected. Start it first."));
-                return;
-            }
-
-            await _discordBotService.RedeployCommandsAsync();
-            ShowToast(T(
-                "Discord 命令已按绑定服务器语言重新部署。",
-                "Discord commands were redeployed using each bound server language."));
-        }
-        catch (Exception ex)
-        {
-            ShowToast(T($"Discord 命令重新部署失败：{GetExceptionMessage(ex)}", $"Failed to redeploy Discord commands: {GetExceptionMessage(ex)}"));
-        }
-        finally
-        {
-            DiscordRedeployButton.IsEnabled = true;
-        }
-    }
-
-    private async void OnDiscordClearClick(object? sender, RoutedEventArgs e)
-    {
-        var preferences = _preferencesService.Load();
-        preferences.Discord = new DiscordIntegrationSettings();
-        _preferencesService.Save(preferences);
-        await _discordBotService.SaveSettingsAsync(preferences.Discord);
-        if (_discordBotService.GetCurrentStatus().IsRunning)
-            await _discordBotService.StopAsync(TimeSpan.FromSeconds(5));
-        ApplyDiscordSettings(preferences.Discord);
-        ShowToast(T("Discord 配置已清空。", "Discord configuration cleared."));
-    }
-
-    private void OnDiscordRefreshClick(object? sender, RoutedEventArgs e)
-    {
-        ApplyDiscordSettings(_preferencesService.Load().Discord);
-        DiscordBindingValidationTextBlock.IsVisible = false;
-        DiscordCustomCommandValidationTextBlock.IsVisible = false;
-        RefreshConnectionRuntimeStatus();
-    }
-
-    private void OnDiscordBindingAddClick(object? sender, RoutedEventArgs e)
-    {
-        var profiles = _profileService.GetProfiles();
-        _discordBindingItems.Add(new DiscordProfileBindingItem(profiles, profiles.FirstOrDefault()?.Id ?? string.Empty, string.Empty, string.Empty));
-    }
-
-    private void OnDiscordBindingRemoveClick(object? sender, RoutedEventArgs e)
-    {
-        if (sender is Button { Tag: DiscordProfileBindingItem item }) _discordBindingItems.Remove(item);
-        if (_discordBindingItems.Count == 0) OnDiscordBindingAddClick(sender, e);
-    }
-
-    private void OnDiscordCustomCommandAddClick(object? sender, RoutedEventArgs e)
-    {
-        _discordCustomCommandItems.Add(new DiscordCustomCommandItem(string.Empty, RobotCustomMessageType.Text, string.Empty, _isChinese));
-    }
-
-    private void OnDiscordCustomCommandRemoveClick(object? sender, RoutedEventArgs e)
-    {
-        if (sender is Button { Tag: DiscordCustomCommandItem item }) _discordCustomCommandItems.Remove(item);
-        if (_discordCustomCommandItems.Count == 0) OnDiscordCustomCommandAddClick(sender, e);
-    }
-
-    private async void OnDiscordCustomCommandImagePathClick(object? sender, RoutedEventArgs e)
-    {
-        if (sender is not Button { Tag: DiscordCustomCommandItem item }) return;
-        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = T("选择 Discord 图片", "Select Discord image"),
-            AllowMultiple = false,
-            FileTypeFilter = [new FilePickerFileType("Image") { Patterns = ["*.png", "*.jpg", "*.jpeg", "*.gif", "*.bmp", "*.webp"] }]
-        });
-        var path = TryGetLocalPath(files.FirstOrDefault());
-        if (!string.IsNullOrWhiteSpace(path)) item.Content = path;
-    }
-
-    private void ApplyDiscordSettings(DiscordIntegrationSettings settings)
-    {
-        DiscordTokenTextBox.Text = settings.BotToken;
-        SetNumericValue(DiscordReconnectNumericUpDown, settings.ReconnectIntervalSec);
-        DiscordAdminUsersTextBox.Text = string.Join(Environment.NewLine, settings.AdminUserIds);
-        DiscordAdminRolesTextBox.Text = string.Join(Environment.NewLine, settings.AdminRoleIds);
-        RebuildDiscordBindingItems(settings);
-        RebuildDiscordCustomCommandItems(settings);
-    }
-
-    private void RebuildDiscordBindingItems(DiscordIntegrationSettings settings)
-    {
-        _discordBindingItems.Clear();
-        var profiles = _profileService.GetProfiles();
-        foreach (var binding in settings.ProfileBindings ?? [])
-        {
-            _discordBindingItems.Add(new DiscordProfileBindingItem(profiles, binding.ProfileId, binding.GuildId, binding.ChannelId));
-        }
-
-        if (_discordBindingItems.Count == 0)
-            _discordBindingItems.Add(new DiscordProfileBindingItem(profiles, profiles.FirstOrDefault()?.Id ?? string.Empty, string.Empty, string.Empty));
-    }
-
-    private void RebuildDiscordCustomCommandItems(DiscordIntegrationSettings settings)
-    {
-        _discordCustomCommandItems.Clear();
-        foreach (var command in settings.CustomCommands ?? [])
-        {
-            _discordCustomCommandItems.Add(new DiscordCustomCommandItem(command.Command, command.MessageType, command.Content, _isChinese));
-        }
-
-        if (_discordCustomCommandItems.Count == 0)
-            _discordCustomCommandItems.Add(new DiscordCustomCommandItem(string.Empty, RobotCustomMessageType.Text, string.Empty, _isChinese));
-    }
-
-    private bool TryCollectDiscordSettings(out DiscordIntegrationSettings settings, out string message)
-    {
-        settings = new DiscordIntegrationSettings();
-        message = string.Empty;
-        var token = DiscordTokenTextBox.Text?.Trim() ?? string.Empty;
-        if (!DiscordIntegrationSettingsRules.IsValidBotToken(token))
-        {
-            message = T("Discord Bot Token 格式无效。", "Discord Bot Token format is invalid.");
-            return false;
-        }
-
-        var adminUsers = ParseDiscordIds(DiscordAdminUsersTextBox.Text);
-        var adminRoles = ParseDiscordIds(DiscordAdminRolesTextBox.Text);
-        if (!TryValidateDiscordIds(adminUsers) || !TryValidateDiscordIds(adminRoles))
-        {
-            message = T("管理员用户 ID 和角色 ID 必须是正整数 Snowflake ID。", "Administrator user and role IDs must be positive Discord Snowflake IDs.");
-            return false;
-        }
-
-        var bindings = new List<DiscordProfileBinding>();
-        var seenBindings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var item in _discordBindingItems)
-        {
-            var profileId = item.SelectedProfile?.Id ?? item.ProfileId.Trim();
-            var guildId = item.GuildId.Trim();
-            var channelId = item.ChannelId.Trim();
-            if (string.IsNullOrWhiteSpace(profileId) && string.IsNullOrWhiteSpace(guildId) && string.IsNullOrWhiteSpace(channelId)) continue;
-            if (string.IsNullOrWhiteSpace(profileId) || _profileService.GetProfileById(profileId) is null || !DiscordIntegrationSettingsRules.TryNormalizeSnowflakeId(guildId, out var normalizedGuild) || !DiscordIntegrationSettingsRules.TryNormalizeSnowflakeId(channelId, out var normalizedChannel))
-            {
-                message = T("绑定表中存在无效的 Profile、Guild ID 或 Channel ID。", "The binding table contains an invalid Profile, Guild ID, or Channel ID.");
-                return false;
-            }
-            var key = $"{profileId}|{normalizedGuild}|{normalizedChannel}";
-            if (!seenBindings.Add(key)) continue;
-            bindings.Add(new DiscordProfileBinding { ProfileId = profileId, GuildId = normalizedGuild, ChannelId = normalizedChannel });
-        }
-
-        var customCommands = new List<RobotCustomCommand>();
-        var seenCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var item in _discordCustomCommandItems)
-        {
-            if (string.IsNullOrWhiteSpace(item.Command) && string.IsNullOrWhiteSpace(item.Content)) continue;
-            if (!RobotCustomCommandRules.TryNormalize(new RobotCustomCommand { Command = item.Command, MessageType = item.MessageType, Content = item.Content }, out var normalized))
-            {
-                message = T($"自定义指令无效：{item.Command}。名称必须符合 Discord 规则，且内容不能为空。", $"Invalid custom command: {item.Command}. Use a valid Discord command name and non-empty content.");
-                return false;
-            }
-            if (seenCommands.Add(normalized.Command)) customCommands.Add(normalized);
-        }
-
-        settings = DiscordIntegrationSettingsRules.Normalize(new DiscordIntegrationSettings
-        {
-            BotToken = token,
-            ReconnectIntervalSec = (int)(DiscordReconnectNumericUpDown.Value ?? 5),
-            AdminUserIds = adminUsers,
-            AdminRoleIds = adminRoles,
-            ProfileBindings = bindings,
-            CustomCommands = customCommands
-        });
-        return true;
-    }
-
-    private void ShowDiscordValidation(string message)
-    {
-        var isCustom = message.Contains("自定义", StringComparison.OrdinalIgnoreCase) || message.Contains("custom", StringComparison.OrdinalIgnoreCase);
-        DiscordBindingValidationTextBlock.Text = isCustom ? string.Empty : message;
-        DiscordBindingValidationTextBlock.IsVisible = !isCustom;
-        DiscordCustomCommandValidationTextBlock.Text = isCustom ? message : string.Empty;
-        DiscordCustomCommandValidationTextBlock.IsVisible = !string.IsNullOrWhiteSpace(DiscordCustomCommandValidationTextBlock.Text);
-        ShowToast(message);
-    }
-
-    private static List<string> ParseDiscordIds(string? value) => (value ?? string.Empty)
-        .Split([',', ';', '，', '；', '\r', '\n', '\t', ' '], StringSplitOptions.RemoveEmptyEntries)
-        .ToList();
-
-    private static bool TryValidateDiscordIds(IEnumerable<string> values) => values.All(value => DiscordIntegrationSettingsRules.TryNormalizeSnowflakeId(value, out _));
 
     private void OnRobotClearClick(object? sender, RoutedEventArgs e)
     {
@@ -12463,7 +12113,6 @@ public partial class LauncherMainWindow : Window
         Frp,
         EasyTier,
         Robot,
-        Discord,
         Gateway,
         Auth,
         ServerMap,
@@ -13075,118 +12724,6 @@ public partial class LauncherMainWindow : Window
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         }
-    }
-
-    public sealed class DiscordProfileBindingItem : INotifyPropertyChanged
-    {
-        private string _profileId;
-        private string _guildId;
-        private string _channelId;
-        private InstanceProfile? _selectedProfile;
-
-        public DiscordProfileBindingItem(
-            IReadOnlyList<InstanceProfile> profileOptions,
-            string profileId,
-            string guildId,
-            string channelId)
-        {
-            ProfileOptions = new ObservableCollection<InstanceProfile>(profileOptions);
-            _profileId = profileId ?? string.Empty;
-            _guildId = guildId ?? string.Empty;
-            _channelId = channelId ?? string.Empty;
-            _selectedProfile = ProfileOptions.FirstOrDefault(profile => profile.Id.Equals(_profileId, StringComparison.OrdinalIgnoreCase));
-        }
-
-        public ObservableCollection<InstanceProfile> ProfileOptions { get; }
-
-        public string ProfileId => _profileId;
-
-        public InstanceProfile? SelectedProfile
-        {
-            get => _selectedProfile;
-            set
-            {
-                if (ReferenceEquals(_selectedProfile, value)) return;
-                _selectedProfile = value;
-                _profileId = value?.Id ?? string.Empty;
-                OnPropertyChanged();
-                OnPropertyChanged(nameof(ProfileId));
-            }
-        }
-
-        public string GuildId
-        {
-            get => _guildId;
-            set { if (_guildId == value) return; _guildId = value ?? string.Empty; OnPropertyChanged(); }
-        }
-
-        public string ChannelId
-        {
-            get => _channelId;
-            set { if (_channelId == value) return; _channelId = value ?? string.Empty; OnPropertyChanged(); }
-        }
-
-        public event PropertyChangedEventHandler? PropertyChanged;
-        private void OnPropertyChanged([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-    }
-
-    public sealed class DiscordCustomCommandItem : INotifyPropertyChanged
-    {
-        private string _command;
-        private string _content;
-        private RobotCustomMessageType _messageType;
-        private ConfigChoiceOption? _selectedType;
-        private bool _isChinese;
-
-        public DiscordCustomCommandItem(string command, RobotCustomMessageType messageType, string content, bool isChinese)
-        {
-            _command = command ?? string.Empty;
-            _messageType = messageType;
-            _content = content ?? string.Empty;
-            SetLanguage(isChinese);
-        }
-
-        public ObservableCollection<ConfigChoiceOption> TypeOptions { get; } = [];
-        public string Command { get => _command; set { if (_command == value) return; _command = value ?? string.Empty; OnPropertyChanged(); } }
-        public string Content { get => _content; set { if (_content == value) return; _content = value ?? string.Empty; OnPropertyChanged(); OnPropertyChanged(nameof(ImagePathButtonText)); } }
-        public bool IsText => _messageType == RobotCustomMessageType.Text;
-        public bool IsImage => _messageType == RobotCustomMessageType.Image;
-        public string ImagePathButtonText => string.IsNullOrWhiteSpace(_content) ? (_isChinese ? "选择图片路径" : "Select image path") : _content;
-        public RobotCustomMessageType MessageType => _messageType;
-
-        public ConfigChoiceOption? SelectedType
-        {
-            get => _selectedType;
-            set
-            {
-                if (ReferenceEquals(_selectedType, value)) return;
-                _selectedType = value;
-                if (value is not null && Enum.TryParse<RobotCustomMessageType>(value.Value, out var parsed)) _messageType = parsed;
-                OnPropertyChanged();
-                OnPropertyChanged(nameof(MessageType));
-                OnPropertyChanged(nameof(IsText));
-                OnPropertyChanged(nameof(IsImage));
-                OnPropertyChanged(nameof(ImagePathButtonText));
-            }
-        }
-
-        public event PropertyChangedEventHandler? PropertyChanged;
-
-        public void SetLanguage(bool isChinese)
-        {
-            _isChinese = isChinese;
-            TypeOptions.Clear();
-            TypeOptions.Add(new ConfigChoiceOption(RobotCustomMessageType.Text.ToString(), _isChinese ? "文本" : "Text"));
-            TypeOptions.Add(new ConfigChoiceOption(RobotCustomMessageType.Image.ToString(), _isChinese ? "图片" : "Image"));
-            _selectedType = TypeOptions.FirstOrDefault(option => option.Value.Equals(_messageType.ToString(), StringComparison.OrdinalIgnoreCase)) ?? TypeOptions[0];
-            OnPropertyChanged(nameof(TypeOptions));
-            OnPropertyChanged(nameof(SelectedType));
-            OnPropertyChanged(nameof(MessageType));
-            OnPropertyChanged(nameof(IsText));
-            OnPropertyChanged(nameof(IsImage));
-        }
-
-        private void OnPropertyChanged([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 
     public sealed class SettingsContributorItem

@@ -6,7 +6,7 @@ namespace LauncherGo.Services.Paths;
 
 public static class LauncherPathHelper
 {
-    public const string DefaultServerDownloadCatalogUrl = "https://cdn.vintagestory.top/stable-unstable.json";
+    public const string DefaultServerDownloadCatalogUrl = "https://api.vintagestory.at/stable-unstable.json";
 
     public static string AppRoot => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -74,12 +74,10 @@ public static class LauncherPathHelper
             AutoRestartServerAfterCrash = false,
             AutoStartServerProfileId = string.Empty,
             AutoStartGatewayOnLaunch = false,
-            AutoStartDiscordOnLaunch = false,
             Robot = new RobotIntegrationSettings
             {
                 DatabasePath = Path.Combine(DefaultQqBotDirectory, "vs2qq.db")
             },
-            Discord = new DiscordIntegrationSettings(),
             Frp = new FrpIntegrationSettings(),
             EasyTier = new EasyTierIntegrationSettings(),
             TcpGateway = new TcpGatewaySettings()

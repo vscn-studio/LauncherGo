@@ -67,8 +67,6 @@ public class LauncherPreferences
 
     public bool AutoStartRobotOnLaunch { get; set; }
 
-    public bool AutoStartDiscordOnLaunch { get; set; }
-
     public bool AutoStartFrpOnLaunch { get; set; }
 
     public bool AutoStartThirdPartyFrpcOnLaunch { get; set; }
@@ -78,8 +76,6 @@ public class LauncherPreferences
     public bool AutoStartGatewayOnLaunch { get; set; }
 
     public RobotIntegrationSettings Robot { get; set; } = new();
-
-    public DiscordIntegrationSettings Discord { get; set; } = new();
 
     public FrpIntegrationSettings Frp { get; set; } = new();
 

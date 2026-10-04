@@ -17,7 +17,7 @@ public sealed class BotCommandCoreTests
     }
 
     [Fact]
-    public void SplitText_RespectsDiscordLimit()
+    public void SplitText_RespectsMessageLimit()
     {
         var parts = RobotCommandDispatcher.SplitText(new string('x', 4500), 2000);
         Assert.Equal(3, parts.Count);

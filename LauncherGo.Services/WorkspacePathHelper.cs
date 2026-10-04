@@ -70,14 +70,6 @@ internal static partial class WorkspacePathHelper
 
     public static string RobotSettingsPath => Path.Combine(RobotRoot, "vs2qq-settings.json");
 
-    public static string DiscordRoot => Path.Combine(RuntimeRoot, "discordbot");
-
-    public static string DiscordSettingsPath => Path.Combine(DiscordRoot, "discord-settings.json");
-
-    public static string DiscordPlayerBindingsPath => Path.Combine(DiscordRoot, "player-bindings.json");
-
-    public static string DiscordLogPath => Path.Combine(DiscordRoot, "discord.log");
-
     public static string GetServerRelayStatePath(string profileId) =>
         Path.Combine(ServerRelayRoot, $"{SanitizeFileName(profileId)}.json");
 
@@ -110,8 +102,6 @@ internal static partial class WorkspacePathHelper
         Directory.CreateDirectory(ThirdPartyFrpcRoot);
         Directory.CreateDirectory(EasyTierRoot);
         Directory.CreateDirectory(RobotRoot);
-        Directory.CreateDirectory(DiscordRoot);
-
     }
 
     public static string GetProfileConfigPath(string profileDataPath) =>

@@ -22,7 +22,7 @@ public interface IBotMessageAdapter
     Task SendAsync(BotMessage message, CancellationToken cancellationToken = default);
 }
 
-/// <summary>Shared command parsing helpers used by OneBot and Discord adapters.</summary>
+/// <summary>Shared command parsing helpers used by the OneBot adapter.</summary>
 public sealed class RobotCommandDispatcher
 {
     public static IReadOnlyList<string> SplitText(string? text, int maxLength = 2000)

@@ -36,7 +36,6 @@ public static class ServiceCollectionExtension
         services.AddSingleton<IServerBridgeMigrationService, ServerBridgeMigrationService>();
         services.AddSingleton<Vs2QQProcessService>();
         services.AddSingleton<IRobotService, RobotService>();
-        services.AddSingleton<IDiscordBotService, DiscordBotService>();
         return services;
     }
 }

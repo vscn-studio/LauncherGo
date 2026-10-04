@@ -1205,7 +1205,6 @@
 
                                     <TextBlock x:Name="ConnectionNavSectionTitleTextBlock" Classes="SidebarSectionTitle" Text="连接" />
                                     <Button x:Name="ConnectionRobotTabButton" Classes="SidebarNavButton" Content="OneBot" Click="OnConnectionRobotTabClick" />
-                                    <Button x:Name="ConnectionDiscordTabButton" Classes="SidebarNavButton" Content="Discord" Click="OnConnectionDiscordTabClick" />
                                     <Button x:Name="ConnectionFrpTabButton" Classes="SidebarNavButton" Content="FRP" Click="OnConnectionFrpTabClick" />
                                     <Button x:Name="ConnectionEasyTierTabButton" Classes="SidebarNavButton" Content="EasyTier" Click="OnConnectionEasyTierTabClick" />
                                     <Button x:Name="ConnectionGatewayTabButton" Classes="SidebarNavButton" Content="网关" Click="OnConnectionGatewayTabClick" />
@@ -2581,10 +2580,6 @@
                                                             <ToggleSwitch x:Name="SettingsAutoStartRobotCheckBox" Classes="LabelledToggle" />
                                                         </StackPanel>
                                                         <StackPanel Classes="ToggleField">
-                                                            <TextBlock x:Name="SettingsAutoStartDiscordLabelTextBlock" Classes="ConfigFieldLabel" Text="启动时自动启动 Discord 机器人" />
-                                                            <ToggleSwitch x:Name="SettingsAutoStartDiscordCheckBox" Classes="LabelledToggle" />
-                                                        </StackPanel>
-                                                        <StackPanel Classes="ToggleField">
                                                             <TextBlock x:Name="SettingsAutoStartFrpLabelTextBlock" Classes="ConfigFieldLabel" Text="启动时自动开启内网穿透（常规）" />
                                                             <ToggleSwitch x:Name="SettingsAutoStartFrpCheckBox" Classes="LabelledToggle" />
                                                         </StackPanel>
@@ -3143,97 +3138,6 @@
                                                             </Border>
                                                         </Grid>
                                                         <Button x:Name="RobotCustomCommandAddButton" Classes="SecondaryActionButton" Width="120" HorizontalAlignment="Left" Content="添加" Click="OnRobotCustomCommandAddClick" />
-                                                    </StackPanel>
-                                                </StackPanel>
-                                            </Border>
-                                        </StackPanel>
-                                    </ScrollViewer>
-
-                                    <ScrollViewer x:Name="ConnectionDiscordPanel" IsVisible="False" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Hidden">
-                                        <StackPanel Spacing="10">
-                                            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*" ColumnSpacing="8">
-                                                <Button x:Name="DiscordSaveButton" Classes="ActionButton" Content="保存" Click="OnDiscordSaveClick" />
-                                                <Button x:Name="DiscordToggleButton" Grid.Column="1" Classes="SecondaryActionButton" Content="启动" Click="OnDiscordToggleClick" />
-                                                <Button x:Name="DiscordRedeployButton" Grid.Column="2" Classes="SecondaryActionButton" Content="重新部署命令" Click="OnDiscordRedeployClick" />
-                                                <Button x:Name="DiscordClearButton" Grid.Column="3" Classes="SecondaryActionButton DangerButton" Content="清空" Click="OnDiscordClearClick" />
-                                                <Button x:Name="DiscordRefreshButton" Grid.Column="4" Classes="SecondaryActionButton" Content="刷新" Click="OnDiscordRefreshClick" />
-                                            </Grid>
-                                            <Border Classes="ConfigCard">
-                                                <StackPanel Spacing="10">
-                                                    <TextBlock x:Name="DiscordConfigTitleTextBlock" Classes="ConfigSectionTitle" Text="Discord 机器人配置" />
-                                                    <WrapPanel Orientation="Horizontal">
-                                                        <StackPanel Classes="ConfigFormFieldWide"><TextBlock x:Name="DiscordTokenLabelTextBlock" Classes="ConfigFieldLabel" Text="Bot Token" /><TextBox x:Name="DiscordTokenTextBox" Classes="CompactInput" PasswordChar="*" /></StackPanel>
-                                                        <StackPanel Classes="ConfigFormField"><TextBlock x:Name="DiscordReconnectLabelTextBlock" Classes="ConfigFieldLabel" Text="重连间隔秒数" /><NumericUpDown x:Name="DiscordReconnectNumericUpDown" Classes="CompactNumber" Minimum="1" Maximum="120" /></StackPanel>
-                                                        <StackPanel Classes="ConfigFormFieldWide"><TextBlock x:Name="DiscordAdminUsersLabelTextBlock" Classes="ConfigFieldLabel" Text="管理员用户 ID" /><TextBox x:Name="DiscordAdminUsersTextBox" Classes="CompactInput" /></StackPanel>
-                                                        <StackPanel Classes="ConfigFormFieldWide"><TextBlock x:Name="DiscordAdminRolesLabelTextBlock" Classes="ConfigFieldLabel" Text="管理员角色 ID" /><TextBox x:Name="DiscordAdminRolesTextBox" Classes="CompactInput" /></StackPanel>
-                                                    </WrapPanel>
-                                                    <StackPanel Spacing="8">
-                                                        <TextBlock x:Name="DiscordBindingTitleTextBlock" Classes="ConfigSectionTitle" Text="Profile / Guild / Channel 绑定" />
-                                                        <TextBlock x:Name="DiscordBindingValidationTextBlock" Classes="ConfigHintText" Foreground="#C0392B" IsVisible="False" TextWrapping="Wrap" />
-                                                        <Grid RowDefinitions="Auto,*">
-                                                            <Border Grid.Row="0" Classes="TableHeader">
-                                                                <Grid ColumnDefinitions="2*,1.3*,1.3*,Auto" ColumnSpacing="8">
-                                                                    <TextBlock x:Name="DiscordBindingProfileHeaderTextBlock" Classes="TableHeaderText" Text="服务器档案" />
-                                                                    <TextBlock x:Name="DiscordBindingGuildHeaderTextBlock" Grid.Column="1" Classes="TableHeaderText" Text="Guild ID" />
-                                                                    <TextBlock x:Name="DiscordBindingChannelHeaderTextBlock" Grid.Column="2" Classes="TableHeaderText" Text="Channel ID" />
-                                                                    <TextBlock x:Name="DiscordBindingActionHeaderTextBlock" Grid.Column="3" Classes="TableHeaderText" Text="操作" HorizontalAlignment="Center" />
-                                                                </Grid>
-                                                            </Border>
-                                                            <Border Grid.Row="1" Classes="TableBody">
-                                                                <ItemsControl x:Name="DiscordBindingsItemsControl">
-                                                                    <ItemsControl.ItemTemplate>
-                                                                        <DataTemplate>
-                                                                            <Border Classes="TableRow">
-                                                                                <Grid ColumnDefinitions="2*,1.3*,1.3*,Auto" ColumnSpacing="8">
-                                                                                    <ComboBox Classes="CompactCombo" ItemsSource="{Binding ProfileOptions}" SelectedItem="{Binding SelectedProfile, Mode=TwoWay}" HorizontalAlignment="Stretch">
-                                                                                        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" /></DataTemplate></ComboBox.ItemTemplate>
-                                                                                    </ComboBox>
-                                                                                    <TextBox Grid.Column="1" Classes="CompactInput" Text="{Binding GuildId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                                                                    <TextBox Grid.Column="2" Classes="CompactInput" Text="{Binding ChannelId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                                                                    <Button Grid.Column="3" Classes="SecondaryActionButton DangerButton" Tag="{Binding}" Content="删除" Click="OnDiscordBindingRemoveClick" />
-                                                                                </Grid>
-                                                                            </Border>
-                                                                        </DataTemplate>
-                                                                    </ItemsControl.ItemTemplate>
-                                                                </ItemsControl>
-                                                            </Border>
-                                                        </Grid>
-                                                        <Button x:Name="DiscordBindingAddButton" Classes="SecondaryActionButton" Width="120" HorizontalAlignment="Left" Content="添加" Click="OnDiscordBindingAddClick" />
-                                                    </StackPanel>
-                                                    <StackPanel Spacing="8" Margin="0,8,0,0">
-                                                        <TextBlock x:Name="DiscordCustomCommandsTitleTextBlock" Classes="ConfigSectionTitle" Text="自定义指令" />
-                                                        <TextBlock x:Name="DiscordCustomCommandHintTextBlock" Classes="ConfigHintText" Text="指令名称仅允许 Discord 支持的 a-z、0-9、_、-；非法名称会提示并阻止保存。" TextWrapping="Wrap" />
-                                                        <TextBlock x:Name="DiscordCustomCommandValidationTextBlock" Classes="ConfigHintText" Foreground="#C0392B" IsVisible="False" TextWrapping="Wrap" />
-                                                        <Grid RowDefinitions="Auto,*">
-                                                            <Border Grid.Row="0" Classes="TableHeader">
-                                                                <Grid ColumnDefinitions="150,140,*,68" ColumnSpacing="10">
-                                                                    <TextBlock x:Name="DiscordCustomCommandNameHeaderTextBlock" Classes="TableHeaderText" Text="指令" />
-                                                                    <TextBlock x:Name="DiscordCustomCommandTypeHeaderTextBlock" Grid.Column="1" Classes="TableHeaderText" Text="类型" />
-                                                                    <TextBlock x:Name="DiscordCustomCommandContentHeaderTextBlock" Grid.Column="2" Classes="TableHeaderText" Text="内容" />
-                                                                    <TextBlock x:Name="DiscordCustomCommandActionHeaderTextBlock" Grid.Column="3" Classes="TableHeaderText" Text="操作" HorizontalAlignment="Center" />
-                                                                </Grid>
-                                                            </Border>
-                                                            <Border Grid.Row="1" Classes="TableBody">
-                                                                <ItemsControl x:Name="DiscordCustomCommandsItemsControl">
-                                                                    <ItemsControl.ItemTemplate>
-                                                                        <DataTemplate>
-                                                                            <Border Classes="TableRow" Padding="10,8">
-                                                                                <Grid ColumnDefinitions="150,140,*,68" ColumnSpacing="10">
-                                                                                    <TextBox Classes="CompactInput" Text="{Binding Command, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="/rules" HorizontalAlignment="Stretch" VerticalAlignment="Top" />
-                                                                                    <ComboBox Grid.Column="1" Classes="CompactCombo" ItemsSource="{Binding TypeOptions}" SelectedItem="{Binding SelectedType, Mode=TwoWay}" HorizontalAlignment="Stretch" VerticalAlignment="Top">
-                                                                                        <ComboBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" /></DataTemplate></ComboBox.ItemTemplate>
-                                                                                    </ComboBox>
-                                                                                    <TextBox Grid.Column="2" Classes="CompactInput MultiLineInput" Text="{Binding Content, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" Height="72" MinHeight="72" HorizontalAlignment="Stretch" VerticalAlignment="Top" IsVisible="{Binding IsText}" />
-                                                                                    <Button Grid.Column="2" Classes="SecondaryActionButton" Tag="{Binding}" Click="OnDiscordCustomCommandImagePathClick" Height="72" HorizontalAlignment="Stretch" VerticalAlignment="Top" IsVisible="{Binding IsImage}"><TextBlock Text="{Binding ImagePathButtonText}" TextTrimming="CharacterEllipsis" /></Button>
-                                                                                    <Button Grid.Column="3" Classes="SecondaryActionButton DangerButton" Tag="{Binding}" Content="删除" Click="OnDiscordCustomCommandRemoveClick" Width="68" HorizontalAlignment="Stretch" VerticalAlignment="Top" />
-                                                                                </Grid>
-                                                                            </Border>
-                                                                        </DataTemplate>
-                                                                    </ItemsControl.ItemTemplate>
-                                                                </ItemsControl>
-                                                            </Border>
-                                                        </Grid>
-                                                        <Button x:Name="DiscordCustomCommandAddButton" Classes="SecondaryActionButton" Width="120" HorizontalAlignment="Left" Content="添加" Click="OnDiscordCustomCommandAddClick" />
                                                     </StackPanel>
                                                 </StackPanel>
                                             </Border>

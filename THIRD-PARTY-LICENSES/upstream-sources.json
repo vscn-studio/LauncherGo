@@ -8,19 +8,6 @@
   },
   {
     "packages": [
-      "Discord.Net/3.15.3",
-      "Discord.Net.Commands/3.15.3",
-      "Discord.Net.Core/3.15.3",
-      "Discord.Net.Interactions/3.15.3",
-      "Discord.Net.Rest/3.15.3",
-      "Discord.Net.Webhook/3.15.3",
-      "Discord.Net.WebSocket/3.15.3"
-    ],
-    "url": "https://raw.githubusercontent.com/discord-net/Discord.Net/13ec6a0e82505d57c5b129de0b9f2878ae54edba/LICENSE",
-    "file": "THIRD-PARTY-LICENSES/upstream/Discord.Net-3.15.3.txt"
-  },
-  {
-    "packages": [
       "Irihi.Avalonia.Shared/0.4.0"
     ],
     "url": "https://raw.githubusercontent.com/irihitech/Irihi.Avalonia.Shared/8c16a0e790c99c96ade7194ffbefd1a99207bd67/LICENSE",
