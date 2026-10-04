@@ -347,7 +347,7 @@ public partial class LauncherMainWindow : Window
     private readonly ObservableCollection<InstanceProfile> _serverMapProfileItems = [];
     private readonly ObservableCollection<ProfileConfigListItem> _serverMapConfigItems = [];
     private readonly ObservableCollection<VoiceConfigListItem> _voiceConfigItems = [];
-    private readonly ObservableCollection<InstanceProfile> _openApiProfileItems = [];
+    private readonly ObservableCollection<OpenApiProfileItem> _openApiProfileItems = [];
     private readonly IVoiceWebService _voiceWebService;
     private readonly HashSet<GatewayBackendStatisticsWindow> _gatewayStatisticsWindows = [];
     private readonly ObservableCollection<DashboardServerItem> _dashboardServerItems = [];
@@ -8390,54 +8390,43 @@ public partial class LauncherMainWindow : Window
 
     private void RefreshOpenApiProfiles()
     {
-        var selectedId = (OpenApiProfileComboBox.SelectedItem as InstanceProfile)?.Id;
         _openApiProfileItems.Clear();
         foreach (var profile in _profileService.GetProfiles().OrderBy(static p => p.Name, StringComparer.CurrentCultureIgnoreCase))
-            _openApiProfileItems.Add(profile);
-        OpenApiProfileComboBox.ItemsSource = _openApiProfileItems;
-        OpenApiProfileComboBox.SelectedItem = _openApiProfileItems.FirstOrDefault(p => p.Id.Equals(selectedId, StringComparison.OrdinalIgnoreCase)) ?? _openApiProfileItems.FirstOrDefault();
-        RefreshOpenApiEditor();
-    }
-
-    private void OnOpenApiProfileSelectionChanged(object? sender, SelectionChangedEventArgs e) => RefreshOpenApiEditor();
-
-    private void RefreshOpenApiEditor()
-    {
-        if (OpenApiProfileComboBox.SelectedItem is not InstanceProfile profile)
         {
-            OpenApiPortNumericUpDown.Value = 8085;
-            OpenApiToggleButton.IsEnabled = false;
-            OpenApiStatusTextBlock.Text = "请先创建服务器档案。";
-            return;
+            var running = _openApiService.IsRunning(profile.Id);
+            var port = _openApiService.GetPort(profile);
+            _openApiProfileItems.Add(new OpenApiProfileItem
+            {
+                Profile = profile,
+                Port = port,
+                IsRunning = running,
+                StatusText = running ? $"已启动：0.0.0.0:{port}" : "未启动"
+            });
         }
-        OpenApiPortNumericUpDown.Value = _openApiService.GetPort(profile);
-        OpenApiToggleButton.IsEnabled = true;
-        var running = _openApiService.IsRunning(profile.Id);
-        OpenApiToggleButton.Content = running ? "停止" : "启动";
-        OpenApiStatusTextBlock.Text = running
-            ? $"已启动：监听 0.0.0.0:{(int)(OpenApiPortNumericUpDown.Value ?? 8085)}，局域网设备可访问。"
-            : "未启动。";
+        OpenApiProfileItemsControl.ItemsSource = _openApiProfileItems;
     }
+
 
     private async void OnOpenApiToggleClick(object? sender, RoutedEventArgs e)
     {
-        if (OpenApiProfileComboBox.SelectedItem is not InstanceProfile profile)
+        if (sender is not Button { Tag: OpenApiProfileItem item })
             return;
+        var profile = item.Profile;
         try
         {
             if (_openApiService.IsRunning(profile.Id))
                 await _openApiService.StopAsync(profile.Id);
             else
             {
-                var port = (int)(OpenApiPortNumericUpDown.Value ?? 8085);
+                var port = item.Port;
                 _openApiService.SavePort(profile, port);
                 await _openApiService.StartAsync(profile, port);
             }
-            RefreshOpenApiEditor();
+            item.IsRunning = _openApiService.IsRunning(profile.Id);
         }
         catch (Exception ex)
         {
-            OpenApiStatusTextBlock.Text = $"操作失败：{ex.Message}";
+            item.StatusText = $"操作失败：{ex.Message}";
         }
     }
 
@@ -12342,6 +12331,56 @@ public partial class LauncherMainWindow : Window
                 LogDirectoryPath = Path.Combine(profile.DirectoryPath, "Logs")
             };
         }
+    }
+
+    public sealed class OpenApiProfileItem : INotifyPropertyChanged
+    {
+        private int _port;
+        private bool _isRunning;
+        private string _statusText = string.Empty;
+
+        public required InstanceProfile Profile { get; init; }
+
+        public string ProfileName => string.IsNullOrWhiteSpace(Profile.Name) ? Profile.Id : Profile.Name;
+
+        public int Port
+        {
+            get => _port;
+            set
+            {
+                if (_port == value) return;
+                _port = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Port)));
+            }
+        }
+
+        public bool IsRunning
+        {
+            get => _isRunning;
+            set
+            {
+                if (_isRunning == value) return;
+                _isRunning = value;
+                StatusText = value ? $"已启动：0.0.0.0:{Port}" : "未启动";
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsRunning)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ActionText)));
+            }
+        }
+
+        public string StatusText
+        {
+            get => _statusText;
+            set
+            {
+                if (_statusText == value) return;
+                _statusText = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StatusText)));
+            }
+        }
+
+        public string ActionText => IsRunning ? "停止" : "启动";
+
+        public event PropertyChangedEventHandler? PropertyChanged;
     }
 
     public sealed class SaveListItem

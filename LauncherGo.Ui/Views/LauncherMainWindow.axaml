@@ -3533,18 +3533,32 @@
                                             <Border Classes="ConfigCard">
                                                 <StackPanel Spacing="12">
                                                     <TextBlock Classes="ConfigSectionTitle" Text="开放 API" />
-                                                    <Grid ColumnDefinitions="Auto,180,Auto,110,Auto,*" ColumnSpacing="8" VerticalAlignment="Center">
-                                                        <TextBlock Classes="ConfigFieldLabel" Text="服务器档案" VerticalAlignment="Center" />
-                                                        <ComboBox x:Name="OpenApiProfileComboBox" Grid.Column="1" Classes="CompactCombo" SelectionChanged="OnOpenApiProfileSelectionChanged">
-                                                            <ComboBox.ItemTemplate>
-                                                                <DataTemplate><TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" /></DataTemplate>
-                                                            </ComboBox.ItemTemplate>
-                                                        </ComboBox>
-                                                        <TextBlock Grid.Column="2" Classes="ConfigFieldLabel" Text="API 端口" VerticalAlignment="Center" />
-                                                        <NumericUpDown x:Name="OpenApiPortNumericUpDown" Grid.Column="3" Classes="CompactNumber" Minimum="1" Maximum="65535" Increment="1" Value="8085" />
-                                                        <Button x:Name="OpenApiToggleButton" Grid.Column="4" Classes="ActionButton" Content="启动" Click="OnOpenApiToggleClick" />
+                                                    <Grid RowDefinitions="Auto,*">
+                                                        <Border Grid.Row="0" Classes="TableHeader">
+                                                            <Grid ColumnDefinitions="2*,120,1.3*,Auto" ColumnSpacing="8">
+                                                                <TextBlock Classes="TableHeaderText" Text="服务器档案" />
+                                                                <TextBlock Grid.Column="1" Classes="TableHeaderText" Text="API 端口" />
+                                                                <TextBlock Grid.Column="2" Classes="TableHeaderText" Text="状态" />
+                                                                <TextBlock Grid.Column="3" Classes="TableHeaderText" Text="操作" HorizontalAlignment="Center" />
+                                                            </Grid>
+                                                        </Border>
+                                                        <Border Grid.Row="1" Classes="TableBody">
+                                                            <ItemsControl x:Name="OpenApiProfileItemsControl">
+                                                                <ItemsControl.ItemTemplate>
+                                                                    <DataTemplate>
+                                                                        <Border Classes="TableRow">
+                                                                            <Grid ColumnDefinitions="2*,120,1.3*,Auto" ColumnSpacing="8">
+                                                                                <TextBlock Classes="TableCellText" Text="{Binding ProfileName}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                                                <NumericUpDown Grid.Column="1" Classes="CompactNumber" Minimum="1" Maximum="65535" Increment="1" Value="{Binding Port, Mode=TwoWay}" />
+                                                                                <TextBlock Grid.Column="2" Classes="TableCellText" Text="{Binding StatusText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                                                <Button Grid.Column="3" Classes="SecondaryActionButton" Tag="{Binding}" Content="{Binding ActionText}" Click="OnOpenApiToggleClick" />
+                                                                            </Grid>
+                                                                        </Border>
+                                                                    </DataTemplate>
+                                                                </ItemsControl.ItemTemplate>
+                                                            </ItemsControl>
+                                                        </Border>
                                                     </Grid>
-                                                    <TextBlock x:Name="OpenApiStatusTextBlock" Classes="ConfigHintText" TextWrapping="Wrap" />
                                                     <TextBlock Classes="ConfigHintText" Text="接口：/api、/api/server、/api/mods" />
                                                 </StackPanel>
                                             </Border>
