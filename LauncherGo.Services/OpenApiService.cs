@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Sockets;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using LauncherGo.Abstractions.Services;
 using LauncherGo.Domains.Models;
 using Microsoft.AspNetCore.Builder;
@@ -17,18 +19,22 @@ public sealed class OpenApiService(
     IServerProcessService serverProcessService,
     IInstanceServerConfigService serverConfigService,
     IInstanceModService modService,
+    IServerBridgeService? serverBridgeService = null,
     ILogger<OpenApiService>? logger = null) : IOpenApiService
 {
-    private const int PlayerCountIntervalMinutes = 5;
     private const int PlayerCountHistoryHours = 24 * 7;
-    private const int PlayerCountHistoryPoints = PlayerCountHistoryHours * 60 / PlayerCountIntervalMinutes;
+    private static readonly TimeSpan BridgeStatusCacheTtl = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan BridgeHistoryCacheTtl = TimeSpan.FromSeconds(5);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HttpClient ModDbClient = new() { Timeout = TimeSpan.FromSeconds(3) };
     private static readonly ConcurrentDictionary<string, string> ModUrlCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, WebApplication> _applications = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _profileGates = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, Timer> _playerHistoryTimers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _playerHistoryCancellations = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, Task> _playerHistoryTasks = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, object> _playerHistoryGates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, CachedBridgeJson> _bridgeStatusCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, CachedBridgeJson> _bridgeHistoryCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ILogger<OpenApiService>? _logger = logger;
 
     public bool IsRunning(string profileId) => _applications.ContainsKey(profileId);
@@ -110,7 +116,11 @@ public sealed class OpenApiService(
             app.MapGet("/api", async (CancellationToken token) => Results.Json(await BuildServerInfoAsync(profile, token), JsonOptions));
             app.MapGet("/api/server", async (CancellationToken token) => Results.Json(await BuildServerInfoAsync(profile, token), JsonOptions));
             app.MapGet("/api/mods", async (CancellationToken token) => Results.Json(await BuildModsAsync(profile, token), JsonOptions));
-            app.MapGet("/api/players/history", () => Results.Json(GetPlayerCountHistory(profile), JsonOptions));
+            app.MapGet("/api/players/history", async (CancellationToken token) =>
+            {
+                await RefreshPlayerHistoryFromBridgeAsync(profile, token);
+                return Results.Json(GetPlayerCountHistory(profile), JsonOptions);
+            });
             app.MapGet("/api/cover", () =>
             {
                 var coverPath = GetCoverPath(profile);
@@ -124,7 +134,7 @@ public sealed class OpenApiService(
             {
                 await app.StartAsync(cancellationToken);
                 _applications[profile.Id] = app;
-                StartPlayerCountSampling(profile);
+                StartPlayerCountTracking(profile);
             }
             catch
             {
@@ -140,7 +150,7 @@ public sealed class OpenApiService(
 
     public async Task StopAsync(string profileId, CancellationToken cancellationToken = default)
     {
-        StopPlayerCountSampling(profileId);
+        await StopPlayerCountTrackingAsync(profileId);
         if (!_applications.TryRemove(profileId, out var app))
             return;
         await app.StopAsync(cancellationToken);
@@ -155,81 +165,163 @@ public sealed class OpenApiService(
 
     private async Task<OpenApiServerInfo> BuildServerInfoAsync(InstanceProfile profile, CancellationToken cancellationToken)
     {
-        var status = serverProcessService.GetCurrentStatus(profile.Id);
+        var localStatus = serverProcessService.GetCurrentStatus(profile.Id);
         var settings = await serverConfigService.LoadServerSettingsAsync(profile, cancellationToken);
+        var bridgeStatus = await GetBridgeStatusAsync(profile, cancellationToken);
+        var isRunning = bridgeStatus is not null
+            ? !string.Equals(bridgeStatus["status"]?.GetValue<string>(), "shutting-down", StringComparison.OrdinalIgnoreCase)
+            : localStatus.IsRunning;
+        var uptimeSeconds = ReadLong(bridgeStatus, "uptimeSeconds") ?? (localStatus.IsRunning && localStatus.StartedAtUtc is { } startedAt
+            ? Math.Max(0, (long)(DateTimeOffset.UtcNow - startedAt).TotalSeconds)
+            : 0);
+        var startedAtUtc = bridgeStatus is not null && uptimeSeconds > 0
+            ? DateTimeOffset.UtcNow.AddSeconds(-uptimeSeconds)
+            : localStatus.StartedAtUtc;
+        await RefreshPlayerHistoryFromBridgeAsync(profile, cancellationToken);
         return new OpenApiServerInfo
         {
             ProfileId = profile.Id,
             ProfileName = profile.Name,
-            ServerName = settings.ServerName,
-            Description = settings.ServerDescription ?? string.Empty,
-            Version = profile.Version,
-            IsRunning = status.IsRunning,
-            OnlinePlayers = status.OnlinePlayers,
-            StartedAtUtc = status.StartedAtUtc,
-            UptimeSeconds = status.IsRunning && status.StartedAtUtc is { } startedAt
-                ? Math.Max(0, (long)(DateTimeOffset.UtcNow - startedAt).TotalSeconds)
-                : 0,
+            ServerName = ReadString(bridgeStatus, "name") ?? settings.ServerName,
+            Description = ReadString(bridgeStatus, "description") ?? settings.ServerDescription ?? string.Empty,
+            Version = ReadString(bridgeStatus, "version") ?? profile.Version,
+            ServerStatus = ReadString(bridgeStatus, "status") ?? string.Empty,
+            WorldName = ReadString(bridgeStatus, "worldName") ?? string.Empty,
+            Address = ReadString(bridgeStatus, "address") ?? string.Empty,
+            MaxPlayers = ReadInt(bridgeStatus, "maxPlayers") ?? 0,
+            IsRunning = isRunning,
+            OnlinePlayers = ReadInt(bridgeStatus, "onlinePlayers") ?? localStatus.OnlinePlayers,
+            StartedAtUtc = startedAtUtc,
+            UptimeSeconds = uptimeSeconds,
             CoverUrl = GetCoverPath(profile) is null ? string.Empty : "/api/cover",
-            PlayerCountIntervalMinutes = PlayerCountIntervalMinutes,
             PlayerCountHistoryHours = PlayerCountHistoryHours,
-            PlayerCountHistoryPoints = PlayerCountHistoryPoints,
             PlayerCountHistory = GetPlayerCountHistory(profile),
             Mods = await BuildModsAsync(profile, cancellationToken)
         };
     }
 
-    private void StartPlayerCountSampling(InstanceProfile profile)
+    private void StartPlayerCountTracking(InstanceProfile profile)
     {
-        RecordPlayerCount(profile);
-
-        var now = DateTimeOffset.UtcNow;
-        var untilNextSample = TruncateToFiveMinutes(now).AddMinutes(PlayerCountIntervalMinutes) - now;
-        if (untilNextSample < TimeSpan.FromSeconds(1))
-            untilNextSample = TimeSpan.FromSeconds(1);
-
-        var timer = new Timer(
-            static state =>
-            {
-                if (state is OpenApiSamplingState sampling)
-                    sampling.Service.RecordPlayerCount(sampling.Profile);
-            },
-            new OpenApiSamplingState(this, profile),
-            untilNextSample,
-            TimeSpan.FromMinutes(PlayerCountIntervalMinutes));
-
-        if (!_playerHistoryTimers.TryAdd(profile.Id, timer))
-            timer.Dispose();
+        var cancellation = new CancellationTokenSource();
+        if (!_playerHistoryCancellations.TryAdd(profile.Id, cancellation))
+        {
+            cancellation.Dispose();
+            return;
+        }
+        var task = TrackPlayerCountAsync(profile, cancellation.Token);
+        _playerHistoryTasks[profile.Id] = task;
     }
 
-    private void StopPlayerCountSampling(string profileId)
+    private async Task StopPlayerCountTrackingAsync(string profileId)
     {
-        if (_playerHistoryTimers.TryRemove(profileId, out var timer))
-            timer.Dispose();
+        if (_playerHistoryCancellations.TryRemove(profileId, out var cancellation))
+        {
+            cancellation.Cancel();
+            cancellation.Dispose();
+        }
+        if (_playerHistoryTasks.TryRemove(profileId, out var task))
+        {
+            try { await task.ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+        }
     }
 
-    private void RecordPlayerCount(InstanceProfile profile)
+    private async Task TrackPlayerCountAsync(InstanceProfile profile, CancellationToken cancellationToken)
     {
         try
         {
-            var status = serverProcessService.GetCurrentStatus(profile.Id);
-            var timestamp = TruncateToFiveMinutes(DateTimeOffset.UtcNow);
+            if (serverBridgeService is null) throw new InvalidOperationException("服务器桥接服务不可用。");
+            await RefreshPlayerHistoryFromBridgeAsync(profile, cancellationToken).ConfigureAwait(false);
+
+            var current = await serverBridgeService.QueryAsync(profile, "server.status", cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (current.Success && ReadInt(current.Data, "onlinePlayers") is { } currentCount)
+                RecordPlayerCount(profile, currentCount, DateTimeOffset.UtcNow);
+
+            await using var subscription = await serverBridgeService.SubscribeAsync(
+                profile,
+                new ServerBridgeSubscriptionOptions { Events = ["player.count-changed"], StartFromLatest = true },
+                value =>
+                {
+                    if (ReadInt(value.Data, "onlinePlayers") is { } count)
+                        RecordPlayerCount(profile, count, value.TimestampUtc);
+                    return Task.CompletedTask;
+                }, cancellationToken).ConfigureAwait(false);
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            _logger?.LogDebug(exception, "桥接玩家数量跟踪不可用，使用当前状态作为兼容基线。ProfileId={ProfileId}", profile.Id);
+            RecordPlayerCount(profile, Math.Max(0, serverProcessService.GetCurrentStatus(profile.Id).OnlinePlayers), DateTimeOffset.UtcNow);
+        }
+    }
+
+    private async Task RefreshPlayerHistoryFromBridgeAsync(InstanceProfile profile, CancellationToken cancellationToken)
+    {
+        if (serverBridgeService is null) return;
+        if (_bridgeHistoryCache.TryGetValue(profile.Id, out var cached) &&
+            DateTimeOffset.UtcNow - cached.CreatedAtUtc < BridgeHistoryCacheTtl)
+            return;
+        try
+        {
+            var history = await serverBridgeService.QueryAsync(profile, "players.history", cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (history.Success && history.Data?["history"] is JsonArray values)
+            {
+                foreach (var value in values.OfType<JsonObject>())
+                    if (ReadInt(value, "onlinePlayers") is { } count && ReadDateTime(value, "timestampUtc") is { } timestamp)
+                        RecordPlayerCount(profile, count, timestamp);
+                _bridgeHistoryCache[profile.Id] = new CachedBridgeJson(DateTimeOffset.UtcNow, history.Data.DeepClone().AsObject());
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception) when (exception is IOException or SocketException or TimeoutException or InvalidOperationException)
+        {
+            _logger?.LogDebug(exception, "读取桥接玩家历史失败。ProfileId={ProfileId}", profile.Id);
+        }
+    }
+
+    private async Task<JsonObject?> GetBridgeStatusAsync(InstanceProfile profile, CancellationToken cancellationToken)
+    {
+        if (serverBridgeService is null) return null;
+        if (_bridgeStatusCache.TryGetValue(profile.Id, out var cached) &&
+            DateTimeOffset.UtcNow - cached.CreatedAtUtc < BridgeStatusCacheTtl)
+            return cached.Data.DeepClone().AsObject();
+        try
+        {
+            var result = await serverBridgeService.QueryAsync(profile, "server.status", cancellationToken: cancellationToken).ConfigureAwait(false);
+            if (result.Success && result.Data is not null)
+            {
+                _bridgeStatusCache[profile.Id] = new CachedBridgeJson(DateTimeOffset.UtcNow, result.Data.DeepClone().AsObject());
+                return result.Data;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or SocketException or TimeoutException or InvalidOperationException)
+        {
+            _logger?.LogDebug(exception, "读取服务器桥接状态失败。ProfileId={ProfileId}", profile.Id);
+        }
+        return null;
+    }
+
+    private void RecordPlayerCount(InstanceProfile profile, int onlinePlayers, DateTimeOffset timestamp)
+    {
+        try
+        {
             var gate = _playerHistoryGates.GetOrAdd(profile.Id, static _ => new object());
             lock (gate)
             {
                 var records = LoadPlayerCountHistory(profile);
-                if (records.Any(record => record.TimestampUtc == timestamp))
+                if (records.LastOrDefault()?.OnlinePlayers == onlinePlayers)
                     return;
 
                 records.Add(new OpenApiPlayerCountRecord
                 {
                     TimestampUtc = timestamp,
-                    OnlinePlayers = Math.Max(0, status.OnlinePlayers)
+                    OnlinePlayers = Math.Max(0, onlinePlayers)
                 });
 
                 var retained = records
                     .OrderBy(record => record.TimestampUtc)
-                    .TakeLast(PlayerCountHistoryPoints)
+                    .Where(record => record.TimestampUtc >= DateTimeOffset.UtcNow.AddHours(-PlayerCountHistoryHours))
                     .ToList();
                 SavePlayerCountHistory(profile, retained);
             }
@@ -247,7 +339,7 @@ public sealed class OpenApiService(
         {
             return LoadPlayerCountHistory(profile)
                 .OrderBy(record => record.TimestampUtc)
-                .TakeLast(PlayerCountHistoryPoints)
+                .Where(record => record.TimestampUtc >= DateTimeOffset.UtcNow.AddHours(-PlayerCountHistoryHours))
                 .ToArray();
         }
     }
@@ -266,7 +358,7 @@ public sealed class OpenApiService(
                 .GroupBy(record => record.TimestampUtc)
                 .Select(group => group.Last())
                 .OrderBy(record => record.TimestampUtc)
-                .TakeLast(PlayerCountHistoryPoints)
+                .Where(record => record.TimestampUtc >= DateTimeOffset.UtcNow.AddHours(-PlayerCountHistoryHours))
                 .ToList() ?? [];
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
@@ -368,8 +460,19 @@ public sealed class OpenApiService(
     private static string GetPlayerCountHistoryPath(InstanceProfile profile) =>
         Path.Combine(profile.DirectoryPath, "openapi-player-history.json");
 
-    private static DateTimeOffset TruncateToFiveMinutes(DateTimeOffset value) =>
-        new(value.Year, value.Month, value.Day, value.Hour, value.Minute / PlayerCountIntervalMinutes * PlayerCountIntervalMinutes, 0, value.Offset);
+    private static int? ReadInt(JsonObject? data, string name) =>
+        data?[name] is JsonValue value && value.TryGetValue<int>(out var result) ? result : null;
+
+    private static long? ReadLong(JsonObject? data, string name) =>
+        data?[name] is JsonValue value && value.TryGetValue<long>(out var result) ? result : null;
+
+    private static string? ReadString(JsonObject? data, string name) =>
+        data?[name] is JsonValue value && value.TryGetValue<string>(out var result) ? result : null;
+
+    private static DateTimeOffset? ReadDateTime(JsonObject data, string name) =>
+        data[name] is JsonValue value && value.TryGetValue<DateTimeOffset>(out var result) ? result : null;
+
+    private sealed record CachedBridgeJson(DateTimeOffset CreatedAtUtc, JsonObject Data);
 
     private static void ValidatePort(int port)
     {
@@ -384,7 +487,6 @@ public sealed class OpenApiService(
         public string CoverContentType { get; init; } = string.Empty;
     }
 
-    private sealed record OpenApiSamplingState(OpenApiService Service, InstanceProfile Profile);
 }
 
 public sealed class OpenApiServerInfo
@@ -394,14 +496,17 @@ public sealed class OpenApiServerInfo
     public string ServerName { get; init; } = string.Empty;
     public string Description { get; init; } = string.Empty;
     public string Version { get; init; } = string.Empty;
+    public string ServerStatus { get; init; } = string.Empty;
+    public string WorldName { get; init; } = string.Empty;
+    public string Address { get; init; } = string.Empty;
+    public int MaxPlayers { get; init; }
     public bool IsRunning { get; init; }
     public int OnlinePlayers { get; init; }
     public DateTimeOffset? StartedAtUtc { get; init; }
     public long UptimeSeconds { get; init; }
     public string CoverUrl { get; init; } = string.Empty;
-    public int PlayerCountIntervalMinutes { get; init; }
+    public string PlayerCountHistoryMode { get; init; } = "on-change";
     public int PlayerCountHistoryHours { get; init; }
-    public int PlayerCountHistoryPoints { get; init; }
     public IReadOnlyList<OpenApiPlayerCountRecord> PlayerCountHistory { get; init; } = [];
     public IReadOnlyList<OpenApiModInfo> Mods { get; init; } = [];
 }

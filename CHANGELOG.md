@@ -1,5 +1,25 @@
 # 更新日志
 
+## 2.7.6-pre.3 - 2026-10-06
+
+### 新增
+
+- 桥接模组在启动时记录在线人数基线，之后仅在人数变化时记录 UTC 时间和人数，提供 `player.count-changed` 事件和 `players.history` 查询。
+- 桥接玩家历史持久化到模组配置目录的 `launchergoserverbridge-player-history.json`，按最近 7 天保留；开放 API 订阅人数变更，并保留档案目录中的本地历史缓存。
+- 开放 API 优先从桥接 `server.status` 获取服务器名称、介绍、版本、在线人数和运行时长，新增 `serverStatus`、`worldName`、`address` 和 `maxPlayers` 字段；桥接不可用时使用本地状态与配置回退。
+
+### 优化
+
+- 移除开放 API 每 5 分钟定时采样，`/api`、`/api/server` 和 `/api/players/history` 使用桥接人数历史。
+- 为每个档案添加 1 秒的桥接状态缓存和 5 秒的历史查询缓存，减少重复查询。
+- 桥接历史文件通过 250 毫秒延迟合并写入，在后台保存，降低玩家加入和离开时的同步磁盘开销。
+
+### 注意事项
+
+- 主程序 **2.7.6-pre.3**；内嵌桥接模组升级为 **2.2.0**，部署后需要重启游戏服务器加载。
+- API 返回 `playerCountHistoryMode: "on-change"` 和 `playerCountHistoryHours: 168`，移除 `playerCountIntervalMinutes` 与 `playerCountHistoryPoints`；客户端应按每条记录的时间戳处理不等间隔数据。
+- 游戏服务器异常退出时，尚未写入磁盘的最近人数变更可能丢失。
+
 ## 2.7.6-pre.2 - 2026-10-05
 
 ### 新增

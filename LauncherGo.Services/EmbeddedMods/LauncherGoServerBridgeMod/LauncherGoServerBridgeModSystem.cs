@@ -22,12 +22,13 @@ namespace LauncherGoServerBridge;
 public sealed class LauncherGoServerBridgeModSystem : ModSystem
 {
     private const string ConfigurationFileName = "launchergoserverbridge.json";
-    private const string BridgeVersion = "2.1.0";
+    private const string BridgeVersion = "2.2.0";
     private const int MaximumRequestBytes = 32768;
     private const int MaximumEventHistory = 500;
     private const int MaximumSubscriptions = 16;
     private const int MaximumExtensionResultBytes = 1024 * 1024;
     private const int MaximumResponseBytes = 2 * 1024 * 1024;
+    private const int PlayerHistoryHours = 24 * 7;
     private ICoreServerAPI? _serverApi;
     private TcpListener? _listener;
     private CancellationTokenSource? _listenerCts;
@@ -53,6 +54,12 @@ public sealed class LauncherGoServerBridgeModSystem : ModSystem
     private double _measuredTps;
     private double _measuredTickTimeMs;
     private long _eventSequence;
+    private readonly object _playerHistoryLock = new();
+    private readonly List<PlayerCountRecord> _playerCountHistory = [];
+    private readonly object _playerHistorySaveLock = new();
+    private List<PlayerCountRecord>? _pendingPlayerHistorySave;
+    private Timer? _playerHistorySaveTimer;
+    private int _lastPlayerCount = -1;
 
     public override void StartServerSide(ICoreServerAPI api)
     {
@@ -64,8 +71,10 @@ public sealed class LauncherGoServerBridgeModSystem : ModSystem
         _performanceListenerId = api.Event.RegisterGameTickListener(OnPerformanceTick, 0, 0);
         _performanceWindowStartedMs = Environment.TickCount64;
         _configuration = LoadConfiguration(api);
+        LoadPlayerCountHistory(api);
         StartConfigurationWatcher(api);
         ApplyConfiguration(api, _configuration, restartListener: true);
+        RecordPlayerCount(api);
     }
 
     public override void Dispose()
@@ -85,6 +94,11 @@ public sealed class LauncherGoServerBridgeModSystem : ModSystem
         _recentExactDeathLogs.Clear();
         _playerJoinedAtUtc.Clear();
         _playerLastActivityUtc.Clear();
+        FlushPlayerCountHistory();
+        _playerHistorySaveTimer?.Dispose();
+        _playerHistorySaveTimer = null;
+        _playerCountHistory.Clear();
+        _lastPlayerCount = -1;
         _configurationReloadTimer?.Dispose();
         _configurationReloadTimer = null;
         _configurationWatcher?.Dispose();
@@ -487,6 +501,7 @@ public sealed class LauncherGoServerBridgeModSystem : ModSystem
         _playerJoinedAtUtc[player.PlayerUID] = now;
         _playerLastActivityUtc[player.PlayerUID] = now;
         EmitPlayerEvent("player.joined", player);
+        RecordPlayerCount(_serverApi);
     }
 
     private void OnPlayerDisconnect(IServerPlayer player)
@@ -494,7 +509,84 @@ public sealed class LauncherGoServerBridgeModSystem : ModSystem
         EmitPlayerEvent("player.left", player);
         _playerJoinedAtUtc.TryRemove(player.PlayerUID, out _);
         _playerLastActivityUtc.TryRemove(player.PlayerUID, out _);
+        RecordPlayerCount(_serverApi, player.PlayerUID);
     }
+
+    private void RecordPlayerCount(ICoreServerAPI? api, string? excludingPlayerUid = null)
+    {
+        if (api is null) return;
+        var count = api.World.AllOnlinePlayers.OfType<IServerPlayer>()
+            .Count(x => x.ConnectionState == EnumClientState.Playing &&
+                        !string.Equals(x.PlayerUID, excludingPlayerUid, StringComparison.Ordinal));
+        lock (_playerHistoryLock)
+        {
+            if (_lastPlayerCount == count) return;
+            _lastPlayerCount = count;
+            var now = DateTimeOffset.UtcNow;
+            _playerCountHistory.RemoveAll(x => now - x.TimestampUtc > TimeSpan.FromHours(PlayerHistoryHours));
+            _playerCountHistory.Add(new PlayerCountRecord { TimestampUtc = now, OnlinePlayers = count });
+            QueuePlayerHistorySave(_playerCountHistory.ToList());
+        }
+        EmitEvent("player.count-changed", new JsonObject
+        {
+            ["onlinePlayers"] = count,
+            ["maxPlayers"] = api.Server.Config.MaxClients
+        });
+    }
+
+    private void LoadPlayerCountHistory(ICoreServerAPI api)
+    {
+        try
+        {
+            var path = GetPlayerCountHistoryPath();
+            if (!File.Exists(path)) return;
+            var values = JsonSerializer.Deserialize<List<PlayerCountRecord>>(File.ReadAllText(path), JsonOptions) ?? [];
+            var cutoff = DateTimeOffset.UtcNow - TimeSpan.FromHours(PlayerHistoryHours);
+            lock (_playerHistoryLock)
+            {
+                _playerCountHistory.Clear();
+                _playerCountHistory.AddRange(values.Where(x => x.TimestampUtc >= cutoff && x.OnlinePlayers >= 0).OrderBy(x => x.TimestampUtc));
+                _lastPlayerCount = _playerCountHistory.LastOrDefault()?.OnlinePlayers ?? -1;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        {
+            api.Logger.Warning("LauncherGo Server Bridge could not load player history: {0}", ex.Message);
+        }
+    }
+
+    private void QueuePlayerHistorySave(List<PlayerCountRecord> snapshot)
+    {
+        lock (_playerHistorySaveLock)
+        {
+            _pendingPlayerHistorySave = snapshot;
+            _playerHistorySaveTimer ??= new Timer(_ => FlushPlayerCountHistory(), null, Timeout.Infinite, Timeout.Infinite);
+            _playerHistorySaveTimer.Change(250, Timeout.Infinite);
+        }
+    }
+
+    private void FlushPlayerCountHistory()
+    {
+        List<PlayerCountRecord>? snapshot;
+        lock (_playerHistorySaveLock)
+        {
+            snapshot = _pendingPlayerHistorySave;
+            _pendingPlayerHistorySave = null;
+        }
+        if (snapshot is null) return;
+        try
+        {
+            var path = GetPlayerCountHistoryPath();
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            var temporaryPath = path + ".tmp";
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(snapshot, JsonOptions));
+            File.Move(temporaryPath, path, true);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    private static string GetPlayerCountHistoryPath() => Path.Combine(GamePaths.ModConfig, "launchergoserverbridge-player-history.json");
     private void OnPlayerChat(IServerPlayer player, int channelId, ref string message, ref string data, BoolRef consumed)
     {
         if (consumed.value || string.IsNullOrWhiteSpace(message) || message.StartsWith('/')) return;
@@ -631,6 +723,7 @@ public sealed class LauncherGoServerBridgeModSystem : ModSystem
                     {
                         "server.status" => BuildServerStatus(api),
                         "players.list" => BuildPlayers(api),
+                        "players.history" => BuildPlayerHistory(),
                         "server.capabilities" => BuildCapabilities(),
                         "world.status" when _configuration.IncludeWorldDetails => BuildWorldStatus(api),
                         _ => null
@@ -915,7 +1008,7 @@ public sealed class LauncherGoServerBridgeModSystem : ModSystem
 
     private JsonObject BuildCapabilities()
     {
-        var queries = new JsonArray("server.status", "players.list", "server.capabilities");
+        var queries = new JsonArray("server.status", "players.list", "players.history", "server.capabilities");
         if (_configuration.IncludeExtendedPlayerInfo) queries.Add("player.info");
         if (_configuration.IncludeWorldDetails) queries.Add("world.status");
         foreach (var provider in _extensionProviders.Values)
@@ -1013,7 +1106,12 @@ public sealed class LauncherGoServerBridgeModSystem : ModSystem
         IncludeWorldDetails = configuration.IncludeWorldDetails,
         IncludePerformanceInfo = configuration.IncludePerformanceInfo,
         IncludeSensitiveFields = configuration.IncludeSensitiveFields,
-        EventTypes = (configuration.EventTypes ?? []).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Take(64).ToArray()
+        EventTypes = (configuration.EventTypes ?? [])
+            .Append("player.count-changed")
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(64)
+            .ToArray()
     };
 
     private void StopListener()
@@ -1098,7 +1196,7 @@ public sealed class LauncherGoServerBridgeModSystem : ModSystem
         public bool IncludeWorldDetails { get; set; }
         public bool IncludePerformanceInfo { get; set; }
         public bool IncludeSensitiveFields { get; set; }
-        public string[] EventTypes { get; set; } = ["player.joined", "player.left", "player.died", "chat", "server.notification"];
+        public string[] EventTypes { get; set; } = ["player.joined", "player.left", "player.count-changed", "player.died", "chat", "server.notification"];
     }
 
     private sealed class ServerBridgeRequest
@@ -1126,6 +1224,25 @@ public sealed class LauncherGoServerBridgeModSystem : ModSystem
         public string? ErrorCode { get; set; }
         public JsonObject? Data { get; set; }
         public string? Type { get; set; }
+    }
+
+    private JsonObject BuildPlayerHistory()
+    {
+        lock (_playerHistoryLock)
+        {
+            var records = new JsonArray(_playerCountHistory.Select(value => (JsonNode?)new JsonObject
+            {
+                ["timestampUtc"] = value.TimestampUtc,
+                ["onlinePlayers"] = value.OnlinePlayers
+            }).ToArray());
+            return new JsonObject { ["history"] = records, ["retentionHours"] = PlayerHistoryHours };
+        }
+    }
+
+    private sealed class PlayerCountRecord
+    {
+        public DateTimeOffset TimestampUtc { get; init; }
+        public int OnlinePlayers { get; init; }
     }
 
     private sealed class ServerBridgeEventRecord

@@ -31,7 +31,7 @@ public sealed class ServerBridgeSettings
     public bool IncludePerformanceInfo { get; init; }
     public bool IncludeSensitiveFields { get; init; }
     public IReadOnlyCollection<string> EventTypes { get; init; } =
-        ["player.joined", "player.left", "player.died", "chat", "server.notification"];
+        ["player.joined", "player.left", "player.count-changed", "player.died", "chat", "server.notification"];
 }
 
 public enum ServerBridgeRuntimeState
