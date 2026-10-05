@@ -19,7 +19,9 @@ public sealed class OpenApiService(
     IInstanceModService modService,
     ILogger<OpenApiService>? logger = null) : IOpenApiService
 {
+    private const int PlayerCountIntervalMinutes = 5;
     private const int PlayerCountHistoryHours = 24 * 7;
+    private const int PlayerCountHistoryPoints = PlayerCountHistoryHours * 60 / PlayerCountIntervalMinutes;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HttpClient ModDbClient = new() { Timeout = TimeSpan.FromSeconds(3) };
     private static readonly ConcurrentDictionary<string, string> ModUrlCache = new(StringComparer.OrdinalIgnoreCase);
@@ -169,8 +171,10 @@ public sealed class OpenApiService(
                 ? Math.Max(0, (long)(DateTimeOffset.UtcNow - startedAt).TotalSeconds)
                 : 0,
             CoverUrl = GetCoverPath(profile) is null ? string.Empty : "/api/cover",
+            PlayerCountIntervalMinutes = PlayerCountIntervalMinutes,
             PlayerCountHistoryHours = PlayerCountHistoryHours,
-            HourlyPlayerCounts = GetPlayerCountHistory(profile),
+            PlayerCountHistoryPoints = PlayerCountHistoryPoints,
+            PlayerCountHistory = GetPlayerCountHistory(profile),
             Mods = await BuildModsAsync(profile, cancellationToken)
         };
     }
@@ -179,9 +183,10 @@ public sealed class OpenApiService(
     {
         RecordPlayerCount(profile);
 
-        var untilNextHour = TruncateToHour(DateTimeOffset.UtcNow).AddHours(1) - DateTimeOffset.UtcNow;
-        if (untilNextHour < TimeSpan.FromSeconds(1))
-            untilNextHour = TimeSpan.FromSeconds(1);
+        var now = DateTimeOffset.UtcNow;
+        var untilNextSample = TruncateToFiveMinutes(now).AddMinutes(PlayerCountIntervalMinutes) - now;
+        if (untilNextSample < TimeSpan.FromSeconds(1))
+            untilNextSample = TimeSpan.FromSeconds(1);
 
         var timer = new Timer(
             static state =>
@@ -190,8 +195,8 @@ public sealed class OpenApiService(
                     sampling.Service.RecordPlayerCount(sampling.Profile);
             },
             new OpenApiSamplingState(this, profile),
-            untilNextHour,
-            TimeSpan.FromHours(1));
+            untilNextSample,
+            TimeSpan.FromMinutes(PlayerCountIntervalMinutes));
 
         if (!_playerHistoryTimers.TryAdd(profile.Id, timer))
             timer.Dispose();
@@ -208,7 +213,7 @@ public sealed class OpenApiService(
         try
         {
             var status = serverProcessService.GetCurrentStatus(profile.Id);
-            var timestamp = TruncateToHour(DateTimeOffset.UtcNow);
+            var timestamp = TruncateToFiveMinutes(DateTimeOffset.UtcNow);
             var gate = _playerHistoryGates.GetOrAdd(profile.Id, static _ => new object());
             lock (gate)
             {
@@ -224,7 +229,7 @@ public sealed class OpenApiService(
 
                 var retained = records
                     .OrderBy(record => record.TimestampUtc)
-                    .TakeLast(PlayerCountHistoryHours)
+                    .TakeLast(PlayerCountHistoryPoints)
                     .ToList();
                 SavePlayerCountHistory(profile, retained);
             }
@@ -242,7 +247,7 @@ public sealed class OpenApiService(
         {
             return LoadPlayerCountHistory(profile)
                 .OrderBy(record => record.TimestampUtc)
-                .TakeLast(PlayerCountHistoryHours)
+                .TakeLast(PlayerCountHistoryPoints)
                 .ToArray();
         }
     }
@@ -261,7 +266,7 @@ public sealed class OpenApiService(
                 .GroupBy(record => record.TimestampUtc)
                 .Select(group => group.Last())
                 .OrderBy(record => record.TimestampUtc)
-                .TakeLast(PlayerCountHistoryHours)
+                .TakeLast(PlayerCountHistoryPoints)
                 .ToList() ?? [];
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
@@ -363,8 +368,8 @@ public sealed class OpenApiService(
     private static string GetPlayerCountHistoryPath(InstanceProfile profile) =>
         Path.Combine(profile.DirectoryPath, "openapi-player-history.json");
 
-    private static DateTimeOffset TruncateToHour(DateTimeOffset value) =>
-        new(value.Year, value.Month, value.Day, value.Hour, 0, 0, value.Offset);
+    private static DateTimeOffset TruncateToFiveMinutes(DateTimeOffset value) =>
+        new(value.Year, value.Month, value.Day, value.Hour, value.Minute / PlayerCountIntervalMinutes * PlayerCountIntervalMinutes, 0, value.Offset);
 
     private static void ValidatePort(int port)
     {
@@ -394,8 +399,10 @@ public sealed class OpenApiServerInfo
     public DateTimeOffset? StartedAtUtc { get; init; }
     public long UptimeSeconds { get; init; }
     public string CoverUrl { get; init; } = string.Empty;
+    public int PlayerCountIntervalMinutes { get; init; }
     public int PlayerCountHistoryHours { get; init; }
-    public IReadOnlyList<OpenApiPlayerCountRecord> HourlyPlayerCounts { get; init; } = [];
+    public int PlayerCountHistoryPoints { get; init; }
+    public IReadOnlyList<OpenApiPlayerCountRecord> PlayerCountHistory { get; init; } = [];
     public IReadOnlyList<OpenApiModInfo> Mods { get; init; } = [];
 }
 
