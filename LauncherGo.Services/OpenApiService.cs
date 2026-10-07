@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using LauncherGo.Abstractions.Services;
 using LauncherGo.Domains.Models;
 using Microsoft.AspNetCore.Builder;
@@ -25,9 +26,11 @@ public sealed class OpenApiService(
     private const int PlayerCountHistoryHours = 24 * 7;
     private static readonly TimeSpan BridgeStatusCacheTtl = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan BridgeHistoryCacheTtl = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan ModMetadataCacheTtl = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan UnavailableModMetadataCacheTtl = TimeSpan.FromMinutes(2);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HttpClient ModDbClient = new() { Timeout = TimeSpan.FromSeconds(3) };
-    private static readonly ConcurrentDictionary<string, string> ModUrlCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, CachedModMetadata> ModMetadataCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, WebApplication> _applications = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _profileGates = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _playerHistoryCancellations = new(StringComparer.OrdinalIgnoreCase);
@@ -381,21 +384,33 @@ public sealed class OpenApiService(
         var mods = await modService.GetModsAsync(profile, cancellationToken);
         return await Task.WhenAll(mods.Where(static mod => !mod.IsDisabled)
             .OrderBy(static mod => mod.ModId, StringComparer.OrdinalIgnoreCase)
-            .Select(async mod => new OpenApiModInfo
+            .Select(async mod =>
             {
-                Name = mod.Name,
-                ModId = mod.ModId,
-                Url = await ResolveModUrlAsync(mod.ModId, cancellationToken)
+                var metadata = await ResolveModMetadataAsync(mod.ModId, cancellationToken);
+                return new OpenApiModInfo
+                {
+                    Name = string.IsNullOrWhiteSpace(metadata.Name) ? mod.Name : metadata.Name,
+                    ModId = mod.ModId,
+                    Version = mod.Version,
+                    Author = metadata.Author,
+                    Description = metadata.Description,
+                    CoverUrl = metadata.CoverUrl,
+                    Url = metadata.Url,
+                    LatestVersion = metadata.LatestVersion,
+                    LatestDownloadUrl = metadata.LatestDownloadUrl
+                };
             }));
     }
 
-    private static async Task<string> ResolveModUrlAsync(string modId, CancellationToken cancellationToken)
+    private async Task<ModDbModMetadata> ResolveModMetadataAsync(string modId, CancellationToken cancellationToken)
     {
         modId = modId.Trim();
         if (string.IsNullOrWhiteSpace(modId))
-            return string.Empty;
-        if (ModUrlCache.TryGetValue(modId, out var cached))
-            return cached;
+            return new ModDbModMetadata();
+        if (ModMetadataCache.TryGetValue(modId, out var cached) &&
+            DateTimeOffset.UtcNow - cached.CreatedAtUtc <
+            (cached.IsAvailable ? ModMetadataCacheTtl : UnavailableModMetadataCacheTtl))
+            return cached.Metadata;
 
         var fallback = $"https://mods.vintagestory.at/{Uri.EscapeDataString(modId)}";
         try
@@ -406,15 +421,12 @@ public sealed class OpenApiService(
                 await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
                 using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
                 var root = document.RootElement;
-                if (IsApiSuccess(root) && root.TryGetProperty("mod", out var mod))
+                if (IsApiSuccess(root) && root.TryGetProperty("mod", out var mod) &&
+                    mod.ValueKind == JsonValueKind.Object)
                 {
-                    var alias = mod.TryGetProperty("urlalias", out var aliasValue) && aliasValue.ValueKind == JsonValueKind.String
-                        ? aliasValue.GetString()?.Trim().Trim('/')
-                        : null;
-                    if (!string.IsNullOrWhiteSpace(alias))
-                        return ModUrlCache.GetOrAdd(modId, $"https://mods.vintagestory.at/{Uri.EscapeDataString(alias)}");
-                    if (mod.TryGetProperty("modid", out var numericId) && numericId.TryGetInt32(out var id) && id > 0)
-                        return ModUrlCache.GetOrAdd(modId, $"https://mods.vintagestory.at/show/mod/{id}");
+                    var metadata = ReadModMetadata(mod, fallback);
+                    ModMetadataCache[modId] = new CachedModMetadata(DateTimeOffset.UtcNow, metadata, true);
+                    return metadata;
                 }
             }
         }
@@ -422,10 +434,62 @@ public sealed class OpenApiService(
         {
             throw;
         }
-        catch
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or TaskCanceledException)
         {
+            _logger?.LogDebug(exception, "读取 Mod DB 模组信息失败。ModId={ModId}", modId);
         }
-        return ModUrlCache.GetOrAdd(modId, fallback);
+
+        var unavailable = new ModDbModMetadata { Url = fallback };
+        ModMetadataCache[modId] = new CachedModMetadata(DateTimeOffset.UtcNow, unavailable, false);
+        return unavailable;
+    }
+
+    private static ModDbModMetadata ReadModMetadata(JsonElement mod, string fallbackUrl)
+    {
+        var alias = ReadJsonString(mod, "urlalias").Trim().Trim('/');
+        var url = !string.IsNullOrWhiteSpace(alias)
+            ? $"https://mods.vintagestory.at/{Uri.EscapeDataString(alias)}"
+            : mod.TryGetProperty("modid", out var numericId) && numericId.TryGetInt32(out var id) && id > 0
+                ? $"https://mods.vintagestory.at/show/mod/{id}"
+                : fallbackUrl;
+        var (latestVersion, latestDownloadUrl) = ReadLatestRelease(mod);
+        return new ModDbModMetadata
+        {
+            Name = ReadJsonString(mod, "name"),
+            Author = ReadJsonString(mod, "author"),
+            Description = ToPlainText(ReadJsonString(mod, "text")),
+            CoverUrl = ReadJsonString(mod, "logofile"),
+            Url = url,
+            LatestVersion = latestVersion,
+            LatestDownloadUrl = latestDownloadUrl
+        };
+    }
+
+    private static (string Version, string DownloadUrl) ReadLatestRelease(JsonElement mod)
+    {
+        if (!mod.TryGetProperty("releases", out var releases) || releases.ValueKind != JsonValueKind.Array)
+            return (string.Empty, string.Empty);
+
+        var latest = ModUpdateService.SelectLatestRelease(releases.EnumerateArray());
+        if (latest.ValueKind != JsonValueKind.Object)
+            return (string.Empty, string.Empty);
+        var downloadUrl = ReadJsonString(latest, "mainfile");
+        return Uri.TryCreate(downloadUrl, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"
+            ? (ReadJsonString(latest, "modversion"), downloadUrl)
+            : (string.Empty, string.Empty);
+    }
+
+    private static string ReadJsonString(JsonElement element, string propertyName) =>
+        element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
+            ? property.GetString()?.Trim() ?? string.Empty
+            : string.Empty;
+
+    private static string ToPlainText(string html)
+    {
+        if (string.IsNullOrWhiteSpace(html)) return string.Empty;
+        var text = Regex.Replace(html, "<[^>]*>", " ");
+        text = Regex.Replace(WebUtility.HtmlDecode(text), @"\s+", " ").Trim();
+        return text.Length <= 360 ? text : text[..357].TrimEnd() + "...";
     }
 
     private static bool IsApiSuccess(JsonElement root) => root.TryGetProperty("statuscode", out var status) &&
@@ -474,6 +538,19 @@ public sealed class OpenApiService(
 
     private sealed record CachedBridgeJson(DateTimeOffset CreatedAtUtc, JsonObject Data);
 
+    private sealed record CachedModMetadata(DateTimeOffset CreatedAtUtc, ModDbModMetadata Metadata, bool IsAvailable);
+
+    private sealed class ModDbModMetadata
+    {
+        public string Name { get; init; } = string.Empty;
+        public string Author { get; init; } = string.Empty;
+        public string Description { get; init; } = string.Empty;
+        public string CoverUrl { get; init; } = string.Empty;
+        public string Url { get; init; } = string.Empty;
+        public string LatestVersion { get; init; } = string.Empty;
+        public string LatestDownloadUrl { get; init; } = string.Empty;
+    }
+
     private static void ValidatePort(int port)
     {
         if (port is < 1 or > 65535)
@@ -521,5 +598,11 @@ public sealed class OpenApiModInfo
 {
     public string Name { get; init; } = string.Empty;
     public string ModId { get; init; } = string.Empty;
+    public string Version { get; init; } = string.Empty;
+    public string Author { get; init; } = string.Empty;
+    public string Description { get; init; } = string.Empty;
+    public string CoverUrl { get; init; } = string.Empty;
     public string Url { get; init; } = string.Empty;
+    public string LatestVersion { get; init; } = string.Empty;
+    public string LatestDownloadUrl { get; init; } = string.Empty;
 }
