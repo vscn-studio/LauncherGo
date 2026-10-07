@@ -382,11 +382,12 @@ public sealed class OpenApiService(
     private async Task<IReadOnlyList<OpenApiModInfo>> BuildModsAsync(InstanceProfile profile, CancellationToken cancellationToken)
     {
         var mods = await modService.GetModsAsync(profile, cancellationToken);
-        return await Task.WhenAll(mods.Where(static mod => !mod.IsDisabled)
+        return await Task.WhenAll(mods.Where(static mod => !mod.IsDisabled &&
+                                                           mod.Side.Equals("Universal", StringComparison.OrdinalIgnoreCase))
             .OrderBy(static mod => mod.ModId, StringComparer.OrdinalIgnoreCase)
             .Select(async mod =>
             {
-                var metadata = await ResolveModMetadataAsync(mod.ModId, cancellationToken);
+                var metadata = await ResolveModMetadataAsync(mod.ModId, mod.Version, cancellationToken);
                 return new OpenApiModInfo
                 {
                     Name = string.IsNullOrWhiteSpace(metadata.Name) ? mod.Name : metadata.Name,
@@ -402,12 +403,16 @@ public sealed class OpenApiService(
             }));
     }
 
-    private async Task<ModDbModMetadata> ResolveModMetadataAsync(string modId, CancellationToken cancellationToken)
+    private async Task<ModDbModMetadata> ResolveModMetadataAsync(
+        string modId,
+        string installedVersion,
+        CancellationToken cancellationToken)
     {
         modId = modId.Trim();
         if (string.IsNullOrWhiteSpace(modId))
             return new ModDbModMetadata();
-        if (ModMetadataCache.TryGetValue(modId, out var cached) &&
+        var cacheKey = $"{modId}\u001f{installedVersion.Trim()}";
+        if (ModMetadataCache.TryGetValue(cacheKey, out var cached) &&
             DateTimeOffset.UtcNow - cached.CreatedAtUtc <
             (cached.IsAvailable ? ModMetadataCacheTtl : UnavailableModMetadataCacheTtl))
             return cached.Metadata;
@@ -424,8 +429,8 @@ public sealed class OpenApiService(
                 if (IsApiSuccess(root) && root.TryGetProperty("mod", out var mod) &&
                     mod.ValueKind == JsonValueKind.Object)
                 {
-                    var metadata = ReadModMetadata(mod, fallback);
-                    ModMetadataCache[modId] = new CachedModMetadata(DateTimeOffset.UtcNow, metadata, true);
+                    var metadata = ReadModMetadata(mod, fallback, installedVersion);
+                    ModMetadataCache[cacheKey] = new CachedModMetadata(DateTimeOffset.UtcNow, metadata, true);
                     return metadata;
                 }
             }
@@ -440,11 +445,11 @@ public sealed class OpenApiService(
         }
 
         var unavailable = new ModDbModMetadata { Url = fallback };
-        ModMetadataCache[modId] = new CachedModMetadata(DateTimeOffset.UtcNow, unavailable, false);
+        ModMetadataCache[cacheKey] = new CachedModMetadata(DateTimeOffset.UtcNow, unavailable, false);
         return unavailable;
     }
 
-    private static ModDbModMetadata ReadModMetadata(JsonElement mod, string fallbackUrl)
+    private static ModDbModMetadata ReadModMetadata(JsonElement mod, string fallbackUrl, string installedVersion)
     {
         var alias = ReadJsonString(mod, "urlalias").Trim().Trim('/');
         var url = !string.IsNullOrWhiteSpace(alias)
@@ -452,7 +457,7 @@ public sealed class OpenApiService(
             : mod.TryGetProperty("modid", out var numericId) && numericId.TryGetInt32(out var id) && id > 0
                 ? $"https://mods.vintagestory.at/show/mod/{id}"
                 : fallbackUrl;
-        var (latestVersion, latestDownloadUrl) = ReadLatestRelease(mod);
+        var (serverVersion, serverDownloadUrl) = ReadReleaseForVersion(mod, installedVersion);
         return new ModDbModMetadata
         {
             Name = ReadJsonString(mod, "name"),
@@ -460,24 +465,31 @@ public sealed class OpenApiService(
             Description = ToPlainText(ReadJsonString(mod, "text")),
             CoverUrl = ReadJsonString(mod, "logofile"),
             Url = url,
-            LatestVersion = latestVersion,
-            LatestDownloadUrl = latestDownloadUrl
+            // Keep the existing API fields for compatibility, but point them
+            // to the release matching the version installed on the server.
+            LatestVersion = serverVersion,
+            LatestDownloadUrl = serverDownloadUrl
         };
     }
 
-    private static (string Version, string DownloadUrl) ReadLatestRelease(JsonElement mod)
+    private static (string Version, string DownloadUrl) ReadReleaseForVersion(JsonElement mod, string installedVersion)
     {
         if (!mod.TryGetProperty("releases", out var releases) || releases.ValueKind != JsonValueKind.Array)
             return (string.Empty, string.Empty);
 
-        var latest = ModUpdateService.SelectLatestRelease(releases.EnumerateArray());
-        if (latest.ValueKind != JsonValueKind.Object)
+        var release = releases.EnumerateArray()
+            .FirstOrDefault(item => item.ValueKind == JsonValueKind.Object &&
+                                    VersionsMatch(ReadJsonString(item, "modversion"), installedVersion));
+        if (release.ValueKind != JsonValueKind.Object)
             return (string.Empty, string.Empty);
-        var downloadUrl = ReadJsonString(latest, "mainfile");
+        var downloadUrl = ReadJsonString(release, "mainfile");
         return Uri.TryCreate(downloadUrl, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"
-            ? (ReadJsonString(latest, "modversion"), downloadUrl)
+            ? (ReadJsonString(release, "modversion"), downloadUrl)
             : (string.Empty, string.Empty);
     }
+
+    private static bool VersionsMatch(string left, string right) =>
+        string.Equals(left.Trim().TrimStart('v', 'V'), right.Trim().TrimStart('v', 'V'), StringComparison.OrdinalIgnoreCase);
 
     private static string ReadJsonString(JsonElement element, string propertyName) =>
         element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String
