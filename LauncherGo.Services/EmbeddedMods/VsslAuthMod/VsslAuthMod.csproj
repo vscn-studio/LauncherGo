@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <AssemblyName>serverauth</AssemblyName>
+    <Version>1.1.1</Version>
     <RootNamespace>VsslAuth</RootNamespace>
     <VintageStoryDir Condition="'$(VINTAGE_STORY)' != ''">$(VINTAGE_STORY)</VintageStoryDir>
     <VintageStoryDir Condition="'$(VintageStoryDir)' == '' and Exists('$(MSBuildThisFileDirectory)..\..\..\..\vs_client_linux-x64_1.22.2\vintagestory\VintagestoryAPI.dll')">$(MSBuildThisFileDirectory)..\..\..\..\vs_client_linux-x64_1.22.2\vintagestory</VintageStoryDir>

@@ -6,7 +6,7 @@ namespace LauncherGo.Tests;
 public sealed class EmbeddedModIdentityTests
 {
     [Theory]
-    [InlineData("launchergoauth", "launchergoauth", "1.1.0", "serverauth.dll", "ServerAuth-1.1.0")]
+    [InlineData("launchergoauth", "launchergoauth", "1.1.1", "serverauth.dll", "ServerAuth-1.1.1")]
     [InlineData("launchergoserverbridge", "launchergoserverbridge", "2.2.0", "serverbridge.dll", "LauncherGo Server Bridge-2.2.0")]
     [InlineData("launchergoredirect", "launchergoredirect", "1.2.0", "launchergoredirect.dll", "LauncherGo Gateway Redirect-1.2.0")]
     public void BundledModFolderName_ComesFromValidatedMetadata(

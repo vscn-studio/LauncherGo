@@ -27,8 +27,8 @@ public sealed class ServerAuthOAuth2SettingsTests
             var installed = Assert.Single(await new InstanceModService(configService).GetModsAsync(profile));
             Assert.Equal("launchergoauth", installed.ModId);
             Assert.Equal("ServerAuth", installed.Name);
-            Assert.Equal("1.1.0", installed.Version);
-            Assert.Equal("ServerAuth-1.1.0", Path.GetFileName(installed.FilePath));
+            Assert.Equal("1.1.1", installed.Version);
+            Assert.Equal("ServerAuth-1.1.1", Path.GetFileName(installed.FilePath));
             Assert.True(await auth.GetAuthModEnabledAsync(profile));
         }
         finally
@@ -44,7 +44,7 @@ public sealed class ServerAuthOAuth2SettingsTests
         try
         {
             var profile = new InstanceProfile { DirectoryPath = directory.FullName };
-            var occupied = Directory.CreateDirectory(Path.Combine(directory.FullName, "Mods", "ServerAuth-1.1.0"));
+            var occupied = Directory.CreateDirectory(Path.Combine(directory.FullName, "Mods", "ServerAuth-1.1.1"));
             var infoPath = Path.Combine(occupied.FullName, "modinfo.json");
             var info = """{"modid":"other","name":"ServerAuth","version":"1.1.0"}""";
             await File.WriteAllTextAsync(infoPath, info);
@@ -66,7 +66,7 @@ public sealed class ServerAuthOAuth2SettingsTests
         try
         {
             var profile = new InstanceProfile { DirectoryPath = directory.FullName };
-            var installed = Directory.CreateDirectory(Path.Combine(directory.FullName, "Mods", "ServerAuth-1.1.0"));
+            var installed = Directory.CreateDirectory(Path.Combine(directory.FullName, "Mods", "ServerAuth-1.1.1"));
             await File.WriteAllTextAsync(Path.Combine(installed.FullName, "modinfo.json"),
                 """{"name":"ServerAuth","version":"1.1.0"}""");
             await File.WriteAllTextAsync(Path.Combine(installed.FullName, "serverauth.dll"), "old");

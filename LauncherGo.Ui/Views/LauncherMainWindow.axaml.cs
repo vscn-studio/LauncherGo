@@ -8879,25 +8879,25 @@ public partial class LauncherMainWindow : Window
             return;
         }
 
+        var saved = false;
         try
         {
             var settings = CollectAuthSettings();
             await _serverAuthService.SaveSettingsAsync(profile, settings);
-            if (settings.Enabled)
-            {
-                await _serverAuthService.EnsureAuthModDeployedAsync(profile, enableMod: true);
-            }
-            else
-            {
-                await _serverAuthService.SetAuthModEnabledAsync(profile, enabled: false);
-            }
+            saved = true;
+            await _serverAuthService.EnsureAuthModDeployedAsync(profile, enableMod: true);
 
+            var reloaded = await ServerAuthReload.ReloadAsync(_serverProcessService, profile.Id);
             await LoadAuthForProfileAsync(profile);
-            SetAuthStatus(T("认证配置已保存。", "Auth settings saved."));
+            SetAuthStatus(reloaded
+                ? T("认证配置已保存并生效。", "Auth settings saved and applied.")
+                : T("认证配置已保存，将在服务器启动时生效。", "Auth settings saved; they will apply when the server starts."));
         }
         catch (Exception ex)
         {
-            SetAuthStatus(T($"保存失败：{ex.Message}", $"Save failed: {ex.Message}"));
+            SetAuthStatus(saved
+                ? T($"认证配置已保存，但应用失败：{ex.Message}", $"Auth settings saved, but applying them failed: {ex.Message}")
+                : T($"保存失败：{ex.Message}", $"Save failed: {ex.Message}"));
         }
     }
 
@@ -8940,6 +8940,8 @@ public partial class LauncherMainWindow : Window
             return;
         }
 
+        var failures = new List<string>();
+        var cleared = 0;
         foreach (var item in selected)
         {
             var profile = _profileService.GetProfileById(item.ProfileId);
@@ -8948,14 +8950,25 @@ public partial class LauncherMainWindow : Window
                 continue;
             }
 
-            await _serverAuthService.SaveSettingsAsync(profile, BuildClearedAuthSettings());
-            await _serverAuthService.SetAuthModEnabledAsync(profile, enabled: false);
+            try
+            {
+                await _serverAuthService.SaveSettingsAsync(profile, BuildClearedAuthSettings());
+                cleared++;
+                await _serverAuthService.SetAuthModEnabledAsync(profile, enabled: true);
+                await ServerAuthReload.ReloadAsync(_serverProcessService, profile.Id);
+            }
+            catch (Exception ex)
+            {
+                failures.Add(profile.Name + ": " + ex.Message);
+            }
         }
 
         if (selected.Count > 0)
         {
             RefreshAuthConfigItems();
-            SetAuthStatus(T($"已清空 {selected.Count} 个安全配置。", $"Cleared {selected.Count} security configs."));
+            SetAuthStatus(failures.Count == 0
+                ? T($"已清空 {cleared} 个安全配置。", $"Cleared {cleared} security configs.")
+                : T($"已清空 {cleared} 个安全配置，部分操作失败：{string.Join("; ", failures)}", $"Cleared {cleared} security configs; some operations failed: {string.Join("; ", failures)}"));
         }
     }
 
@@ -8970,11 +8983,11 @@ public partial class LauncherMainWindow : Window
         try
         {
             var settings = CollectAuthSettings();
-            await _serverAuthService.EnsureAuthModDeployedAsync(profile, enableMod: settings.Enabled);
+            await _serverAuthService.EnsureAuthModDeployedAsync(profile, enableMod: true);
             await LoadAuthForProfileAsync(profile);
             SetAuthStatus(settings.Enabled
                 ? T("认证模组已部署并启用。", "Auth mod deployed and enabled.")
-                : T("认证模组已部署，但认证未启用，模组保持禁用。", "Auth mod deployed, but auth is disabled so the mod remains disabled."));
+                : T("认证模组已部署，认证当前关闭。", "Auth mod deployed; authentication is currently disabled."));
         }
         catch (Exception ex)
         {

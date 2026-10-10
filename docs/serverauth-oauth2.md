@@ -1,5 +1,10 @@
 # ServerAuth OAuth2/OIDC 配置
 
+ServerAuth 1.1.1 起支持 `/serverauth reload`。LauncherGo 保存配置后自动发送重载指令并等待结果，
+手动修改 `ModConfig/serverauth.json` 后可由管理员或服务器控制台执行该指令，无需重启服务器。
+首次更新认证 DLL 仍需重新部署并重启服务器；回调监听地址修改会重启认证监听器。
+重载会使旧浏览器认证链接失效，并为等待认证的玩家重新发起认证，已认证玩家保持在线。
+
 ServerAuth 使用 OAuth 2.0 Authorization Code 流程，并始终启用 PKCE `S256`。身份资料从标准
 UserInfo 端点读取，因此推荐使用支持 OpenID Connect Discovery 的认证服务。
 

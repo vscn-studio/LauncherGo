@@ -13,7 +13,7 @@ public sealed class ServerAuthService : IServerAuthService
 {
     private const string AuthModId = "launchergoauth";
     private const string LegacyAuthModId = "serverauth";
-    private const string AuthModVersion = "1.1.0";
+    private const string AuthModVersion = "1.1.1";
     private const string AuthModFolderName = "launchergoauth";
     private const string LegacyAuthModFolderName = "serverauth";
     private const string AuthModZipName = "launchergoauth.zip";
@@ -80,7 +80,7 @@ public sealed class ServerAuthService : IServerAuthService
         var settingsPath = GetSettingsPath(profile);
         Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
         var json = JsonSerializer.Serialize(normalized, JsonWriteOptions);
-        await File.WriteAllTextAsync(settingsPath, json, cancellationToken);
+        await ServerConfigFileIO.WriteAllTextAtomicAsync(settingsPath, json, cancellationToken);
     }
 
     /// <inheritdoc />

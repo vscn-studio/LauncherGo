@@ -45,7 +45,7 @@ public sealed class VsslAuthServerSystem : ModSystem
 
     private ICoreServerAPI? _api;
     private IServerNetworkChannel? _channel;
-    private ServerAuthSettings _settings = ServerAuthSettings.Default();
+    private volatile ServerAuthSettings _settings = ServerAuthSettings.Default();
     private PlayerStore _store = new();
     private HttpListener? _listener;
     private CancellationTokenSource? _listenerCts;
@@ -221,10 +221,27 @@ public sealed class VsslAuthServerSystem : ModSystem
             raw = args.RawArgs?.PopAll() ?? string.Empty;
 
         var parts = raw.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length is 1 or 2 && parts[0].Equals("reload", StringComparison.OrdinalIgnoreCase))
+        {
+            var requestId = parts.Length == 2 ? parts[1] : "manual";
+            if (requestId.Length > 64 || requestId.Any(c => !char.IsAsciiLetterOrDigit(c)))
+                return TextCommandResult.Error("Invalid reload request ID.", "");
+            try
+            {
+                ReloadSettings();
+                _api?.Logger.Notification("{0} reload {1} OK", VsslAuthModSystem.LogPrefix, requestId);
+                return TextCommandResult.Success("ServerAuth configuration reloaded and applied.", null);
+            }
+            catch (Exception ex)
+            {
+                _api?.Logger.Error("{0} reload {1} ERROR {2}", VsslAuthModSystem.LogPrefix, requestId, ex.Message);
+                return TextCommandResult.Error("ServerAuth reload failed: " + ex.Message, "");
+            }
+        }
         if (parts.Length < 2 || !parts[0].Equals("admin", StringComparison.OrdinalIgnoreCase))
         {
             return TextCommandResult.Error(
-                "Usage: /serverauth admin clearpassword <player> | setpassword <player> <password> | clearsessions",
+                "Usage: /serverauth reload | admin clearpassword <player> | admin setpassword <player> <password> | admin clearsessions",
                 "");
         }
 
@@ -327,6 +344,11 @@ public sealed class VsslAuthServerSystem : ModSystem
 
         BeginPending(player, now);
 
+        SendLoginPrompt(player, now);
+    }
+
+    private void SendLoginPrompt(IServerPlayer player, DateTimeOffset now)
+    {
         if (_settings.OAuth2.Enabled)
         {
             _ = SendOAuth2ChallengeAsync(player, now);
@@ -613,6 +635,7 @@ public sealed class VsslAuthServerSystem : ModSystem
         {
             _discourseByNonce[nonce] = new DiscourseChallengeState
             {
+                Settings = _settings,
                 Nonce = nonce,
                 PlayerUid = player.PlayerUID,
                 ExpiresAtUtc = now.AddMinutes(DiscourseChallengeMinutes)
@@ -630,23 +653,25 @@ public sealed class VsslAuthServerSystem : ModSystem
         }, player);
     }
 
-    private void StartAuthListener()
+    private void StartAuthListener(string? listenPrefix = null, bool throwOnFailure = false)
     {
-        var listenPrefix = _settings.OAuth2.Enabled
+        listenPrefix ??= _settings.OAuth2.Enabled
             ? _settings.OAuth2.ListenPrefix
             : _settings.Discourse.ListenPrefix;
         if (string.IsNullOrWhiteSpace(listenPrefix))
             return;
 
-        StopAuthListener();
-
+        var listener = new HttpListener();
+        var listenerCts = new CancellationTokenSource();
         try
         {
-            _listenerCts = new CancellationTokenSource();
-            _listener = new HttpListener();
-            _listener.Prefixes.Add(NormalizeListenPrefix(listenPrefix));
-            _listener.Start();
-            _listenerTask = Task.Run(() => ListenLoopAsync(_listener, _listenerCts.Token), CancellationToken.None);
+            listener.Prefixes.Add(NormalizeListenPrefix(listenPrefix));
+            listener.Start();
+            StopAuthListener();
+            _listener = listener;
+            _listenerCts = listenerCts;
+            var token = listenerCts.Token;
+            _listenerTask = Task.Run(() => ListenLoopAsync(listener, token), CancellationToken.None);
 
             _api?.Logger.Notification(
                 "{0} auth callback listener started on {1}",
@@ -655,10 +680,14 @@ public sealed class VsslAuthServerSystem : ModSystem
         }
         catch (Exception ex)
         {
+            listener.Close();
+            listenerCts.Dispose();
             _api?.Logger.Error(
-                "{0} Failed to start Discourse callback listener: {1}",
+                "{0} Failed to start auth callback listener: {1}",
                 VsslAuthModSystem.LogPrefix,
                 ex.Message);
+            if (throwOnFailure)
+                throw;
         }
     }
 
@@ -759,7 +788,7 @@ public sealed class VsslAuthServerSystem : ModSystem
             _discourseByNonce.Remove(nonce, out challenge);
         }
 
-        if (challenge is null || DateTimeOffset.UtcNow > challenge.ExpiresAtUtc)
+        if (challenge is null || !ReferenceEquals(challenge.Settings, _settings) || DateTimeOffset.UtcNow > challenge.ExpiresAtUtc)
         {
             await WriteHttpResponseAsync(context, 400, "Challenge expired. Please rejoin the server.");
             return;
@@ -791,7 +820,7 @@ public sealed class VsslAuthServerSystem : ModSystem
             _oauth2ByState.Remove(stateValue, out challenge);
         }
 
-        if (challenge is null || DateTimeOffset.UtcNow > challenge.ExpiresAtUtc)
+        if (challenge is null || !ReferenceEquals(challenge.Settings, _settings) || DateTimeOffset.UtcNow > challenge.ExpiresAtUtc)
         {
             await WriteHttpResponseAsync(context, 400, "OAuth2 challenge expired. Please rejoin the server.");
             return;
@@ -836,7 +865,7 @@ public sealed class VsslAuthServerSystem : ModSystem
 
     private void CompleteDiscourseAuth(DiscourseChallengeState challenge, Dictionary<string, string> payload)
     {
-        if (_api is null)
+        if (_api is null || !ReferenceEquals(challenge.Settings, _settings) || !_settings.Enabled || IsChallengeInactive(challenge.PlayerUid))
             return;
 
         var player = _api.World.PlayerByUid(challenge.PlayerUid) as IServerPlayer;
@@ -896,7 +925,7 @@ public sealed class VsslAuthServerSystem : ModSystem
 
     private void CompleteOAuth2Auth(OAuth2ChallengeState challenge, OAuth2Identity identity)
     {
-        if (_api is null)
+        if (_api is null || !ReferenceEquals(challenge.Settings, _settings) || !_settings.Enabled || IsChallengeInactive(challenge.PlayerUid))
             return;
 
         var player = _api.World.PlayerByUid(challenge.PlayerUid) as IServerPlayer;
@@ -949,6 +978,93 @@ public sealed class VsslAuthServerSystem : ModSystem
         }
 
         Authenticate(player, "OAuth2 认证成功，已通过服务器认证。");
+    }
+
+    private bool IsChallengeInactive(string playerUid)
+    {
+        lock (_authLock)
+            return !_pendingByUid.ContainsKey(playerUid);
+    }
+
+    private void ReloadSettings()
+    {
+        var path = Path.Combine(GamePaths.ModConfig, SettingsFileName);
+        var next = ServerAuthSettings.Normalize(
+            JsonSerializer.Deserialize<ServerAuthSettings>(File.ReadAllText(path), JsonOptions)
+            ?? throw new InvalidOperationException("Auth configuration must be a JSON object."));
+        var previous = _settings;
+        var previousPrefix = GetActiveListenPrefix(previous);
+        var nextPrefix = GetActiveListenPrefix(next);
+        var restartListener = !string.Equals(previousPrefix, nextPrefix, StringComparison.OrdinalIgnoreCase)
+                              || (nextPrefix.Length > 0 && _listener?.IsListening != true);
+
+        // Bind the replacement before publishing settings or closing the old listener.
+        if (restartListener)
+        {
+            if (nextPrefix.Length > 0)
+                StartAuthListener(nextPrefix, throwOnFailure: true);
+            else
+                StopAuthListener();
+        }
+        _settings = next;
+
+        List<PendingAuthState> pending;
+        lock (_authLock)
+        {
+            _discourseByNonce.Clear();
+            _oauth2ByState.Clear();
+            pending = _pendingByUid.Values.ToList();
+        }
+        if (next.RememberSessionMinutes == 0 ||
+            JsonSerializer.Serialize(previous.Discourse, JsonOptions) != JsonSerializer.Serialize(next.Discourse, JsonOptions) ||
+            JsonSerializer.Serialize(previous.OAuth2, JsonOptions) != JsonSerializer.Serialize(next.OAuth2, JsonOptions))
+        {
+            lock (_storeLock)
+            {
+                _store.Sessions.Clear();
+                try
+                {
+                    SaveStoreUnsafe();
+                }
+                catch (Exception ex)
+                {
+                    _api?.Logger.Warning("{0} Failed to persist session invalidation: {1}", VsslAuthModSystem.LogPrefix, ex.Message);
+                }
+            }
+        }
+        var now = DateTimeOffset.UtcNow;
+        foreach (var state in pending)
+        {
+            var player = _api?.World.PlayerByUid(state.PlayerUid) as IServerPlayer;
+            if (player is null)
+            {
+                lock (_authLock)
+                    _pendingByUid.Remove(state.PlayerUid);
+                continue;
+            }
+            if (!next.Enabled)
+                Authenticate(player, "服务器认证已关闭。");
+            else
+            {
+                state.DeadlineUtc = now.AddSeconds(next.LoginTimeoutSeconds);
+                SendLoginPrompt(player, now);
+            }
+        }
+        if (!previous.Enabled && next.Enabled && _api is not null)
+        {
+            foreach (var player in _api.World.AllOnlinePlayers.OfType<IServerPlayer>())
+            {
+                if (player.ConnectionState == EnumClientState.Playing && !pending.Any(state => state.PlayerUid == player.PlayerUID))
+                    OnPlayerNowPlaying(player);
+            }
+        }
+    }
+
+    private static string GetActiveListenPrefix(ServerAuthSettings settings)
+    {
+        if (!settings.Enabled || (!settings.OAuth2.Enabled && !settings.Discourse.Enabled))
+            return string.Empty;
+        return NormalizeListenPrefix(settings.OAuth2.Enabled ? settings.OAuth2.ListenPrefix : settings.Discourse.ListenPrefix);
     }
 
     private ServerAuthSettings LoadSettings()
@@ -1033,6 +1149,8 @@ public sealed class VsslAuthServerSystem : ModSystem
 
     private bool HasRememberedSession(IServerPlayer player, DateTimeOffset now)
     {
+        if (_settings.RememberSessionMinutes <= 0)
+            return false;
         var ip = player.IpAddress ?? string.Empty;
         return _store.Sessions.Any(session =>
             session.PlayerUid.Equals(player.PlayerUID, StringComparison.OrdinalIgnoreCase) &&
@@ -1063,7 +1181,8 @@ public sealed class VsslAuthServerSystem : ModSystem
 
     private async Task SendOAuth2ChallengeAsync(IServerPlayer player, DateTimeOffset now)
     {
-        var config = _settings.OAuth2;
+        var settings = _settings;
+        var config = settings.OAuth2;
         if (string.IsNullOrWhiteSpace(config.ClientId) ||
             string.IsNullOrWhiteSpace(config.PublicCallbackBaseUrl))
         {
@@ -1088,6 +1207,7 @@ public sealed class VsslAuthServerSystem : ModSystem
                 verifier);
             var challenge = new OAuth2ChallengeState
             {
+                Settings = settings,
                 PlayerUid = player.PlayerUID,
                 CodeVerifier = verifier,
                 RedirectUri = redirectUri,
@@ -1098,12 +1218,12 @@ public sealed class VsslAuthServerSystem : ModSystem
                 UsernameClaim = config.UsernameClaim,
                 DisplayNameClaim = config.DisplayNameClaim,
                 EmailClaim = config.EmailClaim,
-                ExpiresAtUtc = now.AddSeconds(_settings.LoginTimeoutSeconds)
+                ExpiresAtUtc = now.AddSeconds(settings.LoginTimeoutSeconds)
             };
 
             lock (_authLock)
             {
-                if (!_pendingByUid.ContainsKey(player.PlayerUID))
+                if (!ReferenceEquals(settings, _settings) || !_pendingByUid.ContainsKey(player.PlayerUID))
                     return;
                 _oauth2ByState[state] = challenge;
             }
@@ -1114,7 +1234,8 @@ public sealed class VsslAuthServerSystem : ModSystem
                 authUrl,
                 "oauth2",
                 "已打开 OAuth2 登录页面，请在浏览器中完成登录。",
-                "serverauth-oauth2-challenge");
+                "serverauth-oauth2-challenge",
+                settings);
         }
         catch (Exception ex)
         {
@@ -1250,7 +1371,8 @@ public sealed class VsslAuthServerSystem : ModSystem
         string authUrl,
         string mode,
         string message,
-        string taskName)
+        string taskName,
+        ServerAuthSettings settings)
     {
         if (_api is null)
             return;
@@ -1258,6 +1380,8 @@ public sealed class VsslAuthServerSystem : ModSystem
         _api.Event.EnqueueMainThreadTask(
             () =>
             {
+                if (!ReferenceEquals(settings, _settings) || IsChallengeInactive(playerUid))
+                    return;
                 if (_api.World.PlayerByUid(playerUid) is not IServerPlayer player)
                     return;
 
@@ -1515,13 +1639,14 @@ public sealed class VsslAuthServerSystem : ModSystem
     private sealed class PendingAuthState
     {
         public string PlayerUid { get; init; } = string.Empty;
-        public DateTimeOffset DeadlineUtc { get; init; }
+        public DateTimeOffset DeadlineUtc { get; set; }
         public float OriginalMoveSpeed { get; init; } = 1f;
         public bool DeferredCharacterSelection { get; init; }
     }
 
     private sealed class DiscourseChallengeState
     {
+        public ServerAuthSettings Settings { get; init; } = null!;
         public string Nonce { get; init; } = string.Empty;
         public string PlayerUid { get; init; } = string.Empty;
         public DateTimeOffset ExpiresAtUtc { get; init; }
@@ -1529,6 +1654,7 @@ public sealed class VsslAuthServerSystem : ModSystem
 
     private sealed class OAuth2ChallengeState
     {
+        public ServerAuthSettings Settings { get; init; } = null!;
         public string PlayerUid { get; init; } = string.Empty;
         public string CodeVerifier { get; init; } = string.Empty;
         public string RedirectUri { get; init; } = string.Empty;

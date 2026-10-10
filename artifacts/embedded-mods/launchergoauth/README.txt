@@ -13,3 +13,4 @@ distributed with LauncherGo.
 - 提供密码注册、密码登录、Discourse SSO 与 OAuth2/OIDC 授权码认证
 - OAuth2/OIDC 支持 Discovery、PKCE S256、Token 与 UserInfo 端点
 - 为 LauncherGo 认证中心与 QQ 密码管理提供玩家与会话数据
+- 支持 /serverauth reload，LauncherGo 保存配置后自动重载，无需轮询配置文件
